@@ -220,6 +220,11 @@ jobs:
         with:
           path: artifacts
 
+      - name: Install release packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zip
+
       - name: Assemble release notes
         shell: bash
         run: |
@@ -229,6 +234,25 @@ jobs:
           TAG="v$VERSION"
           mkdir -p dist
           find artifacts -type f ! -name '*-Qt-app.tar.gz' -exec cp {} dist/ \;
+
+          UNIVERSAL_ROOT="Blackcoin-$VERSION-macOS-Universal-Qt-apps"
+          mkdir -p "universal/$UNIVERSAL_ROOT/Intel-x86_64" "universal/$UNIVERSAL_ROOT/Apple-Silicon-ARM64"
+          for archive in artifacts/release-macos-*/*-Qt-app.tar.gz; do
+            base="$(basename "$archive")"
+            rm -rf universal-work
+            mkdir -p universal-work
+            tar -C universal-work -xzf "$archive"
+            case "$base" in
+              *Intel-x86_64*)
+                mv universal-work/blackcoin-qt.app "universal/$UNIVERSAL_ROOT/Intel-x86_64/blackcoin-qt.app"
+                ;;
+              *Apple-Silicon-ARM64*)
+                mv universal-work/blackcoin-qt.app "universal/$UNIVERSAL_ROOT/Apple-Silicon-ARM64/blackcoin-qt.app"
+                ;;
+            esac
+          done
+          (cd universal && zip -qry "../dist/$UNIVERSAL_ROOT.zip" "$UNIVERSAL_ROOT")
+
           (cd dist && sha256sum * | sort -k2 > SHA256SUMS.txt)
 
           {
