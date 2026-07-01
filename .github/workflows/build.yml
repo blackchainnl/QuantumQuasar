@@ -2,20 +2,27 @@ name: build
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the leading v
+        required: true
+        default: 30.0.0
+      create_release:
+        description: Create or update the GitHub release
+        required: true
+        type: boolean
+        default: false
   push:
-    branches:
-      - '**'
-    paths-ignore:
-      - '**/*.md'
-  pull_request:
-    paths-ignore:
-      - 'doc/**'
-      - 'contrib/**'
-      - '**/*.md'
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   build:
     name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
 
     env:
       MAKEJOBS: 4
@@ -24,42 +31,38 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name:
-          - linux-64-bit
-          - windows-64-bit
-          - macos-64-bit
-          - macos-arm-64-bit
-          - linux-arm-64-bit
         include:
           - name: linux-64-bit
             host: x86_64-pc-linux-gnu
             os: ubuntu-22.04
             packages: python3
-            check-security: false
-            check-symbols: false
             dep-opts: ""
             config-opts: "--enable-sse2 --enable-glibc-back-compat LDFLAGS=-static-libstdc++"
+            goal: install
+
+          - name: linux-arm-64-bit
+            host: aarch64-linux-gnu
+            os: ubuntu-22.04
+            packages: g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+            dep-opts: ""
+            config-opts: "--enable-glibc-back-compat LDFLAGS=-static-libstdc++"
             goal: install
 
           - name: windows-64-bit
             host: x86_64-w64-mingw32
             os: ubuntu-22.04
-            packages: nsis g++-mingw-w64-x86-64 build-essential libtool autotools-dev automake pkg-config bsdmainutils curl git
+            packages: nsis g++-mingw-w64-x86-64 build-essential libtool autotools-dev automake pkg-config bsdmainutils curl git zip
             postinstall: |
               sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
               sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
-            check-security: false
-            check-symbols: false
             dep-opts: ""
             config-opts: "--enable-sse2 LDFLAGS=-static-libgcc"
-            goal: install
+            goal: deploy install
 
           - name: macos-64-bit
             host: x86_64-apple-darwin
             os: ubuntu-22.04
             packages: curl bsdmainutils cmake libz-dev python3-setuptools libtinfo5 xorriso zip
-            check-security: false
-            check-symbols: false
             dep-opts: ""
             config-opts: "--enable-sse2"
             goal: deploy
@@ -69,24 +72,10 @@ jobs:
             host: aarch64-apple-darwin
             os: ubuntu-22.04
             packages: curl bsdmainutils cmake libz-dev python3-setuptools libtinfo5 xorriso zip
-            check-security: false
-            check-symbols: false
             dep-opts: ""
             config-opts: ""
             goal: deploy
             sdk: 12.2-12B45b
-
-          - name: linux-arm-64-bit
-            host: aarch64-linux-gnu
-            os: ubuntu-22.04
-            packages: g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
-            check-security: false
-            check-symbols: false
-            dep-opts: ""
-            config-opts: "--enable-glibc-back-compat LDFLAGS=-static-libstdc++"
-            goal: install
-
-    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Install packages
@@ -119,8 +108,8 @@ jobs:
         run: |
           mkdir -p ./depends/sdk-sources
           mkdir -p ./depends/SDKs
-          curl --location --fail $SDK_URL/Xcode-${{ matrix.sdk }}-extracted-SDK-with-libcxx-headers.tar.gz -o depends/sdk-sources/Xcode-${{ matrix.sdk }}-extracted-SDK-with-libcxx-headers.tar.gz
-          tar -C depends/SDKs -xzvf depends/sdk-sources/Xcode-${{ matrix.sdk }}-extracted-SDK-with-libcxx-headers.tar.gz
+          curl --location --fail "$SDK_URL/Xcode-${{ matrix.sdk }}-extracted-SDK-with-libcxx-headers.tar.gz" -o "depends/sdk-sources/Xcode-${{ matrix.sdk }}-extracted-SDK-with-libcxx-headers.tar.gz"
+          tar -C depends/SDKs -xzf "depends/sdk-sources/Xcode-${{ matrix.sdk }}-extracted-SDK-with-libcxx-headers.tar.gz"
 
       - name: Dependency cache
         uses: actions/cache@v6
@@ -131,33 +120,141 @@ jobs:
           key: ${{ matrix.name }}-${{ env.cache-name }}-${{ hashFiles('depends/*.mk', 'depends/packages/*', 'depends/patches/**/*') }}
 
       - name: Build depends
-        run: |
-          make -j $MAKEJOBS -C depends HOST=${{ matrix.host }} ${{ matrix.dep-opts }}
+        run: make -j "$MAKEJOBS" -C depends HOST=${{ matrix.host }} ${{ matrix.dep-opts }}
+
       - name: Build Blackcoin
         run: |
           ./autogen.sh
-          ./configure --prefix=`pwd`/depends/${{ matrix.host }} ${{ matrix.config-opts }} --enable-reduce-exports || ( cat config.log && false)
-          make -j $MAKEJOBS ${{ matrix.goal }} || ( echo "Build failure. Verbose build follows." && make ${{ matrix.goal }} V=1 ; false )
- 
-      - name: Check security
-        if: ${{ matrix.check-security }}
-        run: make -C src check-security
+          ./configure --prefix="$(pwd)/depends/${{ matrix.host }}" ${{ matrix.config-opts }} --enable-reduce-exports || (cat config.log && false)
+          make -j "$MAKEJOBS" ${{ matrix.goal }} || (echo "Build failure. Verbose build follows." && make ${{ matrix.goal }} V=1; false)
 
-      - name: Check symbols
-        if: ${{ matrix.check-symbols }}
-        run: make -C src check-symbols
+      - name: Package release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          VERSION="${VERSION#v}"
+          HOST="${{ matrix.host }}"
+          OUT="$GITHUB_WORKSPACE/release-assets"
+          mkdir -p "$OUT"
 
-      - name: Upload artifacts
+          case "${{ matrix.name }}" in
+            linux-64-bit|linux-arm-64-bit)
+              (cd "depends/$HOST/bin" && tar -czf "$OUT/blackcoin-$VERSION-$HOST.tar.gz" blackcoin*)
+              ;;
+            windows-64-bit)
+              (cd "depends/$HOST/bin" && zip -9j "$OUT/blackcoin-$VERSION-$HOST.zip" blackcoin*.exe)
+              cp "blackcoin-$VERSION-win64-setup.exe" "$OUT/blackcoin-$VERSION-win64-setup.exe"
+              ;;
+            macos-64-bit|macos-arm-64-bit)
+              cp Blackcoin.zip "$OUT/blackcoin-$VERSION-$HOST-QT-app.zip"
+              tar -C dist -czf "$OUT/blackcoin-$VERSION-$HOST-QT-app.tar.gz" blackcoin-qt.app
+              ;;
+          esac
+
+      - name: Upload release assets
         uses: actions/upload-artifact@v7
         with:
-          name: blackcoin-${{ github.sha }}-${{ matrix.name }}
-          path: |
-            depends/${{ matrix.host }}/bin/blackcoin*
-            dist/blackcoin-qt.app
+          name: release-${{ matrix.name }}
+          path: release-assets/*
           if-no-files-found: error
           retention-days: 7
 
-      - name: Download artifacts
+  macos-installers:
+    name: macOS installers
+    needs: build
+    runs-on: macos-14
+
+    steps:
+      - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
-          name: blackcoin-${{ github.sha }}-${{ matrix.name }}
+          path: artifacts
+          pattern: release-macos-*
+
+      - name: Build DMG installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          VERSION="${VERSION#v}"
+          mkdir -p release-assets work
+          for archive in artifacts/release-macos-*/*-QT-app.tar.gz; do
+            base="$(basename "$archive")"
+            host="${base#blackcoin-$VERSION-}"
+            host="${host%-QT-app.tar.gz}"
+            rm -rf work/*
+            tar -C work -xzf "$archive"
+            hdiutil create -volname "Blackcoin $VERSION" \
+              -srcfolder work/blackcoin-qt.app \
+              -ov -format UDZO \
+              "release-assets/blackcoin-$VERSION-$host-QT-installer.dmg"
+          done
+
+      - name: Upload macOS installers
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-macos-installers
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: GitHub release
+    needs:
+      - build
+      - macos-installers
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true' }}
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Assemble release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          VERSION="${VERSION#v}"
+          TAG="v$VERSION"
+          mkdir -p dist
+          find artifacts -type f ! -name '*-QT-app.tar.gz' -exec cp {} dist/ \;
+          (cd dist && sha256sum * | sort -k2 > SHA256SUMS.txt)
+
+          {
+            echo "Blackcoin Core — Protocol V4 (Quantum Quasar)"
+            echo
+            echo "PoSV4.0 upgrade release."
+            echo
+            echo "This is a mandatory Protocol V4 upgrade for Blackcoin. Quantum Quasar adds the Gold Rush migration path, quantum-resistant address support, Gold Rush PoS/PoW participation, and the 24-month transition schedule."
+            echo
+            echo "Gold Rush reward accounting starts at block 5,950,000 and runs for 243,000 blocks. The deterministic 10,000 BLK whitelist snapshot remains block 5,920,000."
+            echo
+            echo "When upgrading from older software versions, back up wallet.dat before installation."
+            echo
+            echo "## SHA256 Checksums"
+            echo
+            echo "| Archive | Checksum |"
+            echo "| --- | --- |"
+            while read -r hash file; do
+              echo "| $file | $hash |"
+            done < dist/SHA256SUMS.txt
+          } > RELEASE_NOTES.md
+
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "Blackcoin Core — Protocol V4 (Quantum Quasar)" --notes-file RELEASE_NOTES.md --latest
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "Blackcoin Core — Protocol V4 (Quantum Quasar)" --notes-file RELEASE_NOTES.md --latest
+          fi
