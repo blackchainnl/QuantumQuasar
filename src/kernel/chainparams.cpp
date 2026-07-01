@@ -554,9 +554,11 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_QUANTUM_MIGRATION].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
         consensus.vDeployments[Consensus::DEPLOYMENT_QUANTUM_MIGRATION].min_activation_height = 0;
 
-        if (opts.shadow_whitelist_height || opts.shadow_gold_rush_blocks) {
-            SetShadowRegtestSchedule(opts.shadow_whitelist_height.value_or(SHADOW_WHITELIST_HEIGHT),
-                                     opts.shadow_gold_rush_blocks.value_or(SHADOW_GOLD_RUSH_BLOCKS));
+        if (opts.shadow_whitelist_height || opts.shadow_gold_rush_start_height || opts.shadow_gold_rush_blocks) {
+            const int whitelist_height = opts.shadow_whitelist_height.value_or(SHADOW_WHITELIST_HEIGHT);
+            SetShadowTestSchedule(whitelist_height,
+                                  opts.shadow_gold_rush_start_height.value_or(whitelist_height + 1),
+                                  opts.shadow_gold_rush_blocks.value_or(SHADOW_GOLD_RUSH_BLOCKS));
         }
 
         consensus.nProtocolV1RetargetingFixedTime = 1395631999;

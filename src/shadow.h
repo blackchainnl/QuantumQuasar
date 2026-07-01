@@ -48,9 +48,10 @@ struct ShadowSyntheticPayoutCoin {
     int64_t time{0};
 };
 
-// Gold Rush schedule heights. Defaults are the mainnet values; on regtest they may be
-// overridden via SetShadowRegtestSchedule() (driven by -shadowwhitelistheight /
-// -shadowgoldrushblocks) so the reward window is reachable for end-to-end testing.
+// Gold Rush schedule heights. Defaults are the mainnet values. The dedicated
+// testnet schedule branch may override them on testnet/regtest only via
+// -shadowwhitelistheight / -shadowgoldrushstartheight / -shadowgoldrushblocks so
+// the reward window is reachable for manual public-testnet experiments.
 // They are set once during chainparams init (before any block validation) and read-only
 // thereafter, so the runtime globals are race-free.
 extern int SHADOW_WHITELIST_HEIGHT;
@@ -59,7 +60,9 @@ extern int SHADOW_GOLD_RUSH_BLOCKS;
 extern int SHADOW_PHASE1_END_HEIGHT;
 extern int SHADOW_REWARD_END_HEIGHT;
 
-/** Regtest-only: shift the Gold Rush schedule to a small, reachable window. */
+/** Test-only: shift the Gold Rush schedule to a small, reachable window. */
+void SetShadowTestSchedule(int whitelist_height, int reward_start_height, int gold_rush_blocks);
+/** Legacy regtest helper: shift the reward window to whitelist_height + 1. */
 void SetShadowRegtestSchedule(int whitelist_height, int gold_rush_blocks);
 static constexpr unsigned int SHADOW_EQUAL_FOOTING_TIME = 1713938400;
 static constexpr CAmount SHADOW_WHITELIST_MIN_BALANCE = 10000 * COIN;

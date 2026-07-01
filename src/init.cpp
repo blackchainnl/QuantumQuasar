@@ -100,6 +100,7 @@
 #include <cstdio>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <set>
 #include <string>
 #include <thread>
@@ -896,15 +897,37 @@ bool AppInitParameterInteraction(const ArgsManager& args)
     if (chain == ChainType::SIGNET) {
         LogPrintf("Signet derived magic (message start): %s\n", HexStr(chainparams.MessageStart()));
     }
-    // Quantum Quasar (regtest-only): move the shadow Gold Rush schedule to a small, reachable
-    // window so the reward/claim/payout/emission-cap paths can be exercised end-to-end. Applied
-    // here (before chainstate load and any block validation) so the heights are stable thereafter.
-    if (chain == ChainType::REGTEST && (args.IsArgSet("-shadowwhitelistheight") || args.IsArgSet("-shadowgoldrushblocks"))) {
-        const int wl = (int)args.GetIntArg("-shadowwhitelistheight", SHADOW_WHITELIST_HEIGHT);
-        const int blocks = (int)args.GetIntArg("-shadowgoldrushblocks", SHADOW_GOLD_RUSH_BLOCKS);
-        SetShadowRegtestSchedule(wl, blocks);
-        LogPrintf("Quantum Quasar: regtest shadow schedule overridden: whitelist=%d reward=[%d,%d]\n",
-                  SHADOW_WHITELIST_HEIGHT, SHADOW_REWARD_START_HEIGHT, SHADOW_REWARD_END_HEIGHT);
+    // Quantum Quasar test schedule branch: allow manual public-testnet/regtest
+    // schedule overrides, but make it structurally impossible to boot mainnet
+    // with altered Gold Rush heights.
+    const bool has_shadow_schedule_override = args.IsArgSet("-shadowwhitelistheight") ||
+                                              args.IsArgSet("-shadowgoldrushstartheight") ||
+                                              args.IsArgSet("-shadowgoldrushblocks");
+    if (has_shadow_schedule_override) {
+        if (chain != ChainType::TESTNET && chain != ChainType::REGTEST) {
+            return InitError(_("-shadowwhitelistheight, -shadowgoldrushstartheight, and -shadowgoldrushblocks are only supported on testnet/regtest in the test schedule branch."));
+        }
+
+        const int64_t wl = args.GetIntArg("-shadowwhitelistheight", SHADOW_WHITELIST_HEIGHT);
+        const int64_t start = args.GetIntArg("-shadowgoldrushstartheight", chain == ChainType::REGTEST ? wl + 1 : SHADOW_REWARD_START_HEIGHT);
+        const int64_t blocks = args.GetIntArg("-shadowgoldrushblocks", SHADOW_GOLD_RUSH_BLOCKS);
+
+        if (wl < 0 || wl >= std::numeric_limits<int>::max()) {
+            return InitError(strprintf(_("Invalid height value (%d) for -shadowwhitelistheight."), wl));
+        }
+        if (start < 0 || start >= std::numeric_limits<int>::max()) {
+            return InitError(strprintf(_("Invalid height value (%d) for -shadowgoldrushstartheight."), start));
+        }
+        if (start <= wl) {
+            return InitError(_("-shadowgoldrushstartheight must be greater than -shadowwhitelistheight."));
+        }
+        if (blocks <= 0 || blocks >= std::numeric_limits<int>::max() || start + blocks - 1 >= std::numeric_limits<int>::max()) {
+            return InitError(strprintf(_("Invalid block count value (%d) for -shadowgoldrushblocks."), blocks));
+        }
+
+        SetShadowTestSchedule(static_cast<int>(wl), static_cast<int>(start), static_cast<int>(blocks));
+        LogPrintf("Quantum Quasar: %s shadow schedule overridden: whitelist=%d reward=[%d,%d]\n",
+                  ChainTypeToString(chain), SHADOW_WHITELIST_HEIGHT, SHADOW_REWARD_START_HEIGHT, SHADOW_REWARD_END_HEIGHT);
     }
     bilingual_str errors;
     for (const auto& arg : args.GetUnsuitableSectionOnlyArgs()) {

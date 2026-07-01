@@ -14,6 +14,7 @@
 #include <deploymentinfo.h>
 #include <logging.h>
 #include <key_io.h> // for DecodeDestination()
+#include <shadow.h>
 #include <tinyformat.h>
 #include <util/chaintype.h>
 #include <util/strencodings.h>
@@ -134,12 +135,22 @@ void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& opti
         }
         options.shadow_whitelist_height = static_cast<int>(height);
     }
+    if (args.IsArgSet("-shadowgoldrushstartheight")) {
+        const int64_t height = args.GetIntArg("-shadowgoldrushstartheight", 0);
+        if (height < 0 || height >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Invalid height value (%d) for -shadowgoldrushstartheight.", height));
+        }
+        options.shadow_gold_rush_start_height = static_cast<int>(height);
+    }
     if (args.IsArgSet("-shadowgoldrushblocks")) {
         const int64_t blocks = args.GetIntArg("-shadowgoldrushblocks", 0);
         if (blocks <= 0 || blocks >= std::numeric_limits<int>::max()) {
             throw std::runtime_error(strprintf("Invalid block count value (%d) for -shadowgoldrushblocks.", blocks));
         }
         options.shadow_gold_rush_blocks = static_cast<int>(blocks);
+    }
+    if (options.shadow_gold_rush_start_height && *options.shadow_gold_rush_start_height <= options.shadow_whitelist_height.value_or(SHADOW_WHITELIST_HEIGHT)) {
+        throw std::runtime_error("-shadowgoldrushstartheight must be greater than -shadowwhitelistheight.");
     }
 
     if (!args.IsArgSet("-vbparams")) return;

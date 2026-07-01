@@ -166,6 +166,7 @@ public:
         std::optional<int> quantum_demurrage_activation_height{};
         std::optional<int> quantum_demurrage_blocks_per_month{};
         std::optional<int> shadow_whitelist_height{};
+        std::optional<int> shadow_gold_rush_start_height{};
         std::optional<int> shadow_gold_rush_blocks{};
     };
 
