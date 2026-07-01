@@ -3598,13 +3598,17 @@ RPCHelpMan getmigrationstatus()
 
         const Consensus::Params& c = Params().GetConsensus();
         int64_t mtp = 0;
-        if (const CBlockIndex* tip = pwallet->chain().getTip()) mtp = tip->GetMedianTimePast();
+        int next_height = 0;
+        if (const CBlockIndex* tip = pwallet->chain().getTip()) {
+            mtp = tip->GetMedianTimePast();
+            next_height = tip->nHeight + 1;
+        }
 
         const bool scheduled = c.nQuantumMigrationDeadlineTime != 0;
         const bool passed = c.IsQuantumFinalLockout(mtp);
         const int64_t secs = (scheduled && c.nQuantumMigrationDeadlineTime > mtp)
                                  ? (c.nQuantumMigrationDeadlineTime - mtp) : 0;
-        const bool quantum_active = c.IsQuantumMigrationWindow(mtp) || c.IsQuantumFinalLockout(mtp);
+        const bool quantum_active = IsQuantumWitnessSpendActive(c, mtp, next_height);
 
         CAmount legacy_amt = 0, quantum_amt = 0, goldrush_reward_amt = 0;
         unsigned int legacy_n = 0, quantum_n = 0, goldrush_reward_n = 0;
@@ -3648,7 +3652,7 @@ RPCHelpMan getmigrationstatus()
         if (passed && goldrush_reward_n > 0) advice = "Deadline passed. Remaining Gold Rush reward outputs are permanently unspendable.";
         else if (passed)         advice = "Deadline passed. Remaining legacy coins are permanently unspendable.";
         else if (goldrush_reward_n > 0 && c.IsQuantumMigrationWindow(mtp)) advice = "Run migrategoldrushrewards before the deadline to move Gold Rush reward outputs to a fresh quantum address.";
-        else if (goldrush_reward_n > 0) advice = "Gold Rush reward outputs can be moved with migrategoldrushrewards after Gold Rush ends and before the deadline.";
+        else if (goldrush_reward_n > 0) advice = "Gold Rush reward outputs can be spent to quantum addresses during Gold Rush, and can also be swept with migrategoldrushrewards after Gold Rush ends and before the deadline.";
         else if (legacy_n == 0)  advice = "No legacy coins remain to migrate.";
         else if (!scheduled)     advice = "No deadline scheduled yet, but you can migrate now with migratetoquantum.";
         else                     advice = "Run migratetoquantum before the deadline to move legacy coins into a quantum address.";

@@ -16,6 +16,9 @@ class CBlockIndex;
 class CBlockUndo;
 class CCoinsView;
 class CCoinsViewCache;
+namespace Consensus {
+struct Params;
+}
 
 struct ShadowGoldRushInfo {
     CAmount pow_amount{0};
@@ -64,6 +67,10 @@ extern int SHADOW_REWARD_END_HEIGHT;
 void SetShadowTestSchedule(int whitelist_height, int reward_start_height, int gold_rush_blocks);
 /** Legacy regtest helper: shift the reward window to whitelist_height + 1. */
 void SetShadowRegtestSchedule(int whitelist_height, int gold_rush_blocks);
+
+/** Quantum witness spends activate when Gold Rush rewards can first materialize,
+ * then stay active through the migration and final lockout phases. */
+bool IsQuantumWitnessSpendActive(const Consensus::Params& consensus, int64_t nMedianTimePast, int nSpendHeight);
 static constexpr unsigned int SHADOW_EQUAL_FOOTING_TIME = 1713938400;
 static constexpr CAmount SHADOW_WHITELIST_MIN_BALANCE = 10000 * COIN;
 static constexpr int SHADOW_SOLVER_ACTIVITY_SECONDS = 14 * 24 * 60 * 60;

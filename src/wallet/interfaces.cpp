@@ -708,11 +708,12 @@ public:
         const Consensus::Params& consensus = Params().GetConsensus();
         const CBlockIndex* tip = m_wallet->chain().getTip();
         const int64_t mtp = tip ? tip->GetMedianTimePast() : 0;
+        const int next_height = tip ? tip->nHeight + 1 : 0;
         const bool scheduled = consensus.nQuantumMigrationDeadlineTime != 0;
         const bool passed = consensus.IsQuantumFinalLockout(mtp);
         const int64_t secs = (scheduled && consensus.nQuantumMigrationDeadlineTime > mtp)
                                  ? consensus.nQuantumMigrationDeadlineTime - mtp : 0;
-        const bool quantum_active = consensus.IsQuantumMigrationWindow(mtp) || consensus.IsQuantumFinalLockout(mtp);
+        const bool quantum_active = IsQuantumWitnessSpendActive(consensus, mtp, next_height);
 
         status.phase = QuantumQuasarPhaseName(consensus.GetQuantumQuasarPhase(mtp));
         status.median_time = mtp;

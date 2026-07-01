@@ -1366,12 +1366,12 @@ static UniValue QuantumQuasarStatus(const CBlockIndex& tip, const ChainstateMana
     const Consensus::Params& consensus = chainman.GetConsensus();
     const int64_t mtp = tip.GetMedianTimePast();
     const Consensus::QuantumQuasarPhase phase = consensus.GetQuantumQuasarPhase(mtp);
-    const bool quantum_spend_active = consensus.IsQuantumSpendEnforcementActive(mtp);
+    const int next_height = tip.nHeight + 1;
+    const bool quantum_spend_active = IsQuantumWitnessSpendActive(consensus, mtp, next_height);
     const bool new_network_stake_only = consensus.IsNewNetworkStakeOnly(mtp);
     const bool base_network_stake_compatible = consensus.IsBaseNetworkStakeCompatible(mtp);
     const bool shadow_merge_mining_active = consensus.IsGoldRushEpoch(mtp);
     const bool final_lockout_active = consensus.IsQuantumFinalLockout(mtp);
-    const int next_height = tip.nHeight + 1;
     const bool shadow_reward_height_active = next_height >= SHADOW_REWARD_START_HEIGHT && next_height <= SHADOW_REWARD_END_HEIGHT;
 
     UniValue obj(UniValue::VOBJ);
@@ -1401,7 +1401,7 @@ static UniValue QuantumQuasarStatus(const CBlockIndex& tip, const ChainstateMana
     readiness.pushKV(VersionBitsDeploymentInfo[Consensus::DEPLOYMENT_QUANTUM_QUASAR].name, QuantumReadinessStatus(tip, chainman, Consensus::DEPLOYMENT_QUANTUM_QUASAR));
     readiness.pushKV(VersionBitsDeploymentInfo[Consensus::DEPLOYMENT_QUANTUM_MIGRATION].name, QuantumReadinessStatus(tip, chainman, Consensus::DEPLOYMENT_QUANTUM_MIGRATION));
     obj.pushKV("readiness_signalling", readiness);
-    obj.pushKV("migration_policy", "Quantum witness-v16 addresses are fundable now. ML-DSA spends activate during the migration window by median-time-past. After the migration deadline, consensus rejects non-quantum spends and value-bearing non-quantum outputs.");
+    obj.pushKV("migration_policy", "Quantum witness-v16 addresses are fundable now. ML-DSA spends activate when Gold Rush rewards begin by height and remain active through migration/final lockout. After the migration deadline, consensus rejects non-quantum spends and value-bearing non-quantum outputs.");
     return obj;
 }
 

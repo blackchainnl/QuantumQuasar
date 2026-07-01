@@ -1,5 +1,7 @@
 #include <shadow.h>
 
+#include <consensus/params.h>
+
 #include <algorithm>
 
 // Gold Rush schedule heights (mainnet defaults; regtest-overridable, see header).
@@ -24,4 +26,10 @@ void SetShadowTestSchedule(int whitelist_height, int reward_start_height, int go
 void SetShadowRegtestSchedule(int whitelist_height, int gold_rush_blocks)
 {
     SetShadowTestSchedule(whitelist_height, whitelist_height + 1, gold_rush_blocks);
+}
+
+bool IsQuantumWitnessSpendActive(const Consensus::Params& consensus, int64_t nMedianTimePast, int nSpendHeight)
+{
+    if (consensus.IsQuantumSpendEnforcementActive(nMedianTimePast)) return true;
+    return consensus.IsProtocolV4(nMedianTimePast) && nSpendHeight >= SHADOW_REWARD_START_HEIGHT;
 }

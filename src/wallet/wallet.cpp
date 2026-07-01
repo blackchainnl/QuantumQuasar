@@ -2482,7 +2482,7 @@ bool CWallet::SignQuantumTransaction(CMutableTransaction& tx, const std::map<COu
 
     for (const unsigned int i : quantum_inputs) {
         if (!quantum_spend_active || !(verify_flags & SCRIPT_VERIFY_QUANTUM_ML_DSA)) {
-            input_errors[i] = _("Quantum migration spends are not active at the current chain tip");
+            input_errors[i] = _("Quantum migration spends are not active until Gold Rush rewards begin");
             continue;
         }
 
@@ -2673,6 +2673,7 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
     int active_sighash = sighash;
     unsigned int verify_flags = STANDARD_SCRIPT_VERIFY_FLAGS;
     bool quantum_spend_active = !HaveChain();
+    bool eutxo_spend_active = !HaveChain();
     if (HaveChain()) {
         if (const CBlockIndex* tip = chain().getTip()) {
             const int64_t tip_mtp = tip->GetMedianTimePast();
@@ -2686,11 +2687,14 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
                 active_sighash = (active_sighash == SIGHASH_DEFAULT ? SIGHASH_ALL : active_sighash) | SIGHASH_FORKID;
                 verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
             }
-            quantum_spend_active = consensus.IsQuantumSpendEnforcementActive(tip_mtp);
+            quantum_spend_active = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
+            eutxo_spend_active = consensus.IsQuantumSpendEnforcementActive(tip_mtp);
             if (quantum_spend_active) {
-                verify_flags |= SCRIPT_VERIFY_EUTXO;
                 verify_flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
                 verify_flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
+            }
+            if (eutxo_spend_active) {
+                verify_flags |= SCRIPT_VERIFY_EUTXO;
             }
             if (consensus.IsStakeTiersActive(tip->nHeight + 1)) {
                 verify_flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
@@ -2738,6 +2742,7 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
     LOCK(cs_wallet);
     int active_sighash = sighash_type;
     bool quantum_spend_active = !HaveChain();
+    bool eutxo_spend_active = !HaveChain();
     bool final_lockout_active = false;
     unsigned int psbt_verify_flags = STANDARD_SCRIPT_VERIFY_FLAGS;
     if (HaveChain()) {
@@ -2753,7 +2758,8 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
                 active_sighash = (active_sighash == SIGHASH_DEFAULT ? SIGHASH_ALL : active_sighash) | SIGHASH_FORKID;
                 psbt_verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
             }
-            quantum_spend_active = consensus.IsQuantumSpendEnforcementActive(tip_mtp);
+            quantum_spend_active = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
+            eutxo_spend_active = consensus.IsQuantumSpendEnforcementActive(tip_mtp);
             final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp);
             if (consensus.IsStakeTiersActive(tip->nHeight + 1)) {
                 psbt_verify_flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
@@ -2761,9 +2767,11 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
         }
     }
     if (quantum_spend_active) {
-        psbt_verify_flags |= SCRIPT_VERIFY_EUTXO;
         psbt_verify_flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
         psbt_verify_flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
+    }
+    if (eutxo_spend_active) {
+        psbt_verify_flags |= SCRIPT_VERIFY_EUTXO;
     }
     if (final_lockout_active) {
         psbt_verify_flags |= SCRIPT_VERIFY_LEGACY_ECDSA_LOCKOUT;

@@ -936,12 +936,12 @@ static RPCHelpMan getblocktemplate()
         result.pushKV("weightlimit", (int64_t)(expanded_block_limits ? V4_MAX_BLOCK_WEIGHT : MAX_BLOCK_WEIGHT));
     }
     UniValue quantumquasar(UniValue::VOBJ);
-    const bool quantum_spend_active = consensusParams.IsQuantumSpendEnforcementActive(template_mtp);
+    const int template_height = pindexPrev->nHeight + 1;
+    const bool quantum_spend_active = IsQuantumWitnessSpendActive(consensusParams, template_mtp, template_height);
     const bool new_network_stake_only = consensusParams.IsNewNetworkStakeOnly(template_mtp);
     const bool base_network_stake_compatible = consensusParams.IsBaseNetworkStakeCompatible(template_mtp);
     const bool shadow_merge_mining_active = consensusParams.IsGoldRushEpoch(template_mtp);
     const bool final_lockout_active = consensusParams.IsQuantumFinalLockout(template_mtp);
-    const int template_height = pindexPrev->nHeight + 1;
     const bool shadow_reward_height_active = template_height >= SHADOW_REWARD_START_HEIGHT && template_height <= SHADOW_REWARD_END_HEIGHT;
     quantumquasar.pushKV("phase", gbt_blackcoin_phase_name(consensusParams.GetQuantumQuasarPhase(template_mtp)));
     quantumquasar.pushKV("v4_activation_time", consensusParams.nProtocolV4Time);
