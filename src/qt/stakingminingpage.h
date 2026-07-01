@@ -45,6 +45,7 @@ public:
 
 private Q_SLOTS:
     void onStakingToggled(bool enabled);
+    void onUnlockStakingOnlyToggled(bool enabled);
     void onDonationToggled(bool enabled);
     void onDonationPercentChanged(int percentage);
     void onPowEnableToggled(bool enabled);
@@ -68,6 +69,7 @@ private:
 
     // Staking section
     QCheckBox* m_staking_enable{nullptr};
+    QCheckBox* m_unlock_staking_only{nullptr};
     QLabel* m_staking_status{nullptr};
     QLabel* m_stake_weight{nullptr};
     QLabel* m_goldrush_badge{nullptr};
@@ -109,6 +111,7 @@ private:
     void refreshControlsEnabled();
     void resetStatusForNoWallet();
     void applyDonationPercentage(unsigned int percentage);
+    bool requestStakingOnlyUnlock();
 };
 
 #endif // BITCOIN_QT_STAKINGMININGPAGE_H
