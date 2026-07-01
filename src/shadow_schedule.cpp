@@ -2,9 +2,9 @@
 
 // Gold Rush schedule heights (mainnet defaults; regtest-overridable, see header).
 int SHADOW_WHITELIST_HEIGHT = 5920000;
-int SHADOW_REWARD_START_HEIGHT = SHADOW_WHITELIST_HEIGHT + 1;
+int SHADOW_REWARD_START_HEIGHT = 5950000;
 int SHADOW_GOLD_RUSH_BLOCKS = (180 * 24 * 60 * 60) / 64;
-int SHADOW_PHASE1_END_HEIGHT = 6157600;
+int SHADOW_PHASE1_END_HEIGHT = SHADOW_REWARD_START_HEIGHT + 237599;
 int SHADOW_REWARD_END_HEIGHT = SHADOW_REWARD_START_HEIGHT + SHADOW_GOLD_RUSH_BLOCKS - 1;
 
 void SetShadowRegtestSchedule(int whitelist_height, int gold_rush_blocks)
