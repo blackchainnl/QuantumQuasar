@@ -24,6 +24,7 @@ define $(package)_set_vars
   $(package)_config_opts_aarch64_linux += -DCMAKE_SYSTEM_PROCESSOR=aarch64
   $(package)_config_opts_x86_64_mingw32 += -DCMAKE_SYSTEM_PROCESSOR=x86_64
   $(package)_config_opts_x86_64_darwin += -DCMAKE_SYSTEM_PROCESSOR=x86_64
+  $(package)_config_opts_aarch64_darwin += -DCMAKE_SYSTEM_PROCESSOR=arm64
 endef
 
 define $(package)_config_cmds
