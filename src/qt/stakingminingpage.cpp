@@ -56,6 +56,7 @@ StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget
     connect(m_donation_enable, &QCheckBox::clicked, this, &StakingMiningPage::onDonationToggled);
     connect(m_donation_percent, qOverload<int>(&QSpinBox::valueChanged), this, &StakingMiningPage::onDonationPercentChanged);
     connect(m_pow_enable, &QCheckBox::clicked, this, &StakingMiningPage::onPowEnableToggled);
+    connect(m_pow_unlock_wallet, &QCheckBox::clicked, this, &StakingMiningPage::onPowUnlockWalletToggled);
     connect(m_pow_apply, &QPushButton::clicked, this, &StakingMiningPage::onApplyPow);
     connect(m_pow_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopyPayoutAddress);
     connect(m_quantum_new, &QPushButton::clicked, this, &StakingMiningPage::onCreateQuantumAddress);
@@ -129,6 +130,11 @@ void StakingMiningPage::setupUi()
     m_pow_enable->setToolTip(tr("Runs the Argon2id Gold Rush solver inside this wallet. No separate mining "
                                 "program is required. Active only during the Gold Rush epoch."));
 
+    m_pow_unlock_wallet = new QCheckBox(tr("Unlock wallet for Gold Rush mining"), powBox);
+    m_pow_unlock_wallet->setObjectName(QStringLiteral("powUnlockWallet"));
+    m_pow_unlock_wallet->setToolTip(tr("Unlocks an encrypted wallet normally so Gold Rush PoW mining can create "
+                                       "and submit claim transactions. This is not staking-only unlock."));
+
     m_pow_cores = new QSpinBox(powBox);
     m_pow_cores->setObjectName(QStringLiteral("powCores"));
     const int max_cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
@@ -169,6 +175,7 @@ void StakingMiningPage::setupUi()
 
     int r = 0;
     pgrid->addWidget(m_pow_enable, r++, 0, 1, 3);
+    pgrid->addWidget(m_pow_unlock_wallet, r++, 0, 1, 3);
     pgrid->addWidget(new QLabel(tr("CPU cores:"), powBox), r, 0);
     pgrid->addWidget(m_pow_cores, r++, 1);
     pgrid->addWidget(new QLabel(tr("CPU usage:"), powBox), r, 0);
@@ -367,12 +374,43 @@ void StakingMiningPage::onPowEnableToggled(bool /*enabled*/)
     onApplyPow(); // applying immediately keeps the backend and the controls in sync
 }
 
+void StakingMiningPage::onPowUnlockWalletToggled(bool enabled)
+{
+    if (m_updating || !m_wallet_model) return;
+
+    if (enabled) {
+        if (!requestNormalUnlock()) {
+            updateStatus();
+            return;
+        }
+    } else {
+        if (m_wallet_model->wallet().getPowMiningInfo().enabled) {
+            std::string ignored_error;
+            m_wallet_model->wallet().setPowMining(false, m_pow_cores->value(), m_pow_percent->value(), ignored_error);
+        }
+        m_wallet_model->setWalletUnlockStakingOnly(false);
+        if (m_wallet_model->getEncryptionStatus() == WalletModel::Unlocked) {
+            m_wallet_model->setWalletLocked(true);
+        }
+        m_wallet_model->updateStatus();
+    }
+
+    updateStatus();
+}
+
 void StakingMiningPage::onApplyPow()
 {
     if (m_updating || !m_wallet_model || m_pow_apply_pending) return;
     const bool enabled = m_pow_enable->isChecked();
     const int cores = m_pow_cores->value();
     const int percent = m_pow_percent->value();
+
+    if (enabled && !requestNormalUnlock()) {
+        m_pow_enable->setChecked(false);
+        m_pow_status->setText(tr("Gold Rush PoW mining requires a normal wallet unlock."));
+        updateStatus();
+        return;
+    }
 
     m_pow_apply_pending = true;
     m_pow_pending_enabled = enabled;
@@ -493,6 +531,8 @@ void StakingMiningPage::updateStatus()
     const interfaces::WalletPowMiningInfo info = w.getPowMiningInfo();
     if (!m_pow_apply_pending) {
         m_pow_enable->setChecked(info.enabled);
+        m_pow_unlock_wallet->setChecked(m_wallet_model->getEncryptionStatus() == WalletModel::Unlocked &&
+                                        !w.getWalletUnlockStakingOnly());
         if (!m_pow_cores->hasFocus() && info.threads > 0) m_pow_cores->setValue(info.threads);
         if (!m_pow_percent->hasFocus() && info.cpu_percent > 0) m_pow_percent->setValue(info.cpu_percent);
     }
@@ -554,6 +594,7 @@ void StakingMiningPage::resetStatusForNoWallet()
     QSignalBlocker unlock_staking_blocker(m_unlock_staking_only);
     QSignalBlocker donation_blocker(m_donation_enable);
     QSignalBlocker pow_blocker(m_pow_enable);
+    QSignalBlocker pow_unlock_blocker(m_pow_unlock_wallet);
 
     m_staking_enable->setChecked(false);
     m_unlock_staking_only->setChecked(false);
@@ -565,6 +606,7 @@ void StakingMiningPage::resetStatusForNoWallet()
     m_donation_status->setText(tr("Load a wallet to configure staking reward donations."));
 
     m_pow_enable->setChecked(false);
+    m_pow_unlock_wallet->setChecked(false);
     m_pow_payout->clear();
     m_pow_status->setText(tr("Load a wallet to use Gold Rush PoW mining."));
 
@@ -597,6 +639,10 @@ void StakingMiningPage::refreshControlsEnabled()
                                       encryption_status != WalletModel::NoKeys &&
                                       encryption_status != WalletModel::Unencrypted);
     m_pow_enable->setEnabled(has_wallet && !m_pow_apply_pending);
+    m_pow_unlock_wallet->setEnabled(has_wallet &&
+                                    encryption_status != WalletModel::NoKeys &&
+                                    encryption_status != WalletModel::Unencrypted &&
+                                    !m_pow_apply_pending);
     m_pow_cores->setEnabled(tune && !m_pow_apply_pending);
     m_pow_percent->setEnabled(tune && !m_pow_apply_pending);
     m_pow_apply->setEnabled(has_wallet && tune && !m_pow_apply_pending);
@@ -636,5 +682,44 @@ bool StakingMiningPage::requestStakingOnlyUnlock()
 
     m_wallet_model->setWalletUnlockStakingOnly(true);
     m_wallet_model->updateStatus();
+    return true;
+}
+
+bool StakingMiningPage::requestNormalUnlock()
+{
+    if (!m_wallet_model) return false;
+
+    const WalletModel::EncryptionStatus encryption_status = m_wallet_model->getEncryptionStatus();
+    if (encryption_status == WalletModel::NoKeys) {
+        return false;
+    }
+    if (encryption_status == WalletModel::Unencrypted) {
+        return true;
+    }
+
+    if (m_wallet_model->getWalletUnlockStakingOnly()) {
+        m_wallet_model->setWalletUnlockStakingOnly(false);
+        if (encryption_status == WalletModel::Unlocked) {
+            m_wallet_model->setWalletLocked(true);
+        }
+        m_wallet_model->updateStatus();
+    }
+
+    if (m_wallet_model->getEncryptionStatus() == WalletModel::Locked) {
+        AskPassphraseDialog dlg(AskPassphraseDialog::Unlock, this);
+        dlg.setModel(m_wallet_model);
+        if (dlg.exec() != QDialog::Accepted) {
+            return false;
+        }
+    }
+
+    if (m_wallet_model->getEncryptionStatus() != WalletModel::Unlocked) {
+        return false;
+    }
+
+    if (m_wallet_model->getWalletUnlockStakingOnly()) {
+        m_wallet_model->setWalletUnlockStakingOnly(false);
+        m_wallet_model->updateStatus();
+    }
     return true;
 }

@@ -49,6 +49,7 @@ private Q_SLOTS:
     void onDonationToggled(bool enabled);
     void onDonationPercentChanged(int percentage);
     void onPowEnableToggled(bool enabled);
+    void onPowUnlockWalletToggled(bool enabled);
     void onApplyPow();
     void onCopyPayoutAddress();
     void onCreateQuantumAddress();
@@ -79,6 +80,7 @@ private:
 
     // Proof-of-Work section
     QCheckBox* m_pow_enable{nullptr};
+    QCheckBox* m_pow_unlock_wallet{nullptr};
     QSpinBox* m_pow_cores{nullptr};
     QSpinBox* m_pow_percent{nullptr};
     QLineEdit* m_pow_payout{nullptr};
@@ -112,6 +114,7 @@ private:
     void resetStatusForNoWallet();
     void applyDonationPercentage(unsigned int percentage);
     bool requestStakingOnlyUnlock();
+    bool requestNormalUnlock();
 };
 
 #endif // BITCOIN_QT_STAKINGMININGPAGE_H

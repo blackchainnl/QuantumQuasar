@@ -297,6 +297,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QCheckBox* unlock_staking_only = page.findChild<QCheckBox*>("unlockStakingOnly");
     QLabel* staking_status = page.findChild<QLabel*>("stakingStatus");
     QCheckBox* pow_enable = page.findChild<QCheckBox*>("powEnable");
+    QCheckBox* pow_unlock_wallet = page.findChild<QCheckBox*>("powUnlockWallet");
     QCheckBox* donation_enable = page.findChild<QCheckBox*>("stakingDonationEnable");
     QSpinBox* donation_percent = page.findChild<QSpinBox*>("stakingDonationPercent");
     QLabel* donation_status = page.findChild<QLabel*>("stakingDonationStatus");
@@ -329,6 +330,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(unlock_staking_only);
     QVERIFY(staking_status);
     QVERIFY(pow_enable);
+    QVERIFY(pow_unlock_wallet);
     QVERIFY(donation_enable);
     QVERIFY(donation_percent);
     QVERIFY(donation_status);
@@ -361,6 +363,8 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QCOMPARE(staking_enable->isChecked(), false);
     QCOMPARE(unlock_staking_only->isChecked(), false);
     QVERIFY(!unlock_staking_only->isEnabled());
+    QCOMPARE(pow_unlock_wallet->isChecked(), false);
+    QVERIFY(!pow_unlock_wallet->isEnabled());
     QCOMPARE(staking_status->text(), QString("Staking is off"));
     QCOMPARE(donation_enable->isChecked(), false);
     QCOMPARE(walletModel.wallet().getDonationPercentage(), 0U);
