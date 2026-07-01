@@ -1960,11 +1960,11 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
         const bool is_quantum_spend = is_quantum_migration_spend || is_quantum_coldstake_spend;
         const bool is_eutxo_spend = IsEUTXOScript(txdata.m_spent_outputs[i].scriptPubKey);
         if (is_quantum_migration_spend && !(flags & SCRIPT_VERIFY_QUANTUM_ML_DSA)) {
-            return state.Invalid(TxValidationResult::TX_CONSENSUS, "blackcoin-migration-spend-premature", "Quantum migration spends are not active until the migration window");
+            return state.Invalid(TxValidationResult::TX_CONSENSUS, "blackcoin-migration-spend-premature", "Quantum migration spends are not active until Gold Rush rewards begin");
         }
         if (is_quantum_coldstake_spend &&
             (!(flags & SCRIPT_VERIFY_QUANTUM_ML_DSA) || !(flags & SCRIPT_VERIFY_QUANTUM_COLDSTAKE))) {
-            return state.Invalid(TxValidationResult::TX_CONSENSUS, "blackcoin-coldstake-spend-premature", "Quantum cold-stake spends are not active until the migration window");
+            return state.Invalid(TxValidationResult::TX_CONSENSUS, "blackcoin-coldstake-spend-premature", "Quantum cold-stake spends are not active until Gold Rush rewards begin");
         }
         spends_quantum_migration_output = spends_quantum_migration_output || is_quantum_spend;
         if (is_eutxo_spend && !(flags & SCRIPT_VERIFY_EUTXO)) {
@@ -2978,8 +2978,10 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const Ch
 
     // Gold Rush and migration coinstakes remain legacy-signature compatible so
     // upgraded stakers can keep legacy wallets securing the chain until final
-    // lockout. Quantum witness/EUTXO spends begin during migration; FORKID
-    // replay protection is reserved for the final quantum-only phase.
+    // lockout. Basic quantum witness spends begin when Gold Rush rewards can
+    // materialize; EUTXO spends and larger post-quantum limits remain reserved
+    // for the migration/final-lockout phases. FORKID replay protection is
+    // reserved for the final quantum-only phase.
     if (consensusparams.IsProtocolV4(v4_mtp)) {
         flags |= SCRIPT_VERIFY_ISCOINSTAKE;
         flags |= SCRIPT_VERIFY_STRICTENC;
@@ -2990,11 +2992,14 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const Ch
         flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
     }
 
-    if (consensusparams.IsQuantumSpendEnforcementActive(v4_mtp)) {
-        flags |= SCRIPT_VERIFY_EUTXO;
+    if (IsQuantumWitnessSpendActive(consensusparams, v4_mtp, block_index.nHeight)) {
         flags |= SCRIPT_VERIFY_WITNESS;
         flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
         flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
+    }
+
+    if (consensusparams.IsQuantumSpendEnforcementActive(v4_mtp)) {
+        flags |= SCRIPT_VERIFY_EUTXO;
     }
 
     if (consensusparams.IsStakeTiersActive(block_index.nHeight)) {
@@ -3025,15 +3030,18 @@ static unsigned int ApplyNextBlockV4ScriptFlags(unsigned int flags, const CBlock
     } else {
         flags &= ~SCRIPT_ENABLE_SIGHASH_FORKID;
     }
-    if (consensusparams.IsQuantumSpendEnforcementActive(next_block_mtp)) {
-        flags |= SCRIPT_VERIFY_EUTXO;
+    if (IsQuantumWitnessSpendActive(consensusparams, next_block_mtp, next_height)) {
         flags |= SCRIPT_VERIFY_WITNESS;
         flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
         flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
     } else {
-        flags &= ~SCRIPT_VERIFY_EUTXO;
         flags &= ~SCRIPT_VERIFY_QUANTUM_ML_DSA;
         flags &= ~SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
+    }
+    if (consensusparams.IsQuantumSpendEnforcementActive(next_block_mtp)) {
+        flags |= SCRIPT_VERIFY_EUTXO;
+    } else {
+        flags &= ~SCRIPT_VERIFY_EUTXO;
     }
     if (consensusparams.IsStakeTiersActive(next_height)) {
         flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;

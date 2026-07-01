@@ -26,6 +26,7 @@
 #include <script/interpreter.h>
 #include <script/sign.h>
 #include <consensus/consensus.h>
+#include <shadow.h>
 #include <test/data/staking_mr_table.h>
 
 #include <algorithm>
@@ -344,12 +345,14 @@ bool CheckProofOfStake(CBlockIndex* pindexPrev, const CTransaction& tx, unsigned
     if (consensus.IsNewNetworkStakeOnly(stake_mtp)) {
         script_verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
     }
-    if (consensus.IsQuantumSpendEnforcementActive(stake_mtp)) {
-        script_verify_flags |= SCRIPT_VERIFY_EUTXO;
+    if (IsQuantumWitnessSpendActive(consensus, stake_mtp, pindexPrev->nHeight + 1)) {
         script_verify_flags |= SCRIPT_VERIFY_P2SH;
         script_verify_flags |= SCRIPT_VERIFY_WITNESS;
         script_verify_flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
         script_verify_flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
+    }
+    if (consensus.IsQuantumSpendEnforcementActive(stake_mtp)) {
+        script_verify_flags |= SCRIPT_VERIFY_EUTXO;
     }
     if (consensus.IsStakeTiersActive(pindexPrev->nHeight + 1)) {
         script_verify_flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;

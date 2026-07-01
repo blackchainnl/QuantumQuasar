@@ -40,6 +40,7 @@
 #include <script/sign.h>
 #include <script/signingprovider.h>
 #include <script/solver.h>
+#include <shadow.h>
 #include <support/cleanse.h>
 #include <uint256.h>
 #include <undo.h>
@@ -1423,6 +1424,7 @@ static RPCHelpMan signrawtransactionwithquantumkey()
 
     bool v4_active{false};
     bool quantum_spend_active{false};
+    bool eutxo_spend_active{false};
     bool final_lockout_active{false};
     bool stake_tiers_active{false};
     {
@@ -1431,7 +1433,8 @@ static RPCHelpMan signrawtransactionwithquantumkey()
             const int64_t tip_mtp = tip->GetMedianTimePast();
             const auto& consensus = chainman.GetConsensus();
             v4_active = consensus.IsProtocolV4(tip_mtp);
-            quantum_spend_active = consensus.IsQuantumMigrationWindow(tip_mtp) || consensus.IsQuantumFinalLockout(tip_mtp);
+            quantum_spend_active = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
+            eutxo_spend_active = consensus.IsQuantumSpendEnforcementActive(tip_mtp);
             final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp);
             stake_tiers_active = consensus.IsStakeTiersActive(tip->nHeight + 1);
         }
@@ -1461,12 +1464,12 @@ static RPCHelpMan signrawtransactionwithquantumkey()
         if (quantum_inputs[i] || quantum_coldstake_inputs[i]) {
             spends_quantum_migration_output = true;
             if (!quantum_spend_active) {
-                input_errors[i] = "Quantum-protected spends are not active until the migration window";
+                input_errors[i] = "Quantum-protected spends are not active until Gold Rush rewards begin";
                 continue;
             }
             mtx.vin[i].scriptSig.clear();
         } else if (eutxo_inputs[i]) {
-            if (!quantum_spend_active) {
+            if (!eutxo_spend_active) {
                 input_errors[i] = "EUTXO spends are not active until the post-Gold-Rush migration window";
             }
         } else if (final_lockout_active) {
@@ -1595,9 +1598,11 @@ static RPCHelpMan signrawtransactionwithquantumkey()
             verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
         }
         if (quantum_spend_active) {
-            verify_flags |= SCRIPT_VERIFY_EUTXO;
             verify_flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
             verify_flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
+        }
+        if (eutxo_spend_active) {
+            verify_flags |= SCRIPT_VERIFY_EUTXO;
         }
         if (stake_tiers_active) {
             verify_flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
