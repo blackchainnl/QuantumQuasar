@@ -139,16 +139,23 @@ jobs:
           mkdir -p "$OUT"
 
           case "${{ matrix.name }}" in
-            linux-64-bit|linux-arm-64-bit)
-              (cd "depends/$HOST/bin" && tar -czf "$OUT/blackcoin-$VERSION-$HOST.tar.gz" blackcoin*)
+            linux-64-bit)
+              (cd "depends/$HOST/bin" && tar -czf "$OUT/Blackcoin-$VERSION-Linux-x86_64.tar.gz" blackcoin*)
+              ;;
+            linux-arm-64-bit)
+              (cd "depends/$HOST/bin" && tar -czf "$OUT/Blackcoin-$VERSION-Linux-ARM64.tar.gz" blackcoin*)
               ;;
             windows-64-bit)
-              (cd "depends/$HOST/bin" && zip -9j "$OUT/blackcoin-$VERSION-$HOST.zip" blackcoin*.exe)
-              cp "blackcoin-$VERSION-win64-setup.exe" "$OUT/blackcoin-$VERSION-win64-setup.exe"
+              (cd "depends/$HOST/bin" && zip -9j "$OUT/Blackcoin-$VERSION-Windows-x86_64-Portable.zip" blackcoin*.exe)
+              cp "blackcoin-$VERSION-win64-setup.exe" "$OUT/Blackcoin-$VERSION-Windows-x86_64-Installer.exe"
               ;;
-            macos-64-bit|macos-arm-64-bit)
-              cp Blackcoin.zip "$OUT/blackcoin-$VERSION-$HOST-QT-app.zip"
-              tar -C dist -czf "$OUT/blackcoin-$VERSION-$HOST-QT-app.tar.gz" blackcoin-qt.app
+            macos-64-bit)
+              cp Blackcoin.zip "$OUT/Blackcoin-$VERSION-macOS-Intel-x86_64-Qt-app.zip"
+              tar -C dist -czf "$OUT/Blackcoin-$VERSION-macOS-Intel-x86_64-Qt-app.tar.gz" blackcoin-qt.app
+              ;;
+            macos-arm-64-bit)
+              cp Blackcoin.zip "$OUT/Blackcoin-$VERSION-macOS-Apple-Silicon-ARM64-Qt-app.zip"
+              tar -C dist -czf "$OUT/Blackcoin-$VERSION-macOS-Apple-Silicon-ARM64-Qt-app.tar.gz" blackcoin-qt.app
               ;;
           esac
 
@@ -179,16 +186,16 @@ jobs:
           VERSION="${{ github.event.inputs.version || github.ref_name }}"
           VERSION="${VERSION#v}"
           mkdir -p release-assets work
-          for archive in artifacts/release-macos-*/*-QT-app.tar.gz; do
+          for archive in artifacts/release-macos-*/*-Qt-app.tar.gz; do
             base="$(basename "$archive")"
-            host="${base#blackcoin-$VERSION-}"
-            host="${host%-QT-app.tar.gz}"
+            label="${base#Blackcoin-$VERSION-macOS-}"
+            label="${label%-Qt-app.tar.gz}"
             rm -rf work/*
             tar -C work -xzf "$archive"
             hdiutil create -volname "Blackcoin $VERSION" \
               -srcfolder work/blackcoin-qt.app \
               -ov -format UDZO \
-              "release-assets/blackcoin-$VERSION-$host-QT-installer.dmg"
+              "release-assets/Blackcoin-$VERSION-macOS-$label.dmg"
           done
 
       - name: Upload macOS installers
@@ -221,7 +228,7 @@ jobs:
           VERSION="${VERSION#v}"
           TAG="v$VERSION"
           mkdir -p dist
-          find artifacts -type f ! -name '*-QT-app.tar.gz' -exec cp {} dist/ \;
+          find artifacts -type f ! -name '*-Qt-app.tar.gz' -exec cp {} dist/ \;
           (cd dist && sha256sum * | sort -k2 > SHA256SUMS.txt)
 
           {
