@@ -21,6 +21,7 @@ namespace Ui {
 }
 
 QT_BEGIN_NAMESPACE
+class QLabel;
 class QModelIndex;
 QT_END_NAMESPACE
 
@@ -53,6 +54,10 @@ private:
     ClientModel* clientModel{nullptr};
     WalletModel* walletModel{nullptr};
     bool m_privacy{false};
+    QLabel* m_label_legacy_balance_text{nullptr};
+    QLabel* m_label_legacy_balance{nullptr};
+    QLabel* m_label_quantum_balance_text{nullptr};
+    QLabel* m_label_quantum_balance{nullptr};
 
     const PlatformStyle* m_platform_style;
 

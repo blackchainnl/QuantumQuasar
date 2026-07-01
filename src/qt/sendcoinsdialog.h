@@ -26,6 +26,8 @@ namespace Ui {
 }
 
 QT_BEGIN_NAMESPACE
+class QComboBox;
+class QLabel;
 class QUrl;
 QT_END_NAMESPACE
 
@@ -69,6 +71,9 @@ private:
     WalletModel* model{nullptr};
     std::unique_ptr<wallet::CCoinControl> m_coin_control;
     std::unique_ptr<WalletModelTransaction> m_current_transaction;
+    QComboBox* m_spend_source_combo{nullptr};
+    QLabel* m_spend_source_balance_label{nullptr};
+    QLabel* m_spend_source_warning_label{nullptr};
     bool fNewRecipientAllowed{true};
     const PlatformStyle *platformStyle;
 
@@ -90,12 +95,16 @@ private:
      */
     bool signWithExternalSigner(PartiallySignedTransaction& psbt, CMutableTransaction& mtx, bool& complete);
     void updateCoinControlState();
+    bool validateSpendSourceRecipients(const QList<SendCoinsRecipient>& recipients);
+    bool ensureSpendSourceChange(wallet::CCoinControl& coin_control);
+    void updateSpendSourceBalance();
 
 private Q_SLOTS:
     void sendButtonClicked(bool checked);
     void removeEntry(SendCoinsEntry* entry);
     void useAvailableBalance(SendCoinsEntry* entry);
     void refreshBalance();
+    void spendSourceChanged();
     void coinControlFeatureChanged(bool);
     void coinControlButtonClicked();
     void coinControlChangeChecked(int);

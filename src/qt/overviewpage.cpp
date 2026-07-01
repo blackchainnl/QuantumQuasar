@@ -19,6 +19,8 @@
 #include <QAbstractItemDelegate>
 #include <QApplication>
 #include <QDateTime>
+#include <QGridLayout>
+#include <QLabel>
 #include <QPainter>
 #include <QStatusTipEvent>
 
@@ -145,6 +147,22 @@ OverviewPage::OverviewPage(const PlatformStyle *platformStyle, QWidget *parent) 
 {
     ui->setupUi(this);
 
+    m_label_legacy_balance_text = new QLabel(tr("Legacy spendable:"), this);
+    m_label_legacy_balance = new QLabel(QStringLiteral("0.00000000 BLK"), this);
+    m_label_quantum_balance_text = new QLabel(tr("Quantum spendable:"), this);
+    m_label_quantum_balance = new QLabel(QStringLiteral("0.00000000 BLK"), this);
+    for (QLabel* label : {m_label_legacy_balance, m_label_quantum_balance}) {
+        label->setCursor(Qt::IBeamCursor);
+        label->setAlignment(Qt::AlignRight | Qt::AlignTrailing | Qt::AlignVCenter);
+        label->setTextInteractionFlags(Qt::LinksAccessibleByMouse | Qt::TextSelectableByKeyboard | Qt::TextSelectableByMouse);
+    }
+    m_label_legacy_balance->setToolTip(tr("Spendable balance held in legacy Blackcoin outputs."));
+    m_label_quantum_balance->setToolTip(tr("Spendable balance held in quantum-resistant Blackcoin outputs."));
+    ui->gridLayout->addWidget(m_label_legacy_balance_text, 8, 0);
+    ui->gridLayout->addWidget(m_label_legacy_balance, 8, 1);
+    ui->gridLayout->addWidget(m_label_quantum_balance_text, 9, 0);
+    ui->gridLayout->addWidget(m_label_quantum_balance, 9, 1);
+
     // use a SingleColorIcon for the "out of sync warning" icon
     QIcon icon = m_platform_style->SingleColorIcon(QStringLiteral(":/icons/warning"));
     ui->labelTransactionsStatus->setIcon(icon);
@@ -221,6 +239,10 @@ void OverviewPage::setBalance(const interfaces::WalletBalances& balances)
         ui->labelImmature->setText(BitcoinUnits::formatWithPrivacy(unit, balances.immature_balance, BitcoinUnits::SeparatorStyle::ALWAYS, m_privacy));
         ui->labelStake->setText(BitcoinUnits::formatWithPrivacy(unit, balances.stake, BitcoinUnits::SeparatorStyle::ALWAYS, m_privacy));
         ui->labelTotal->setText(BitcoinUnits::formatWithPrivacy(unit, balances.balance + balances.unconfirmed_balance + balances.immature_balance + balances.stake, BitcoinUnits::SeparatorStyle::ALWAYS, m_privacy));
+    }
+    if (m_label_legacy_balance && m_label_quantum_balance) {
+        m_label_legacy_balance->setText(BitcoinUnits::formatWithPrivacy(unit, balances.legacy_balance, BitcoinUnits::SeparatorStyle::ALWAYS, m_privacy));
+        m_label_quantum_balance->setText(BitcoinUnits::formatWithPrivacy(unit, balances.quantum_balance, BitcoinUnits::SeparatorStyle::ALWAYS, m_privacy));
     }
     ui->labelDonations->setText((m_privacy ? QString::fromStdString("#") : (QString::number(donation_percentage) + "%")) + " of stake rewards");
     // only show immature (newly mined) balance if it's non-zero, so as not to complicate things
@@ -374,4 +396,6 @@ void OverviewPage::setMonospacedFont(bool use_embedded_font)
     ui->labelWatchImmature->setFont(f);
     ui->labelWatchStake->setFont(f);
     ui->labelWatchTotal->setFont(f);
+    if (m_label_legacy_balance) m_label_legacy_balance->setFont(f);
+    if (m_label_quantum_balance) m_label_quantum_balance->setFont(f);
 }
