@@ -53,6 +53,7 @@ StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget
 
     connect(m_staking_enable, &QCheckBox::clicked, this, &StakingMiningPage::onStakingToggled);
     connect(m_unlock_staking_only, &QCheckBox::clicked, this, &StakingMiningPage::onUnlockStakingOnlyToggled);
+    connect(m_unlock_quantum_legacy_staking, &QCheckBox::clicked, this, &StakingMiningPage::onUnlockQuantumLegacyStakingToggled);
     connect(m_donation_enable, &QCheckBox::clicked, this, &StakingMiningPage::onDonationToggled);
     connect(m_donation_percent, qOverload<int>(&QSpinBox::valueChanged), this, &StakingMiningPage::onDonationPercentChanged);
     connect(m_pow_enable, &QCheckBox::clicked, this, &StakingMiningPage::onPowEnableToggled);
@@ -80,10 +81,18 @@ void StakingMiningPage::setupUi()
     m_staking_enable->setObjectName(QStringLiteral("stakingEnable"));
     m_staking_enable->setToolTip(tr("Starts legacy PoS staking. If this wallet is whitelisted, Gold Rush "
                                     "signalling and payouts are added to your coinstakes automatically during the epoch."));
-    m_unlock_staking_only = new QCheckBox(tr("Unlock wallet for staking only"), stakingBox);
+    m_unlock_staking_only = new QCheckBox(tr("Unlock wallet for LEGACY staking only"), stakingBox);
     m_unlock_staking_only->setObjectName(QStringLiteral("unlockStakingOnly"));
-    m_unlock_staking_only->setToolTip(tr("Unlocks an encrypted wallet only for staking. Spending and other private-key "
-                                         "operations still require a normal wallet unlock."));
+    m_unlock_staking_only->setToolTip(tr("Unlocks an encrypted wallet only for legacy staking. Spending, Gold Rush signals, "
+                                         "PoW claims, and quantum staking operations still require a normal wallet unlock."));
+    m_unlock_quantum_legacy_staking = new QCheckBox(tr("Unlock wallet for Quantum and Legacy Staking"), stakingBox);
+    m_unlock_quantum_legacy_staking->setObjectName(QStringLiteral("unlockQuantumLegacyStaking"));
+    m_unlock_quantum_legacy_staking->setToolTip(tr("Uses a normal wallet unlock so the wallet can legacy stake and create "
+                                                   "Gold Rush quantum signal transactions when qualified."));
+    m_quantum_legacy_unlock_note = new QLabel(tr("NOTE: 10,000 BLK required at block height 5,920,000"), stakingBox);
+    m_quantum_legacy_unlock_note->setObjectName(QStringLiteral("quantumLegacyUnlockNote"));
+    m_quantum_legacy_unlock_note->setWordWrap(true);
+    m_quantum_legacy_unlock_note->setStyleSheet(QStringLiteral("QLabel { color: #6b5d00; }"));
     m_staking_status = new QLabel(tr("Staking is off"), stakingBox);
     m_staking_status->setObjectName(QStringLiteral("stakingStatus"));
     m_stake_weight = new QLabel(QStringLiteral("-"), stakingBox);
@@ -110,15 +119,17 @@ void StakingMiningPage::setupUi()
 
     sgrid->addWidget(m_staking_enable, 0, 0, 1, 2);
     sgrid->addWidget(m_unlock_staking_only, 1, 0, 1, 2);
-    sgrid->addWidget(new QLabel(tr("Status:"), stakingBox), 2, 0);
-    sgrid->addWidget(m_staking_status, 2, 1);
-    sgrid->addWidget(new QLabel(tr("Stake weight:"), stakingBox), 3, 0);
-    sgrid->addWidget(m_stake_weight, 3, 1);
-    sgrid->addWidget(m_goldrush_badge, 4, 0, 1, 2);
-    sgrid->addWidget(m_donation_enable, 5, 0, 1, 2);
-    sgrid->addWidget(new QLabel(tr("Donation:"), stakingBox), 6, 0);
-    sgrid->addWidget(m_donation_percent, 6, 1);
-    sgrid->addWidget(m_donation_status, 7, 0, 1, 2);
+    sgrid->addWidget(m_unlock_quantum_legacy_staking, 2, 0, 1, 2);
+    sgrid->addWidget(m_quantum_legacy_unlock_note, 3, 0, 1, 2);
+    sgrid->addWidget(new QLabel(tr("Status:"), stakingBox), 4, 0);
+    sgrid->addWidget(m_staking_status, 4, 1);
+    sgrid->addWidget(new QLabel(tr("Stake weight:"), stakingBox), 5, 0);
+    sgrid->addWidget(m_stake_weight, 5, 1);
+    sgrid->addWidget(m_goldrush_badge, 6, 0, 1, 2);
+    sgrid->addWidget(m_donation_enable, 7, 0, 1, 2);
+    sgrid->addWidget(new QLabel(tr("Donation:"), stakingBox), 8, 0);
+    sgrid->addWidget(m_donation_percent, 8, 1);
+    sgrid->addWidget(m_donation_status, 9, 0, 1, 2);
     outer->addWidget(stakingBox);
 
     // ---- Gold Rush Proof-of-Work section ----
@@ -341,6 +352,26 @@ void StakingMiningPage::onUnlockStakingOnlyToggled(bool enabled)
     updateStatus();
 }
 
+void StakingMiningPage::onUnlockQuantumLegacyStakingToggled(bool enabled)
+{
+    if (m_updating || !m_wallet_model) return;
+
+    if (enabled) {
+        if (!requestNormalUnlock()) {
+            updateStatus();
+            return;
+        }
+    } else {
+        if (m_wallet_model->getEncryptionStatus() == WalletModel::Unlocked &&
+            !m_wallet_model->getWalletUnlockStakingOnly()) {
+            m_wallet_model->setWalletLocked(true);
+            m_wallet_model->updateStatus();
+        }
+    }
+
+    updateStatus();
+}
+
 void StakingMiningPage::onDonationToggled(bool enabled)
 {
     if (m_updating || !m_wallet_model) return;
@@ -512,8 +543,11 @@ void StakingMiningPage::updateStatus()
 
     // Staking
     const bool staking = w.getEnabledStaking();
+    const bool normal_unlocked = m_wallet_model->getEncryptionStatus() == WalletModel::Unlocked &&
+                                 !w.getWalletUnlockStakingOnly();
     m_staking_enable->setChecked(staking);
     m_unlock_staking_only->setChecked(w.getWalletUnlockStakingOnly());
+    m_unlock_quantum_legacy_staking->setChecked(normal_unlocked);
     m_staking_status->setText(staking ? tr("Staking is active") : tr("Staking is off"));
     m_stake_weight->setText(QString::number(static_cast<qulonglong>(w.getStakeWeight())));
 
@@ -531,8 +565,7 @@ void StakingMiningPage::updateStatus()
     const interfaces::WalletPowMiningInfo info = w.getPowMiningInfo();
     if (!m_pow_apply_pending) {
         m_pow_enable->setChecked(info.enabled);
-        m_pow_unlock_wallet->setChecked(m_wallet_model->getEncryptionStatus() == WalletModel::Unlocked &&
-                                        !w.getWalletUnlockStakingOnly());
+        m_pow_unlock_wallet->setChecked(normal_unlocked);
         if (!m_pow_cores->hasFocus() && info.threads > 0) m_pow_cores->setValue(info.threads);
         if (!m_pow_percent->hasFocus() && info.cpu_percent > 0) m_pow_percent->setValue(info.cpu_percent);
     }
@@ -592,12 +625,14 @@ void StakingMiningPage::resetStatusForNoWallet()
 {
     QSignalBlocker staking_blocker(m_staking_enable);
     QSignalBlocker unlock_staking_blocker(m_unlock_staking_only);
+    QSignalBlocker unlock_quantum_legacy_blocker(m_unlock_quantum_legacy_staking);
     QSignalBlocker donation_blocker(m_donation_enable);
     QSignalBlocker pow_blocker(m_pow_enable);
     QSignalBlocker pow_unlock_blocker(m_pow_unlock_wallet);
 
     m_staking_enable->setChecked(false);
     m_unlock_staking_only->setChecked(false);
+    m_unlock_quantum_legacy_staking->setChecked(false);
     m_staking_status->setText(tr("No wallet loaded"));
     m_stake_weight->setText(QStringLiteral("-"));
     m_goldrush_badge->setText(tr("Gold Rush: no wallet loaded"));
@@ -638,6 +673,9 @@ void StakingMiningPage::refreshControlsEnabled()
     m_unlock_staking_only->setEnabled(has_wallet &&
                                       encryption_status != WalletModel::NoKeys &&
                                       encryption_status != WalletModel::Unencrypted);
+    m_unlock_quantum_legacy_staking->setEnabled(has_wallet &&
+                                                encryption_status != WalletModel::NoKeys &&
+                                                encryption_status != WalletModel::Unencrypted);
     m_pow_enable->setEnabled(has_wallet && !m_pow_apply_pending);
     m_pow_unlock_wallet->setEnabled(has_wallet &&
                                     encryption_status != WalletModel::NoKeys &&
