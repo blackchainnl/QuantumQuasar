@@ -30,6 +30,11 @@ static constexpr bool DEFAULT_AVOIDPARTIALSPENDS = false;
 class CCoinControl
 {
 public:
+    enum class InputFamily {
+        LEGACY,
+        QUANTUM,
+    };
+
     //! Custom change destination, if not set an address is generated
     CTxDestination destChange = CNoDestination();
     //! Override the default change type if set, ignored if destChange is set
@@ -53,6 +58,8 @@ public:
     int m_min_depth = DEFAULT_MIN_DEPTH;
     //! Maximum chain depth value for coin availability
     int m_max_depth = DEFAULT_MAX_DEPTH;
+    //! Restrict automatic and selected inputs to a wallet-family bucket.
+    std::optional<InputFamily> m_input_family;
     //! SigningProvider that has pubkeys and scripts to do spend size estimation for external inputs
     FlatSigningProvider m_external_provider;
 

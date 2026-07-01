@@ -434,9 +434,16 @@ public:
     }
     WalletBalances getBalances() override
     {
+        LOCK(m_wallet->cs_wallet);
         const auto bal = GetBalance(*m_wallet);
         WalletBalances result;
         result.balance = bal.m_mine_trusted;
+        CCoinControl legacy_control;
+        legacy_control.m_input_family = CCoinControl::InputFamily::LEGACY;
+        result.legacy_balance = AvailableCoinsListUnspent(*m_wallet, &legacy_control).GetTotalAmount();
+        CCoinControl quantum_control;
+        quantum_control.m_input_family = CCoinControl::InputFamily::QUANTUM;
+        result.quantum_balance = AvailableCoinsListUnspent(*m_wallet, &quantum_control).GetTotalAmount();
         result.unconfirmed_balance = bal.m_mine_untrusted_pending;
         result.immature_balance = bal.m_mine_immature;
         result.stake = bal.m_mine_stake;

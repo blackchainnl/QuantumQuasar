@@ -18,12 +18,14 @@
 #include <qt/platformstyle.h>
 #include <qt/sendcoinsentry.h>
 
+#include <addresstype.h>
 #include <chainparams.h>
 #include <interfaces/node.h>
 #include <key_io.h>
 #include <node/interface_ui.h>
 #include <policy/fees.h>
 #include <txmempool.h>
+#include <util/result.h>
 #include <validation.h>
 #include <wallet/coincontrol.h>
 #include <wallet/wallet.h>
@@ -33,12 +35,33 @@
 #include <fstream>
 #include <memory>
 
+#include <QComboBox>
 #include <QFontMetrics>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QScrollBar>
 #include <QSettings>
 #include <QTextDocument>
 
 using wallet::CCoinControl;
+
+namespace {
+enum SpendSource {
+    SPEND_SOURCE_LEGACY = 0,
+    SPEND_SOURCE_QUANTUM = 1,
+};
+
+bool IsQuantumDestinationString(const QString& address)
+{
+    const CTxDestination dest = DecodeDestination(address.toStdString());
+    return IsValidDestination(dest) && (IsQuantumMigrationDestination(dest) || IsQuantumColdStakeDestination(dest));
+}
+
+bool IsQuantumDestinationValue(const CTxDestination& dest)
+{
+    return IsValidDestination(dest) && (IsQuantumMigrationDestination(dest) || IsQuantumColdStakeDestination(dest));
+}
+} // namespace
 
 SendCoinsDialog::SendCoinsDialog(const PlatformStyle *_platformStyle, QWidget *parent) :
     QDialog(parent, GUIUtil::dialog_flags),
@@ -59,6 +82,27 @@ SendCoinsDialog::SendCoinsDialog(const PlatformStyle *_platformStyle, QWidget *p
     }
 
     GUIUtil::setupAddressWidget(ui->lineEditCoinControlChange, this);
+
+    auto* spend_source_layout = new QHBoxLayout();
+    spend_source_layout->setContentsMargins(10, 0, 10, 0);
+    spend_source_layout->setSpacing(8);
+    auto* spend_source_label = new QLabel(tr("Spend from:"), this);
+    m_spend_source_combo = new QComboBox(this);
+    m_spend_source_combo->addItem(tr("Legacy wallet funds"), SPEND_SOURCE_LEGACY);
+    m_spend_source_combo->addItem(tr("Quantum wallet funds"), SPEND_SOURCE_QUANTUM);
+    m_spend_source_combo->setToolTip(tr("Choose which wallet fund family may be selected as transaction inputs."));
+    m_spend_source_combo->setMinimumContentsLength(22);
+    m_spend_source_balance_label = new QLabel(this);
+    m_spend_source_balance_label->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    m_spend_source_warning_label = new QLabel(tr("Quantum funds can only be sent to quantum addresses."), this);
+    m_spend_source_warning_label->setStyleSheet(QStringLiteral("QLabel{color:#aa0000;}"));
+    spend_source_layout->addWidget(spend_source_label);
+    spend_source_layout->addWidget(m_spend_source_combo);
+    spend_source_layout->addWidget(m_spend_source_balance_label);
+    spend_source_layout->addWidget(m_spend_source_warning_label);
+    spend_source_layout->addStretch();
+    ui->verticalLayout->insertLayout(1, spend_source_layout);
+    connect(m_spend_source_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &SendCoinsDialog::spendSourceChanged);
 
     addEntry();
 
@@ -120,6 +164,7 @@ void SendCoinsDialog::setModel(WalletModel *_model)
         connect(_model, &WalletModel::balanceChanged, this, &SendCoinsDialog::setBalance);
         connect(_model->getOptionsModel(), &OptionsModel::displayUnitChanged, this, &SendCoinsDialog::refreshBalance);
         refreshBalance();
+        updateSpendSourceBalance();
 
         // Coin Control
         connect(_model->getOptionsModel(), &OptionsModel::displayUnitChanged, this, &SendCoinsDialog::coinControlUpdateLabels);
@@ -163,6 +208,10 @@ bool SendCoinsDialog::PrepareSendText(QString& question_string, QString& informa
         return false;
     }
 
+    if (!validateSpendSourceRecipients(recipients)) {
+        return false;
+    }
+
     fNewRecipientAllowed = false;
     WalletModel::UnlockContext ctx(model->requestUnlock());
     if(!ctx.isValid())
@@ -180,6 +229,10 @@ bool SendCoinsDialog::PrepareSendText(QString& question_string, QString& informa
 
     CCoinControl coin_control = *m_coin_control;
     coin_control.m_allow_other_inputs = !coin_control.HasSelected(); // future, could introduce a checkbox to customize this value.
+    if (!ensureSpendSourceChange(coin_control)) {
+        fNewRecipientAllowed = true;
+        return false;
+    }
     prepareStatus = model->prepareTransaction(*m_current_transaction, coin_control);
 
     // process prepareStatus and on error generate message shown to user
@@ -590,20 +643,34 @@ void SendCoinsDialog::setBalance(const interfaces::WalletBalances& balances)
 {
     if(model && model->getOptionsModel())
     {
-        CAmount balance = balances.balance;
+        CAmount balance = balances.legacy_balance;
         if (model->wallet().hasExternalSigner()) {
+            balance = balances.balance;
             ui->labelBalanceName->setText(tr("External balance:"));
         } else if (model->wallet().isLegacy() && model->wallet().privateKeysDisabled()) {
             balance = balances.watch_only_balance;
             ui->labelBalanceName->setText(tr("Watch-only balance:"));
+        } else if (m_spend_source_combo && m_spend_source_combo->currentData().toInt() == SPEND_SOURCE_QUANTUM) {
+            balance = balances.quantum_balance;
+            ui->labelBalanceName->setText(tr("Selected balance:"));
+        } else {
+            ui->labelBalanceName->setText(tr("Selected balance:"));
         }
         ui->labelBalance->setText(BitcoinUnits::formatWithUnit(model->getOptionsModel()->getDisplayUnit(), balance));
+        updateSpendSourceBalance();
     }
 }
 
 void SendCoinsDialog::refreshBalance()
 {
     setBalance(model->getCachedBalance());
+}
+
+void SendCoinsDialog::spendSourceChanged()
+{
+    updateCoinControlState();
+    refreshBalance();
+    coinControlUpdateLabels();
 }
 
 void SendCoinsDialog::processSendCoinsReturn(const WalletModel::SendCoinsReturn &sendCoinsReturn, const QString &msgArg)
@@ -649,8 +716,7 @@ void SendCoinsDialog::processSendCoinsReturn(const WalletModel::SendCoinsReturn 
 
 void SendCoinsDialog::useAvailableBalance(SendCoinsEntry* entry)
 {
-    // Include watch-only for wallets without private key
-    m_coin_control->fAllowWatchOnly = model->wallet().privateKeysDisabled() && !model->wallet().hasExternalSigner();
+    updateCoinControlState();
 
     // Same behavior as send: if we have selected coins, only obtain their available balance.
     // Copy to avoid modifying the member's data.
@@ -678,6 +744,74 @@ void SendCoinsDialog::updateCoinControlState()
 {
     // Include watch-only for wallets without private key
     m_coin_control->fAllowWatchOnly = model->wallet().privateKeysDisabled() && !model->wallet().hasExternalSigner();
+    if (m_spend_source_combo && m_spend_source_combo->currentData().toInt() == SPEND_SOURCE_QUANTUM) {
+        m_coin_control->m_input_family = CCoinControl::InputFamily::QUANTUM;
+    } else {
+        m_coin_control->m_input_family = CCoinControl::InputFamily::LEGACY;
+    }
+}
+
+bool SendCoinsDialog::validateSpendSourceRecipients(const QList<SendCoinsRecipient>& recipients)
+{
+    if (!m_spend_source_combo || m_spend_source_combo->currentData().toInt() != SPEND_SOURCE_QUANTUM) {
+        return true;
+    }
+    for (const SendCoinsRecipient& rcp : recipients) {
+        if (!IsQuantumDestinationString(rcp.address)) {
+            Q_EMIT message(tr("Send Coins"),
+                           tr("Quantum wallet funds can only be sent to quantum addresses. Select legacy wallet funds to send to a legacy address."),
+                           CClientUIInterface::MSG_ERROR);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool SendCoinsDialog::ensureSpendSourceChange(CCoinControl& coin_control)
+{
+    if (!m_spend_source_combo || m_spend_source_combo->currentData().toInt() != SPEND_SOURCE_QUANTUM) {
+        return true;
+    }
+
+    if (IsValidDestination(coin_control.destChange)) {
+        if (IsQuantumDestinationValue(coin_control.destChange)) {
+            return true;
+        }
+        Q_EMIT message(tr("Send Coins"),
+                       tr("Quantum wallet funds require a quantum change address. Clear the custom change address or enter a quantum address."),
+                       CClientUIInterface::MSG_ERROR);
+        return false;
+    }
+
+    auto quantum_change = model->wallet().createQuantumAddress("quantum-change");
+    if (!quantum_change) {
+        Q_EMIT message(tr("Send Coins"),
+                       tr("Unable to create a wallet-backed quantum change address: %1").arg(QString::fromStdString(util::ErrorString(quantum_change).original)),
+                       CClientUIInterface::MSG_ERROR);
+        return false;
+    }
+    const CTxDestination change_dest = DecodeDestination(quantum_change->address);
+    if (!IsQuantumDestinationValue(change_dest)) {
+        Q_EMIT message(tr("Send Coins"),
+                       tr("Unable to create a valid quantum change address."),
+                       CClientUIInterface::MSG_ERROR);
+        return false;
+    }
+    coin_control.destChange = change_dest;
+    return true;
+}
+
+void SendCoinsDialog::updateSpendSourceBalance()
+{
+    if (!model || !model->getOptionsModel() || !m_spend_source_combo || !m_spend_source_balance_label || !m_spend_source_warning_label) {
+        return;
+    }
+    const interfaces::WalletBalances balances = model->getCachedBalance();
+    const bool quantum_source = m_spend_source_combo->currentData().toInt() == SPEND_SOURCE_QUANTUM;
+    const CAmount source_balance = quantum_source ? balances.quantum_balance : balances.legacy_balance;
+    const QString family = quantum_source ? tr("Quantum spendable:") : tr("Legacy spendable:");
+    m_spend_source_balance_label->setText(QStringLiteral("%1 %2").arg(family, BitcoinUnits::formatWithUnit(model->getOptionsModel()->getDisplayUnit(), source_balance)));
+    m_spend_source_warning_label->setVisible(quantum_source);
 }
 
 // Coin Control: copy label "Quantity" to clipboard

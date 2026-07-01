@@ -405,6 +405,8 @@ struct WalletAddress
 struct WalletBalances
 {
     CAmount balance = 0;
+    CAmount legacy_balance = 0;
+    CAmount quantum_balance = 0;
     CAmount unconfirmed_balance = 0;
     CAmount immature_balance = 0;
     CAmount stake = 0;
@@ -416,7 +418,8 @@ struct WalletBalances
 
     bool balanceChanged(const WalletBalances& prev) const
     {
-        return balance != prev.balance || unconfirmed_balance != prev.unconfirmed_balance ||
+        return balance != prev.balance || legacy_balance != prev.legacy_balance || quantum_balance != prev.quantum_balance ||
+               unconfirmed_balance != prev.unconfirmed_balance ||
                immature_balance != prev.immature_balance || stake != prev.stake || watch_only_balance != prev.watch_only_balance ||
                unconfirmed_watch_only_balance != prev.unconfirmed_watch_only_balance ||
                immature_watch_only_balance != prev.immature_watch_only_balance || watch_only_stake != prev.watch_only_stake;
