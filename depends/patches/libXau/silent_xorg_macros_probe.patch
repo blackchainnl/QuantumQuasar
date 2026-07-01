@@ -1,0 +1,11 @@
+--- a/configure
++++ b/configure
+@@ -18577,7 +18577,7 @@
+ 
+ 
+ 
+-macros_datadir=`$PKG_CONFIG --print-errors --variable=pkgdatadir xorg-macros`
++macros_datadir=`$PKG_CONFIG --variable=pkgdatadir xorg-macros 2>/dev/null`
+ INSTALL_CMD="(cp -f "$macros_datadir/INSTALL" \$(top_srcdir)/.INSTALL.tmp && \
+ mv \$(top_srcdir)/.INSTALL.tmp \$(top_srcdir)/INSTALL) \
+ || (rm -f \$(top_srcdir)/.INSTALL.tmp; touch \$(top_srcdir)/INSTALL; \

@@ -1,0 +1,33 @@
+# /etc/conf.d/blackcoind: config file for /etc/init.d/blackcoind
+
+# Config file location
+#QQD_CONFIGFILE="/etc/blackcoin/blackcoin.conf"
+
+# What directory to write pidfile to?  (created and owned by $QQD_USER)
+#QQD_PIDDIR="/var/run/blackcoind"
+
+# What filename to give the pidfile
+#QQD_PIDFILE="${QQD_PIDDIR}/blackcoind.pid"
+
+# Where to write blackcoind data (be mindful that the blockchain is large)
+#QQD_DATADIR="/var/lib/blackcoind"
+
+# User and group to own blackcoind process
+#QQD_USER="blackcoin"
+#QQD_GROUP="blackcoin"
+
+# Path to blackcoind executable
+#QQD_BIN="/usr/bin/blackcoind"
+
+# Nice value to run blackcoind under
+#QQD_NICE=0
+
+# Additional options (avoid -conf and -datadir, use flags above)
+#QQD_OPTS=""
+
+# The timeout in seconds OpenRC will wait for blackcoind to terminate
+# after a SIGTERM has been raised.
+# Note that this will be mapped as argument to start-stop-daemon's
+# '--retry' option, which means you can specify a retry schedule
+# here. For more information see man 8 start-stop-daemon.
+QQD_SIGTERM_TIMEOUT=600

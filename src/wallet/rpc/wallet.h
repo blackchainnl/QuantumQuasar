@@ -1,0 +1,18 @@
+// Copyright (c) 2016-2021 Blackcoin Core Developers
+// Copyright (c) 2016-2021 Blackcoin More Developers
+// Copyright (c) 2016-2021 Quantum Quasar Developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#ifndef BITCOIN_WALLET_RPC_WALLET_H
+#define BITCOIN_WALLET_RPC_WALLET_H
+
+#include <span.h>
+
+class CRPCCommand;
+
+namespace wallet {
+Span<const CRPCCommand> GetWalletRPCCommands();
+} // namespace wallet
+
+#endif // BITCOIN_WALLET_RPC_WALLET_H

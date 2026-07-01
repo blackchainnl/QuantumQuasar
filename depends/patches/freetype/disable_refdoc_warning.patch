@@ -1,0 +1,46 @@
+diff -ur a/builds/unix/configure b/builds/unix/configure
+--- a/builds/unix/configure
++++ b/builds/unix/configure
+@@ -18176,22 +18176,6 @@
+   pthread:       $have_pthread
+ " >&6;}
+ 
+-# Warn if docwriter is not installed
+-
+-if test $have_docwriter = no; then
+-  { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING:
+-  \`make refdoc' will fail since pip package \`docwriter' is not installed.
+-  To install, run \`$PIP install docwriter', or to use a Python
+-  virtual environment, run \`make refdoc-venv' (requires pip package
+-  \`virtualenv').  These operations require Python >= 3.5.
+-  " >&5
+-$as_echo "$as_me: WARNING:
+-  \`make refdoc' will fail since pip package \`docwriter' is not installed.
+-  To install, run \`$PIP install docwriter', or to use a Python
+-  virtual environment, run \`make refdoc-venv' (requires pip package
+-  \`virtualenv').  These operations require Python >= 3.5.
+-  " >&2;}
+-fi
+ 
+ # Warn if pthread is not available
+ 
+diff -ur a/builds/unix/configure.ac b/builds/unix/configure.ac
+--- a/builds/unix/configure.ac
++++ b/builds/unix/configure.ac
+@@ -1181,16 +1181,6 @@
+   pthread:       $have_pthread
+ ])
+ 
+-# Warn if docwriter is not installed
+-
+-if test $have_docwriter = no; then
+-  AC_MSG_WARN([
+-  `make refdoc' will fail since pip package `docwriter' is not installed.
+-  To install, run `$PIP install docwriter', or to use a Python
+-  virtual environment, run `make refdoc-venv' (requires pip package
+-  `virtualenv').  These operations require Python >= 3.5.
+-  ])
+-fi
+ 
+ # Warn if pthread is not available
+ 

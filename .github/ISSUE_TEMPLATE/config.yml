@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Blackcoin Security Policy
+    url: https://github.com/Blackcoin-Dev/Blackcoin/security/policy
+    about: View security policy
+  - name: Blackcoin Developers
+    url: https://github.com/Blackcoin-Dev/Blackcoin
+    about: Blackcoin source repository

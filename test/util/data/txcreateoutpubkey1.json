@@ -1,0 +1,26 @@
+{
+    "txid": "971235fb4bb36bb5310cb51942e0c6493a1cbb73740181dd472cd0f2735f93fa",
+    "hash": "971235fb4bb36bb5310cb51942e0c6493a1cbb73740181dd472cd0f2735f93fa",
+    "version": 1,
+    "time": 0,
+    "size": 58,
+    "vsize": 58,
+    "weight": 232,
+    "locktime": 0,
+    "vin": [
+    ],
+    "vout": [
+        {
+            "value": 0.00000000,
+            "n": 0,
+            "scriptPubKey": {
+                "asm": "02a5613bd857b7048924264d1e70e08fb2a7e6527d32b7ab1bb993ac59964ff397 OP_CHECKSIG",
+                "desc": "pk(02a5613bd857b7048924264d1e70e08fb2a7e6527d32b7ab1bb993ac59964ff397)#rk5v7uqw",
+                "hex": "2102a5613bd857b7048924264d1e70e08fb2a7e6527d32b7ab1bb993ac59964ff397ac",
+                "address": "BKFLdkaHzmcnc8vKC6gsqMfzhhZA1v6XpT",
+                "type": "pubkey"
+            }
+        }
+    ],
+    "hex": "010000000000000000010000000000000000232102a5613bd857b7048924264d1e70e08fb2a7e6527d32b7ab1bb993ac59964ff397ac00000000"
+}

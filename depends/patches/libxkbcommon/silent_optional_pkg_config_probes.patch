@@ -1,0 +1,20 @@
+--- a/configure
++++ b/configure
+@@ -18416,7 +18416,7 @@ fi
+ 
+ 
+ 
+-macros_datadir=`$PKG_CONFIG --print-errors --variable=pkgdatadir xorg-macros`
++macros_datadir=`$PKG_CONFIG --variable=pkgdatadir xorg-macros 2>/dev/null`
+ INSTALL_CMD="(cp -f "$macros_datadir/INSTALL" \$(top_srcdir)/.INSTALL.tmp && \
+ mv \$(top_srcdir)/.INSTALL.tmp \$(top_srcdir)/INSTALL) \
+ || (rm -f \$(top_srcdir)/.INSTALL.tmp; test -e \$(top_srcdir)/INSTALL || ( \
+@@ -19711,7 +19711,7 @@ else
+ fi
+ 
+ # Define a configuration option for the XKB config root
+-xkb_base=`$PKG_CONFIG --variable=xkb_base xkeyboard-config`
++xkb_base=`$PKG_CONFIG --variable=xkb_base xkeyboard-config 2>/dev/null`
+ if test "x$xkb_base" = x; then :
+ 
+     xkb_base="$datadir/X11/xkb"

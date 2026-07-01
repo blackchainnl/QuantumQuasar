@@ -1,0 +1,151 @@
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - '**'
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    paths-ignore:
+      - 'doc/**'
+      - 'contrib/**'
+      - '**/*.md'
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+
+    env:
+      MAKEJOBS: 4
+      SDK_URL: https://bitcoincore.org/depends-sources/sdks
+
+    strategy:
+      fail-fast: false
+      matrix:
+        name:
+          - linux-64-bit
+          - windows-64-bit
+          - macos-64-bit
+          - linux-arm-64-bit
+        include:
+          - name: linux-64-bit
+            host: x86_64-pc-linux-gnu
+            os: ubuntu-22.04
+            packages: python3
+            check-security: false
+            check-symbols: false
+            dep-opts: ""
+            config-opts: "--enable-sse2 --enable-glibc-back-compat LDFLAGS=-static-libstdc++"
+            goal: install
+
+          - name: windows-64-bit
+            host: x86_64-w64-mingw32
+            os: ubuntu-22.04
+            packages: nsis g++-mingw-w64-x86-64 build-essential libtool autotools-dev automake pkg-config bsdmainutils curl git
+            postinstall: |
+              sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+              sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+            check-security: false
+            check-symbols: false
+            dep-opts: ""
+            config-opts: "--enable-sse2 LDFLAGS=-static-libgcc"
+            goal: install
+
+          - name: macos-64-bit
+            host: x86_64-apple-darwin
+            os: ubuntu-22.04
+            packages: curl bsdmainutils cmake libz-dev python3-setuptools libtinfo5 xorriso zip
+            check-security: false
+            check-symbols: false
+            dep-opts: ""
+            config-opts: "--enable-sse2"
+            goal: deploy
+            sdk: 12.2-12B45b
+
+          - name: linux-arm-64-bit
+            host: aarch64-linux-gnu
+            os: ubuntu-22.04
+            packages: g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+            check-security: false
+            check-symbols: false
+            dep-opts: ""
+            config-opts: "--enable-glibc-back-compat LDFLAGS=-static-libstdc++"
+            goal: install
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make automake cmake curl g++ libtool gperf binutils-gold bsdmainutils pkg-config python3 patch bison lbzip2 xz-utils libxml2-utils gettext xutils-dev
+          sudo apt-get install -y --no-install-recommends ${{ matrix.packages }}
+          if command -v pkg-config >/dev/null && ! command -v "${{ matrix.host }}-pkg-config" >/dev/null; then
+            sudo ln -s "$(command -v pkg-config)" "/usr/local/bin/${{ matrix.host }}-pkg-config"
+          fi
+
+      - name: Post Install
+        if: ${{ matrix.postinstall }}
+        run: ${{ matrix.postinstall }}
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: SDK cache
+        if: ${{ matrix.sdk }}
+        uses: actions/cache@v6
+        env:
+          cache-name: sdk
+        with:
+          path: ./depends/sdk-sources
+          key: ${{ matrix.name }}-${{ env.cache-name }}
+
+      - name: Install SDK
+        if: ${{ matrix.sdk }}
+        run: |
+          mkdir -p ./depends/sdk-sources
+          mkdir -p ./depends/SDKs
+          curl --location --fail $SDK_URL/Xcode-${{ matrix.sdk }}-extracted-SDK-with-libcxx-headers.tar.gz -o depends/sdk-sources/Xcode-${{ matrix.sdk }}-extracted-SDK-with-libcxx-headers.tar.gz
+          tar -C depends/SDKs -xzvf depends/sdk-sources/Xcode-${{ matrix.sdk }}-extracted-SDK-with-libcxx-headers.tar.gz
+
+      - name: Dependency cache
+        uses: actions/cache@v6
+        env:
+          cache-name: depends
+        with:
+          path: ./depends/built
+          key: ${{ matrix.name }}-${{ env.cache-name }}-${{ hashFiles('depends/*.mk', 'depends/packages/*', 'depends/patches/**/*') }}
+
+      - name: Build depends
+        run: |
+          make -j $MAKEJOBS -C depends HOST=${{ matrix.host }} ${{ matrix.dep-opts }}
+      - name: Build Blackcoin
+        run: |
+          ./autogen.sh
+          ./configure --prefix=`pwd`/depends/${{ matrix.host }} ${{ matrix.config-opts }} --enable-reduce-exports || ( cat config.log && false)
+          make -j $MAKEJOBS ${{ matrix.goal }} || ( echo "Build failure. Verbose build follows." && make ${{ matrix.goal }} V=1 ; false )
+ 
+      - name: Check security
+        if: ${{ matrix.check-security }}
+        run: make -C src check-security
+
+      - name: Check symbols
+        if: ${{ matrix.check-symbols }}
+        run: make -C src check-symbols
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: blackcoin-${{ github.sha }}-${{ matrix.name }}
+          path: |
+            depends/${{ matrix.host }}/bin/blackcoin*
+            dist/blackcoin-qt.app
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: blackcoin-${{ github.sha }}-${{ matrix.name }}

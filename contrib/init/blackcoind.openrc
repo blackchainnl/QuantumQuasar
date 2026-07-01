@@ -1,0 +1,87 @@
+#!/sbin/openrc-run
+
+QQD_DEFAULT_DATADIR="/var/lib/blackcoind"
+
+QQD_CONFIGFILE=${QQD_CONFIGFILE:-/etc/blackcoin/blackcoin.conf}
+QQD_PIDDIR=${QQD_PIDDIR:-/var/run/blackcoind}
+QQD_PIDFILE=${QQD_PIDFILE:-${QQD_PIDDIR}/blackcoind.pid}
+QQD_DATADIR=${QQD_DATADIR:-${QQD_DEFAULT_DATADIR}}
+QQD_USER=${QQD_USER:-blackcoin}
+QQD_GROUP=${QQD_GROUP:-blackcoin}
+QQD_BIN=${QQD_BIN:-/usr/bin/blackcoind}
+QQD_NICE=${QQD_NICE:-${NICELEVEL:-0}}
+QQD_OPTS="${QQD_OPTS:-}"
+
+name="Blackcoin Daemon"
+description="Blackcoin P2P network daemon"
+
+command="/usr/bin/blackcoind"
+command_args="-pid=\"${QQD_PIDFILE}\" \
+		-conf=\"${QQD_CONFIGFILE}\" \
+		-datadir=\"${QQD_DATADIR}\" \
+		-daemon \
+		${QQD_OPTS}"
+
+required_files="${QQD_CONFIGFILE}"
+start_stop_daemon_args="-u ${QQD_USER} \
+			-N ${QQD_NICE} -w 2000"
+pidfile="${QQD_PIDFILE}"
+
+# The retry schedule to use when stopping the daemon. Could be either
+# a timeout in seconds or multiple signal/timeout pairs (like
+# "SIGKILL/180 SIGTERM/300")
+retry="${QQD_SIGTERM_TIMEOUT}"
+
+depend() {
+	need localmount net
+}
+
+# verify
+# 1) that the datadir exists and is writable (or create it)
+# 2) that a directory for the pid exists and is writable
+# 3) ownership and permissions on the config file
+start_pre() {
+	checkpath \
+	-d \
+	--mode 0750 \
+	--owner "${QQD_USER}:${QQD_GROUP}" \
+	"${QQD_DATADIR}"
+
+	checkpath \
+	-d \
+	--mode 0755 \
+	--owner "${QQD_USER}:${QQD_GROUP}" \
+	"${QQD_PIDDIR}"
+
+	checkpath -f \
+	-o "${QQD_USER}:${QQD_GROUP}" \
+	-m 0660 \
+	"${QQD_CONFIGFILE}"
+
+	checkconfig || return 1
+}
+
+checkconfig()
+{
+	if grep -qs '^rpcuser=' "${QQD_CONFIGFILE}" && \
+		! grep -qs '^rpcpassword=' "${QQD_CONFIGFILE}" ; then
+		eerror ""
+		eerror "ERROR: You must set a secure rpcpassword to run blackcoind."
+		eerror "The setting must appear in ${QQD_CONFIGFILE}"
+		eerror ""
+		eerror "This password is security critical to securing wallets "
+		eerror "and must not be the same as the rpcuser setting."
+		eerror "You can generate a suitable random password using the following "
+		eerror "command from the shell:"
+		eerror ""
+		eerror "bash -c 'tr -dc a-zA-Z0-9 < /dev/urandom | head -c32 && echo'"
+		eerror ""
+		eerror "It is recommended that you also set alertnotify so you are "
+		eerror "notified of problems:"
+		eerror ""
+		eerror "ie: alertnotify=echo %%s | mail -s \"Blackcoin Alert\"" \
+			"admin@foo.com"
+		eerror ""
+		return 1
+	fi
+}

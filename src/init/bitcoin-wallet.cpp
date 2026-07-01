@@ -1,0 +1,16 @@
+// Copyright (c) 2021-2022 Blackcoin Core Developers
+// Copyright (c) 2021-2022 Blackcoin More Developers
+// Copyright (c) 2021-2022 Quantum Quasar Developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#include <interfaces/init.h>
+
+#include <memory>
+
+namespace interfaces {
+std::unique_ptr<Init> MakeWalletInit(int argc, char* argv[], int& exit_status)
+{
+    return std::make_unique<Init>();
+}
+} // namespace interfaces

@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+# Copyright (c) 2021 Blackcoin Core Developers
+# Copyright (c) 2021 Blackcoin More Developers
+# Copyright (c) 2021 Blackcoin Developers
+# Distributed under the MIT software license, see the accompanying
+# file COPYING or http://www.opensource.org/licenses/mit-license.php.
+"""
+Test mempool acceptance in case of an already known transaction
+with identical non-witness data but different witness.
+"""
+
+from copy import deepcopy
+from decimal import Decimal
+from test_framework.blocktools import COINBASE_MATURITY
+from test_framework.messages import (
+    COIN,
+    COutPoint,
+    CTransaction,
+    CTxIn,
+    CTxInWitness,
+    CTxOut,
+    sha256,
+)
+from test_framework.script import (
+    CScript,
+    OP_0,
+    OP_ELSE,
+    OP_ENDIF,
+    OP_EQUAL,
+    OP_HASH160,
+    OP_IF,
+    OP_TRUE,
+    hash160,
+)
+from test_framework.test_framework import BitcoinTestFramework
+from test_framework.util import (
+    assert_equal,
+)
+
+TX_FEE = Decimal("0.001")
+
+class MempoolWtxidTest(BitcoinTestFramework):
+    def set_test_params(self):
+        self.num_nodes = 1
+        self.setup_clean_chain = True
+
+    def run_test(self):
+        node = self.nodes[0]
+
+        self.log.info('Start with empty mempool and mature coinbase')
+        blockhash = self.generate(node, COINBASE_MATURITY + 1)[0]
+        coinbase = node.getblock(blockhash=blockhash, verbosity=2)["tx"][0]
+        txid = coinbase["txid"]
+        coinbase_value = coinbase["vout"][0]["value"]
+        assert_equal(node.getmempoolinfo()['size'], 0)
+
+        self.log.info("Submit parent with multiple script branches to mempool")
+        hashlock = hash160(b'Preimage')
+        witness_script = CScript([OP_IF, OP_HASH160, hashlock, OP_EQUAL, OP_ELSE, OP_TRUE, OP_ENDIF])
+        witness_program = sha256(witness_script)
+        script_pubkey = CScript([OP_0, witness_program])
+
+        parent = CTransaction()
+        parent.vin.append(CTxIn(COutPoint(int(txid, 16), 0), b""))
+        parent.vout.append(CTxOut(int((coinbase_value - TX_FEE) * COIN), script_pubkey))
+        parent.rehash()
+
+        privkeys = [node.get_deterministic_priv_key().key]
+        raw_parent = node.signrawtransactionwithkey(hexstring=parent.serialize().hex(), privkeys=privkeys)['hex']
+        parent_txid = node.sendrawtransaction(hexstring=raw_parent, maxfeerate=0)
+        self.generate(node, 1)
+
+        # Create a new transaction with witness solving first branch
+        child_witness_script = CScript([OP_TRUE])
+        child_witness_program = sha256(child_witness_script)
+        child_script_pubkey = CScript([OP_0, child_witness_program])
+
+        child_one = CTransaction()
+        child_one.vin.append(CTxIn(COutPoint(int(parent_txid, 16), 0), b""))
+        child_one.vout.append(CTxOut(int((coinbase_value - 2 * TX_FEE) * COIN), child_script_pubkey))
+        child_one.wit.vtxinwit.append(CTxInWitness())
+        child_one.wit.vtxinwit[0].scriptWitness.stack = [b'Preimage', b'\x01', witness_script]
+        child_one_wtxid = child_one.getwtxid()
+        child_one_txid = child_one.rehash()
+
+        # Create another identical transaction with witness solving second branch
+        child_two = deepcopy(child_one)
+        child_two.wit.vtxinwit[0].scriptWitness.stack = [b'', witness_script]
+        child_two_wtxid = child_two.getwtxid()
+        child_two_txid = child_two.rehash()
+
+        assert_equal(child_one_txid, child_two_txid)
+        assert child_one_wtxid != child_two_wtxid
+
+        self.log.info("Submit child_one to the mempool")
+        txid_submitted = node.sendrawtransaction(child_one.serialize().hex())
+        assert_equal(node.getmempoolentry(txid_submitted)['wtxid'], child_one_wtxid)
+
+        # testmempoolaccept reports the "already in mempool" error
+        assert_equal(node.testmempoolaccept([child_one.serialize().hex()]), [{
+            "txid": child_one_txid,
+            "wtxid": child_one_wtxid,
+            "allowed": False,
+            "reject-reason": "txn-already-in-mempool"
+        }])
+        assert_equal(node.testmempoolaccept([child_two.serialize().hex()])[0], {
+            "txid": child_two_txid,
+            "wtxid": child_two_wtxid,
+            "allowed": False,
+            "reject-reason": "txn-same-nonwitness-data-in-mempool"
+        })
+
+        # sendrawtransaction will not throw but quits early when the exact same transaction is already in mempool
+        node.sendrawtransaction(child_one.serialize().hex())
+
+        self.log.info("Submit child_two to the mempool")
+        # sendrawtransaction will not throw but quits early when a transaction with the same non-witness data is already in mempool
+        node.sendrawtransaction(child_two.serialize().hex())
+
+        # The node keeps the original transaction in its mempool and reports
+        # the wtxid of that transaction. P2P relay timing is covered by the
+        # dedicated relay tests, not this mempool acceptance fixture.
+        assert_equal(node.getmempoolentry(child_one_txid)['wtxid'], child_one_wtxid)
+
+if __name__ == '__main__':
+    MempoolWtxidTest().main()

@@ -1,0 +1,20 @@
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -1039,16 +1039,7 @@
+ 	  echo " $(INSTALL_DATA) fonts.conf $(DESTDIR)$(baseconfigdir)/fonts.conf"; \
+ 	  $(INSTALL_DATA) fonts.conf $(DESTDIR)$(baseconfigdir)/fonts.conf; \
+ 	fi; fi
+-	@(if $(RUN_FC_CACHE_TEST); then \
+-	    echo "fc-cache$(EXEEXT) -s -f -v"; \
+-	    fc-cache/fc-cache$(EXEEXT) -s -f -v; \
+-	else \
+-	    echo "***"; \
+-	    echo "*** Warning: fonts.cache not built"; \
+-	    echo "***"; \
+-	    echo "*** Generate this file manually on host system using fc-cache"; \
+-	    echo "***"; \
+-	fi)
++	@:
+ 
+ uninstall-local:
+ 	if [ -f $(srcdir)/fonts.conf ]; then \

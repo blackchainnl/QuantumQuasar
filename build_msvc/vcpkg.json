@@ -1,0 +1,22 @@
+{
+  "name": "bitcoin-core",
+  "version-string": "1",
+  "dependencies": [
+    "berkeleydb",
+    "boost-date-time",
+    "boost-multi-index",
+    "boost-process",
+    "boost-signals2",
+    "boost-test",
+    "libevent",
+    "sqlite3",
+    "zeromq"
+  ],
+  "builtin-baseline": "c8f45a069ad0266bc70e703c1252cb51506ddcaf",
+  "overrides": [
+    {
+      "name": "libevent",
+      "version": "2.1.12#7"
+    }
+  ]
+}
