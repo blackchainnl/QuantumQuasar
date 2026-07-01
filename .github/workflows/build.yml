@@ -12,6 +12,18 @@ on:
         required: true
         type: boolean
         default: false
+      target:
+        description: Build target to run
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - linux-64-bit
+          - linux-arm-64-bit
+          - windows-64-bit
+          - macos-64-bit
+          - macos-arm-64-bit
   push:
     tags:
       - 'v*'
@@ -20,8 +32,62 @@ permissions:
   contents: write
 
 jobs:
+  select-targets:
+    name: Select build target
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      macos_selected: ${{ steps.matrix.outputs.macos_selected }}
+
+    steps:
+      - id: matrix
+        shell: bash
+        env:
+          TARGET: ${{ github.event.inputs.target || 'all' }}
+        run: |
+          set -euo pipefail
+
+          linux_64='{"name":"linux-64-bit","host":"x86_64-pc-linux-gnu","os":"ubuntu-22.04","packages":"python3","dep-opts":"","config-opts":"--enable-sse2 --enable-glibc-back-compat LDFLAGS=-static-libstdc++","goal":"install"}'
+          linux_arm_64='{"name":"linux-arm-64-bit","host":"aarch64-linux-gnu","os":"ubuntu-22.04","packages":"g++-aarch64-linux-gnu binutils-aarch64-linux-gnu","dep-opts":"","config-opts":"--enable-glibc-back-compat LDFLAGS=-static-libstdc++","goal":"install"}'
+          windows_64='{"name":"windows-64-bit","host":"x86_64-w64-mingw32","os":"ubuntu-22.04","packages":"nsis g++-mingw-w64-x86-64 build-essential libtool autotools-dev automake pkg-config bsdmainutils curl git zip","postinstall":"sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix\nsudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix","dep-opts":"","config-opts":"--enable-sse2 LDFLAGS=-static-libgcc","goal":"deploy install"}'
+          macos_64='{"name":"macos-64-bit","host":"x86_64-apple-darwin","os":"ubuntu-22.04","packages":"curl bsdmainutils cmake libz-dev python3-setuptools libtinfo5 xorriso zip","dep-opts":"","config-opts":"--enable-sse2","goal":"deploy","sdk":"12.2-12B45b"}'
+          macos_arm_64='{"name":"macos-arm-64-bit","host":"aarch64-apple-darwin","os":"ubuntu-22.04","packages":"curl bsdmainutils cmake libz-dev python3-setuptools libtinfo5 xorriso zip","dep-opts":"","config-opts":"","goal":"deploy","sdk":"12.2-12B45b"}'
+
+          case "$TARGET" in
+            all)
+              matrix="[$linux_64,$linux_arm_64,$windows_64,$macos_64,$macos_arm_64]"
+              ;;
+            linux-64-bit)
+              matrix="[$linux_64]"
+              ;;
+            linux-arm-64-bit)
+              matrix="[$linux_arm_64]"
+              ;;
+            windows-64-bit)
+              matrix="[$windows_64]"
+              ;;
+            macos-64-bit)
+              matrix="[$macos_64]"
+              ;;
+            macos-arm-64-bit)
+              matrix="[$macos_arm_64]"
+              ;;
+            *)
+              echo "Unknown build target: $TARGET" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          if [[ "$matrix" == *macos-64-bit* || "$matrix" == *macos-arm-64-bit* ]]; then
+            echo "macos_selected=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "macos_selected=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: ${{ matrix.name }}
+    needs: select-targets
     runs-on: ${{ matrix.os }}
 
     env:
@@ -31,51 +97,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: linux-64-bit
-            host: x86_64-pc-linux-gnu
-            os: ubuntu-22.04
-            packages: python3
-            dep-opts: ""
-            config-opts: "--enable-sse2 --enable-glibc-back-compat LDFLAGS=-static-libstdc++"
-            goal: install
-
-          - name: linux-arm-64-bit
-            host: aarch64-linux-gnu
-            os: ubuntu-22.04
-            packages: g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
-            dep-opts: ""
-            config-opts: "--enable-glibc-back-compat LDFLAGS=-static-libstdc++"
-            goal: install
-
-          - name: windows-64-bit
-            host: x86_64-w64-mingw32
-            os: ubuntu-22.04
-            packages: nsis g++-mingw-w64-x86-64 build-essential libtool autotools-dev automake pkg-config bsdmainutils curl git zip
-            postinstall: |
-              sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
-              sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
-            dep-opts: ""
-            config-opts: "--enable-sse2 LDFLAGS=-static-libgcc"
-            goal: deploy install
-
-          - name: macos-64-bit
-            host: x86_64-apple-darwin
-            os: ubuntu-22.04
-            packages: curl bsdmainutils cmake libz-dev python3-setuptools libtinfo5 xorriso zip
-            dep-opts: ""
-            config-opts: "--enable-sse2"
-            goal: deploy
-            sdk: 12.2-12B45b
-
-          - name: macos-arm-64-bit
-            host: aarch64-apple-darwin
-            os: ubuntu-22.04
-            packages: curl bsdmainutils cmake libz-dev python3-setuptools libtinfo5 xorriso zip
-            dep-opts: ""
-            config-opts: ""
-            goal: deploy
-            sdk: 12.2-12B45b
+        include: ${{ fromJSON(needs.select-targets.outputs.matrix) }}
 
     steps:
       - name: Install packages
@@ -126,7 +148,10 @@ jobs:
         run: |
           ./autogen.sh
           ./configure --prefix="$(pwd)/depends/${{ matrix.host }}" ${{ matrix.config-opts }} --enable-reduce-exports || (cat config.log && false)
-          make -j "$MAKEJOBS" ${{ matrix.goal }} || (echo "Build failure. Verbose build follows." && make ${{ matrix.goal }} V=1; false)
+          if ! make -j "$MAKEJOBS" ${{ matrix.goal }}; then
+            echo "Parallel build failed. Retrying once serially with verbose output."
+            make ${{ matrix.goal }} V=1
+          fi
 
       - name: Package release assets
         shell: bash
@@ -169,7 +194,10 @@ jobs:
 
   macos-installers:
     name: macOS installers
-    needs: build
+    needs:
+      - select-targets
+      - build
+    if: ${{ needs.select-targets.outputs.macos_selected == 'true' }}
     runs-on: macos-14
 
     steps:
@@ -209,9 +237,10 @@ jobs:
   release:
     name: GitHub release
     needs:
+      - select-targets
       - build
       - macos-installers
-    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true' }}
+    if: ${{ needs.select-targets.outputs.macos_selected == 'true' && (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true') && (github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all') }}
     runs-on: ubuntu-22.04
 
     steps:
