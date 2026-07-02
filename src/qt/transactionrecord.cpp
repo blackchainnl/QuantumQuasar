@@ -65,6 +65,23 @@ bool IsQuantumWalletTransferTx(const interfaces::WalletTx& wtx)
 
     return any_value_output && any_quantum_output;
 }
+
+CAmount QuantumWalletTransferAmount(const interfaces::WalletTx& wtx)
+{
+    CAmount amount{0};
+    for (size_t i = 0; i < wtx.tx->vout.size(); ++i) {
+        const CTxOut& txout = wtx.tx->vout[i];
+        if (txout.nValue <= 0 || wtx.txout_is_change[i] || !IsQuantumOutput(txout)) continue;
+        amount += txout.nValue;
+    }
+    if (amount > 0) return amount;
+
+    for (const CTxOut& txout : wtx.tx->vout) {
+        if (txout.nValue <= 0 || !IsQuantumOutput(txout)) continue;
+        amount += txout.nValue;
+    }
+    return amount;
+}
 } // namespace
 
 using wallet::ISMINE_NO;
@@ -101,7 +118,7 @@ QList<TransactionRecord> TransactionRecord::decomposeTransaction(const interface
     }
 
     if (IsQuantumWalletTransferTx(wtx)) {
-        TransactionRecord sub(hash, nTime, TransactionRecord::Other, "Quantum wallet transfer", nNet, 0);
+        TransactionRecord sub(hash, nTime, TransactionRecord::Other, "Quantum wallet transfer", 0, QuantumWalletTransferAmount(wtx));
         sub.idx = 0;
         sub.involvesWatchAddress = false;
         parts.append(sub);
