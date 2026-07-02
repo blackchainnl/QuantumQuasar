@@ -77,6 +77,7 @@ private:
     QLabel* m_staking_status{nullptr};
     QLabel* m_stake_weight{nullptr};
     QLabel* m_goldrush_badge{nullptr};
+    QLabel* m_pos_goldrush_status{nullptr};
     QCheckBox* m_donation_enable{nullptr};
     QSpinBox* m_donation_percent{nullptr};
     QLabel* m_donation_status{nullptr};
