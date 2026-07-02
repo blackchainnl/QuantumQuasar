@@ -113,6 +113,7 @@ CAmount ShadowMaxBlockDirectTotal(const CCoinsViewCache& view, const CBlockIndex
 /** Read-only Gold Rush pool and participant diagnostics for RPC/status reporting. */
 ShadowGoldRushInfo GetShadowGoldRushInfo(const CCoinsViewCache& view, const CBlockIndex* pindex);
 std::map<CScript, ShadowSolverActivity> GetRecentShadowSolverActivity(const CCoinsViewCache& view, const CBlockIndex* pindex);
+uint64_t GetActiveShadowSignalCount(const CCoinsViewCache& view, const CBlockIndex* pindex);
 bool HasRecentShadowSolverActivity(const CCoinsViewCache& view, const CBlockIndex* pindex, const CScript& target, uint32_t solve_height, const uint256& solve_hash);
 
 /** Compute PoS Gold Rush shadow-ledger credits implied by a candidate block.

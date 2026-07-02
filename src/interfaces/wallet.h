@@ -493,6 +493,12 @@ struct WalletPowMiningInfo
     CAmount accrued_jackpot{0};     //!< PoW jackpot currently accrued in the pool
     CAmount next_claim_payout{0};   //!< estimated payout for a valid PoW claim in the next block
     int64_t claims_submitted{0};    //!< number of PoW claims this miner has submitted
+    CAmount pos_accrued_jackpot{0}; //!< PoS jackpot currently accrued in the pool
+    CAmount pos_next_payout_pool{0}; //!< estimated PoS pool paid by the next qualified solver/signaler block
+    CAmount pos_estimated_payout_per_signaler{0}; //!< estimated PoS share per active signaler
+    int pos_active_signalers{0};     //!< active signal-once participants still inside the 14-day window
+    int pos_claim_count{0};          //!< number of accepted PoS Gold Rush payouts
+    int pos_last_payout_height{0};   //!< last accepted PoS Gold Rush payout height, or 0 if none
 };
 
 //! Wallet-backed Blackcoin ML-DSA migration address metadata.

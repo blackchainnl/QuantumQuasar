@@ -638,6 +638,16 @@ public:
                 const ShadowGoldRushInfo shadow_info = GetShadowGoldRushInfo(active.CoinsTip(), tip);
                 info.accrued_jackpot = shadow_info.pow_amount;
                 info.next_claim_payout = info.epoch_active ? shadow_info.pow_amount + ShadowBaseReward(next_height) / 2 : shadow_info.pow_amount;
+                info.pos_accrued_jackpot = shadow_info.pos_amount;
+                const CAmount next_reward = info.epoch_active ? ShadowBaseReward(next_height) : 0;
+                const CAmount next_pos_reward = next_reward - next_reward / 2;
+                info.pos_next_payout_pool = shadow_info.pos_amount + next_pos_reward;
+                info.pos_active_signalers = static_cast<int>(GetActiveShadowSignalCount(active.CoinsTip(), tip));
+                info.pos_estimated_payout_per_signaler = info.pos_active_signalers > 0
+                    ? info.pos_next_payout_pool / info.pos_active_signalers
+                    : 0;
+                info.pos_claim_count = static_cast<int>(shadow_info.pos_count);
+                info.pos_last_payout_height = static_cast<int>(shadow_info.last_pos_height);
             }
         }
         return info;

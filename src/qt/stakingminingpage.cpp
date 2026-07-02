@@ -99,6 +99,9 @@ void StakingMiningPage::setupUi()
     m_stake_weight->setObjectName(QStringLiteral("stakeWeight"));
     m_goldrush_badge = new QLabel(tr("Gold Rush: unknown"), stakingBox);
     m_goldrush_badge->setObjectName(QStringLiteral("goldrushBadge"));
+    m_pos_goldrush_status = new QLabel(tr("PoS Gold Rush jackpot: unknown"), stakingBox);
+    m_pos_goldrush_status->setObjectName(QStringLiteral("posGoldrushStatus"));
+    m_pos_goldrush_status->setWordWrap(true);
 
     m_donation_enable = new QCheckBox(tr("Donate a share of staking rewards"), stakingBox);
     m_donation_enable->setObjectName(QStringLiteral("stakingDonationEnable"));
@@ -126,10 +129,11 @@ void StakingMiningPage::setupUi()
     sgrid->addWidget(new QLabel(tr("Stake weight:"), stakingBox), 5, 0);
     sgrid->addWidget(m_stake_weight, 5, 1);
     sgrid->addWidget(m_goldrush_badge, 6, 0, 1, 2);
-    sgrid->addWidget(m_donation_enable, 7, 0, 1, 2);
-    sgrid->addWidget(new QLabel(tr("Donation:"), stakingBox), 8, 0);
-    sgrid->addWidget(m_donation_percent, 8, 1);
-    sgrid->addWidget(m_donation_status, 9, 0, 1, 2);
+    sgrid->addWidget(m_pos_goldrush_status, 7, 0, 1, 2);
+    sgrid->addWidget(m_donation_enable, 8, 0, 1, 2);
+    sgrid->addWidget(new QLabel(tr("Donation:"), stakingBox), 9, 0);
+    sgrid->addWidget(m_donation_percent, 9, 1);
+    sgrid->addWidget(m_donation_status, 10, 0, 1, 2);
     outer->addWidget(stakingBox);
 
     // ---- Gold Rush Proof-of-Work section ----
@@ -574,6 +578,18 @@ void StakingMiningPage::updateStatus()
     m_goldrush_badge->setText(info.epoch_active
         ? tr("Gold Rush: ACTIVE (%1 blocks remaining)").arg(info.blocks_remaining)
         : tr("Gold Rush: not active"));
+    const QString last_pos_payout = info.pos_last_payout_height > 0
+        ? QString::number(info.pos_last_payout_height)
+        : tr("none yet");
+    m_pos_goldrush_status->setText(info.epoch_active
+        ? tr("PoS Gold Rush jackpot: %1 next qualified payout pool (%2 accrued)   |   Active signalers: %3   |   Estimated split: %4   |   Last PoS payout: %5")
+              .arg(formatBLK(info.pos_next_payout_pool))
+              .arg(formatBLK(info.pos_accrued_jackpot))
+              .arg(QString::number(info.pos_active_signalers))
+              .arg(formatBLK(info.pos_estimated_payout_per_signaler))
+              .arg(last_pos_payout)
+        : tr("PoS Gold Rush jackpot: %1 accrued; Gold Rush is not active.")
+              .arg(formatBLK(info.pos_accrued_jackpot)));
 
     if (m_pow_apply_pending) {
         m_pow_status->setText(m_pow_pending_enabled ? tr("Starting Gold Rush PoW mining...") : tr("Stopping Gold Rush PoW mining..."));
@@ -636,6 +652,7 @@ void StakingMiningPage::resetStatusForNoWallet()
     m_staking_status->setText(tr("No wallet loaded"));
     m_stake_weight->setText(QStringLiteral("-"));
     m_goldrush_badge->setText(tr("Gold Rush: no wallet loaded"));
+    m_pos_goldrush_status->setText(tr("PoS Gold Rush jackpot: no wallet loaded"));
 
     m_donation_enable->setChecked(false);
     m_donation_status->setText(tr("Load a wallet to configure staking reward donations."));
