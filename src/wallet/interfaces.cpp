@@ -16,6 +16,7 @@
 #include <interfaces/handler.h>
 #include <kernel/cs_main.h>
 #include <key_io.h>
+#include <node/quantum_pool.h>
 #include <policy/fees.h>
 #include <primitives/transaction.h>
 #include <rpc/server.h>
@@ -57,6 +58,8 @@ using interfaces::WalletMigrationStatus;
 using interfaces::WalletPowMiningInfo;
 using interfaces::WalletQuantumAddressInfo;
 using interfaces::WalletQuantumColdStakeInfo;
+using interfaces::WalletQuantumPoolInfo;
+using interfaces::WalletQuantumPoolOperatorInfo;
 using interfaces::WalletOrderForm;
 using interfaces::WalletTx;
 using interfaces::WalletTxOut;
@@ -706,6 +709,45 @@ public:
         result.reserve(infos.size());
         for (const QuantumColdStakeDelegationInfo& info : infos) {
             result.push_back(MakeWalletQuantumColdStakeInfo(*m_wallet, info));
+        }
+        return result;
+    }
+    WalletQuantumPoolInfo getQuantumPoolInfo() override
+    {
+        WalletQuantumPoolInfo result;
+        if (!m_wallet->HaveChain()) {
+            result.available = false;
+            return result;
+        }
+
+        TRY_LOCK(::cs_main, main_lock);
+        if (!main_lock) {
+            result.available = false;
+            return result;
+        }
+
+        ChainstateManager& chainman = m_wallet->chain().chainman();
+        const CCoinsViewCache& view = chainman.ActiveChainstate().CoinsTip();
+        result.total_coldstake = node::ComputeQuantumColdStakeTotal(view);
+        result.cap_bps = node::QUANTUM_POOL_CAP_BPS;
+
+        const std::vector<uint256> operators = node::ListQuantumPoolOperators();
+        result.operators.reserve(operators.size());
+        for (const uint256& staker_hash : operators) {
+            const node::QuantumPoolShare share = node::ComputeQuantumPoolShare(view, staker_hash, node::GetQuantumPoolClaims(staker_hash));
+
+            WalletQuantumPoolOperatorInfo entry;
+            entry.staking_pubkey_hash = share.operator_share.staker_pubkey_hash.GetHex();
+            if (!share.operator_share.staker_pubkey.empty()) {
+                entry.staking_pubkey = HexStr(share.operator_share.staker_pubkey);
+            }
+            entry.verified_value = share.operator_share.verified_value;
+            entry.share_bps = node::QuantumPoolShareBps(share.operator_share.verified_value, share.total_coldstake);
+            entry.verified_claims = share.operator_share.verified_claims;
+            entry.invalid_claims = share.operator_share.invalid_claims;
+            entry.operator_commitment_verified = share.operator_share.operator_commitment_verified;
+            entry.over_cap = node::WouldQuantumPoolExceedCap(share.total_coldstake, share.operator_share.verified_value, 0);
+            result.operators.push_back(std::move(entry));
         }
         return result;
     }
