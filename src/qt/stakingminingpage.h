@@ -207,6 +207,7 @@ private:
     void applyDonationPercentage(unsigned int percentage);
     bool requestStakingOnlyUnlock();
     bool requestNormalUnlock();
+    void showHelpDialog(const QString& title, const QString& html);
     QString selectedColdStakeOperatorPubKey() const;
     QString selectedColdStakeOperatorHash() const;
     void setColdStakeOperatorSelection(const QString& pubkey, const QString& label);

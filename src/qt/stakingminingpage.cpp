@@ -30,6 +30,8 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFrame>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -49,6 +51,7 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTabWidget>
+#include <QTextBrowser>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QVariant>
@@ -310,6 +313,15 @@ void StakingMiningPage::setupUi()
             "QLabel { background: #ffffff; border: 1px solid #cfd8e3; border-radius: 6px; padding: 10px; }"
             "QLabel[attention=\"true\"] { background: #fff7e6; border-color: #d8a441; }"));
     };
+    auto makeHelpButton = [this](const QString& text, const QString& title, const QString& html, QWidget* parent) {
+        auto* button = new QPushButton(text, parent);
+        button->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+        button->setToolTip(tr("Open a detailed guide for this workflow."));
+        connect(button, &QPushButton::clicked, this, [this, title, html] {
+            showHelpDialog(title, html);
+        });
+        return button;
+    };
 
     auto* dashboardBox = new QGroupBox(tr("Staking & Mining dashboard"), this);
     auto* dashboard = new QGridLayout(dashboardBox);
@@ -332,13 +344,46 @@ void StakingMiningPage::setupUi()
     m_dashboard_coldstake = new QLabel(tr("Quantum staking status will appear here."), dashboardBox);
     m_dashboard_coldstake->setObjectName(QStringLiteral("stakingMiningDashboardColdstake"));
     configureStatusCard(m_dashboard_coldstake);
+    auto* systemHelp = makeHelpButton(
+        tr("System guide"),
+        tr("Staking & Mining system guide"),
+        tr("<h3>What this page controls</h3>"
+           "<p>This page brings together the new V30 staking, Gold Rush, quantum migration, cold-staking, RGB, and EUTXO controls. The dashboard shows the current state first. The tabs below contain actions.</p>"
+           "<h3>The safe order</h3>"
+           "<ol>"
+           "<li><b>Keep legacy staking online</b> while Gold Rush runs. Legacy staking secures the base chain and can also produce PoS Gold Rush eligibility.</li>"
+           "<li><b>Use normal wallet unlock for quantum actions.</b> Legacy staking-only unlock is intentionally limited and will not create Gold Rush signal or quantum transactions.</li>"
+           "<li><b>Move Gold Rush rewards once.</b> Newly mined Gold Rush quantum rewards must move to a fresh wallet-backed quantum address before being used for sends, staking, node bonds, or delegation.</li>"
+           "<li><b>Choose a staking mode.</b> Stake locally if you want this machine to secure the network with your coins, run a node if you want to stake delegated cold deposits, or delegate to a verified node if you want owner keys offline.</li>"
+           "</ol>"
+           "<h3>Where transactions appear</h3>"
+           "<p>Legacy-visible Gold Rush participation is recorded through QQSIGNAL and QQSPROOF control transactions. Quantum rewards are tracked by upgraded nodes as quantum shadow-ledger credits and displayed in the wallet as <b>PoS - Quantum Stake</b> or <b>PoW - Quantum Claim</b>.</p>"),
+        dashboardBox);
+    auto* safetyHelp = makeHelpButton(
+        tr("Safety checklist"),
+        tr("Wallet safety checklist"),
+        tr("<h3>Before using new V30 features</h3>"
+           "<ul>"
+           "<li>Back up the wallet after creating any new quantum address, node key, or delegation address.</li>"
+           "<li>Use <b>Unlock wallet for LEGACY staking only</b> only when you want ordinary legacy staking and no spending or quantum operations.</li>"
+           "<li>Use <b>Unlock wallet for Quantum and Legacy Staking</b> when you want Gold Rush PoS signals, PoW claim transactions, migration, cold-staking setup, or quantum spends.</li>"
+           "<li>Do not delegate or stake unmoved Gold Rush reward outputs directly. The wallet will move them to a fresh quantum address first when possible.</li>"
+           "<li>Node bonds use a fixed 30-day unbonding period. Delegated funds remain owner-controlled by the delegator wallet.</li>"
+           "</ul>"
+           "<h3>What the dashboard is telling you</h3>"
+           "<p>The recommended action panel is conservative. It calls out the next action most likely to prevent confusion or blocked transactions, such as moving Gold Rush rewards, unlocking normally for signals, or choosing a cold-staking path.</p>"),
+        dashboardBox);
     dashboard->addWidget(m_dashboard_action, 0, 0, 1, 2);
+    dashboard->addWidget(systemHelp, 0, 2);
+    dashboard->addWidget(safetyHelp, 0, 3);
     dashboard->addWidget(m_dashboard_wallet, 1, 0);
-    dashboard->addWidget(m_dashboard_pos, 1, 1);
+    dashboard->addWidget(m_dashboard_pos, 1, 1, 1, 3);
     dashboard->addWidget(m_dashboard_pow, 2, 0);
-    dashboard->addWidget(m_dashboard_coldstake, 2, 1);
+    dashboard->addWidget(m_dashboard_coldstake, 2, 1, 1, 3);
     dashboard->setColumnStretch(0, 1);
     dashboard->setColumnStretch(1, 1);
+    dashboard->setColumnStretch(2, 0);
+    dashboard->setColumnStretch(3, 0);
     outer->addWidget(dashboardBox);
 
     auto* workflowTabs = new QTabWidget(this);
@@ -355,8 +400,8 @@ void StakingMiningPage::setupUi()
     auto* advancedLayout = new QVBoxLayout(advancedTab);
     advancedLayout->setContentsMargins(8, 8, 8, 8);
     advancedLayout->setSpacing(10);
-    workflowTabs->addTab(miningTab, tr("Gold Rush"));
-    workflowTabs->addTab(coldstakeTab, tr("Quantum staking"));
+    workflowTabs->addTab(miningTab, tr("Staking & Mining"));
+    workflowTabs->addTab(coldstakeTab, tr("Cold Staking"));
     workflowTabs->addTab(advancedTab, tr("Migration & assets"));
     outer->addWidget(workflowTabs);
 
@@ -391,6 +436,32 @@ void StakingMiningPage::setupUi()
     m_staking_summary = new QLabel(tr("Wallet staking summary will appear after the wallet is loaded."), stakingBox);
     m_staking_summary->setObjectName(QStringLiteral("stakingSummary"));
     configureInfoPanel(m_staking_summary);
+    auto* stakingHelp = makeHelpButton(
+        tr("PoS guide"),
+        tr("Proof-of-Stake and Gold Rush PoS guide"),
+        tr("<h3>What ordinary staking does</h3>"
+           "<p>Ordinary Proof-of-Stake keeps the legacy Blackcoin chain moving. During Gold Rush, this wallet can continue producing regular PoS blocks while upgraded nodes also track quantum reward credits.</p>"
+           "<h3>Gold Rush PoS eligibility</h3>"
+           "<ul>"
+           "<li>The wallet must have at least 10,000 BLK aggregate balance at the whitelist snapshot height.</li>"
+           "<li>The wallet must solve a PoS block during the rolling activity window.</li>"
+           "<li>The wallet must be normally unlocked so it can publish a QQSIGNAL transaction. Staking-only unlock is not enough for this part.</li>"
+           "</ul>"
+           "<h3>How payouts work</h3>"
+           "<p>Qualified active signalers share the PoS Gold Rush pool. The wallet displays these reward credits as <b>PoS - Quantum Stake</b> and shows the quantum payout address in the transaction list.</p>"
+           "<h3>Example</h3>"
+           "<p>If your wallet was whitelisted and solves a PoS block, keep staking enabled and unlock with <b>Quantum and Legacy Staking</b>. The wallet publishes the signal and remains in the active signaler set until the activity window expires.</p>"),
+        stakingBox);
+    auto* unlockHelp = makeHelpButton(
+        tr("Unlock help"),
+        tr("Unlock modes"),
+        tr("<h3>Legacy staking-only unlock</h3>"
+           "<p>This mode is safest for old-style staking because it does not permit ordinary spending. It also does not permit quantum transactions, Gold Rush signals, PoW claim transactions, migration, or cold-staking setup.</p>"
+           "<h3>Quantum and Legacy Staking unlock</h3>"
+           "<p>This is a normal wallet unlock. Use it when you want the wallet to stake and also create quantum-related transactions, including QQSIGNAL, QQSPROOF claims, migration, node bonds, and delegation funding.</p>"
+           "<h3>Rule of thumb</h3>"
+           "<p>Use staking-only unlock for passive legacy staking. Use the quantum unlock when you are actively participating in Gold Rush or setting up quantum/cold-staking features.</p>"),
+        stakingBox);
 
     m_donation_enable = new QCheckBox(tr("Donate a share of staking rewards"), stakingBox);
     m_donation_enable->setObjectName(QStringLiteral("stakingDonationEnable"));
@@ -410,20 +481,22 @@ void StakingMiningPage::setupUi()
     m_donation_status->setWordWrap(true);
 
     sgrid->addWidget(m_staking_enable, 0, 0, 1, 2);
+    sgrid->addWidget(stakingHelp, 0, 2);
     sgrid->addWidget(m_unlock_staking_only, 1, 0, 1, 2);
-    sgrid->addWidget(m_unlock_quantum_legacy_staking, 2, 0, 1, 2);
-    sgrid->addWidget(m_quantum_legacy_unlock_note, 3, 0, 1, 2);
+    sgrid->addWidget(unlockHelp, 1, 2);
+    sgrid->addWidget(m_unlock_quantum_legacy_staking, 2, 0, 1, 3);
+    sgrid->addWidget(m_quantum_legacy_unlock_note, 3, 0, 1, 3);
     sgrid->addWidget(new QLabel(tr("Status:"), stakingBox), 4, 0);
-    sgrid->addWidget(m_staking_status, 4, 1);
+    sgrid->addWidget(m_staking_status, 4, 1, 1, 2);
     sgrid->addWidget(new QLabel(tr("Stake weight:"), stakingBox), 5, 0);
-    sgrid->addWidget(m_stake_weight, 5, 1);
-    sgrid->addWidget(m_goldrush_badge, 6, 0, 1, 2);
-    sgrid->addWidget(m_pos_goldrush_status, 7, 0, 1, 2);
-    sgrid->addWidget(m_staking_summary, 8, 0, 1, 2);
-    sgrid->addWidget(m_donation_enable, 9, 0, 1, 2);
+    sgrid->addWidget(m_stake_weight, 5, 1, 1, 2);
+    sgrid->addWidget(m_goldrush_badge, 6, 0, 1, 3);
+    sgrid->addWidget(m_pos_goldrush_status, 7, 0, 1, 3);
+    sgrid->addWidget(m_staking_summary, 8, 0, 1, 3);
+    sgrid->addWidget(m_donation_enable, 9, 0, 1, 3);
     sgrid->addWidget(new QLabel(tr("Donation:"), stakingBox), 10, 0);
     sgrid->addWidget(m_donation_percent, 10, 1);
-    sgrid->addWidget(m_donation_status, 11, 0, 1, 2);
+    sgrid->addWidget(m_donation_status, 11, 0, 1, 3);
     miningLayout->addWidget(stakingBox);
 
     // ---- Gold Rush Proof-of-Work section ----
@@ -478,10 +551,39 @@ void StakingMiningPage::setupUi()
                               "Back up this wallet after the address is created, then move Gold Rush rewards "
                               "to a fresh quantum address before final lockout."));
     m_pow_warning->setStyleSheet(QStringLiteral("QLabel { color: #8a6d00; background: #fff6d6; padding: 6px; border-radius: 4px; }"));
+    auto* powHelp = makeHelpButton(
+        tr("PoW guide"),
+        tr("Gold Rush Proof-of-Work guide"),
+        tr("<h3>What the built-in miner does</h3>"
+           "<p>The Gold Rush PoW miner runs inside the wallet. It searches for Argon2id QQSPROOF claims and submits a small legacy-chain control transaction when it finds one.</p>"
+           "<h3>Reward path</h3>"
+           "<ol>"
+           "<li>The miner finds a valid QQSPROOF.</li>"
+           "<li>The wallet signs and broadcasts a claim transaction that spends a small legacy UTXO and includes the proof.</li>"
+           "<li>A staker includes that claim in a PoS block.</li>"
+           "<li>Upgraded nodes credit the reward to the quantum payout address shown here.</li>"
+           "</ol>"
+           "<h3>CPU controls</h3>"
+           "<p>The default is intentionally conservative: 1 core at 1 percent. Increase cores or percent only if you want this computer to spend more CPU time mining claims.</p>"
+           "<h3>What you will see</h3>"
+           "<p>The wallet shows the control transaction fee on the legacy side and the quantum reward as <b>PoW - Quantum Claim</b> when the upgraded ledger credit is accepted.</p>"),
+        powBox);
+    auto* payoutHelp = makeHelpButton(
+        tr("Payout help"),
+        tr("PoW payout address and reward movement"),
+        tr("<h3>Payout address</h3>"
+           "<p>The payout address is a wallet-backed quantum address. Back up the wallet after it is created.</p>"
+           "<h3>Using mined rewards</h3>"
+           "<p>Gold Rush rewards must be moved once to a fresh wallet-backed quantum address before normal use. The wallet can perform that move automatically before staking, node bonding, or delegation when quantum spending is active.</p>"
+           "<h3>Why the control transaction has a fee</h3>"
+           "<p>The QQSPROOF itself is anchored on the legacy chain through a normal transaction. That transaction pays the standard network fee. The quantum reward is not a legacy output.</p>"),
+        powBox);
 
     int r = 0;
-    pgrid->addWidget(m_pow_enable, r++, 0, 1, 3);
-    pgrid->addWidget(m_pow_unlock_wallet, r++, 0, 1, 3);
+    pgrid->addWidget(m_pow_enable, r, 0, 1, 2);
+    pgrid->addWidget(powHelp, r++, 2);
+    pgrid->addWidget(m_pow_unlock_wallet, r, 0, 1, 2);
+    pgrid->addWidget(payoutHelp, r++, 2);
     pgrid->addWidget(new QLabel(tr("CPU cores:"), powBox), r, 0);
     pgrid->addWidget(m_pow_cores, r++, 1);
     pgrid->addWidget(new QLabel(tr("CPU usage:"), powBox), r, 0);
@@ -509,7 +611,26 @@ void StakingMiningPage::setupUi()
     m_coldstake_summary = new QLabel(tr("Cold-staking summary will appear after the wallet is loaded."), coldstakeBox);
     m_coldstake_summary->setObjectName(QStringLiteral("coldstakeSummary"));
     configureInfoPanel(m_coldstake_summary);
-    coldstakeOuter->addWidget(m_coldstake_summary);
+    auto* coldstakeOverviewHelp = makeHelpButton(
+        tr("Cold staking guide"),
+        tr("Cold staking overview"),
+        tr("<h3>What cold staking is</h3>"
+           "<p>Cold staking separates ownership from staking operation. The owner wallet keeps the spend authority. A selected node receives staking authority for confirmed delegated outputs but cannot spend the principal.</p>"
+           "<h3>Three choices</h3>"
+           "<ul>"
+           "<li><b>Stake my coins:</b> keep ownership and staking in this wallet. Optional lock periods increase staking weight.</li>"
+           "<li><b>Run a Node:</b> create a fixed 30-day node bond and keep this wallet online so delegators can select it.</li>"
+           "<li><b>Delegate coins:</b> pick a verified node, create a delegation address, and fund it. This wallet keeps the owner key.</li>"
+           "</ul>"
+           "<h3>Confirmations and availability</h3>"
+           "<p>New node bonds and delegations are visible immediately as pending, then become active after normal confirmations. There is no extra waiting period beyond confirmation and the fixed unbonding rules.</p>"
+           "<h3>Gold Rush reward handling</h3>"
+           "<p>If the wallet uses unmoved Gold Rush reward outputs, the wallet first moves those rewards to a fresh quantum address and then completes the staking or delegation step when possible.</p>"),
+        coldstakeBox);
+    auto* coldstakeSummaryRow = new QHBoxLayout();
+    coldstakeSummaryRow->addWidget(m_coldstake_summary, 1);
+    coldstakeSummaryRow->addWidget(coldstakeOverviewHelp);
+    coldstakeOuter->addLayout(coldstakeSummaryRow);
     coldstakeTabs->addTab(selfStakeTab, tr("1. Stake my coins"));
     coldstakeTabs->addTab(operatorTab, tr("2. Run a Node"));
     coldstakeTabs->addTab(delegateTab, tr("3. Delegate coins"));
@@ -517,6 +638,21 @@ void StakingMiningPage::setupUi()
 
     auto* selfStakeHeading = new QLabel(tr("<b>Stake your own quantum coins</b><br>Keep the keys in this wallet and choose a lock period for staking weight."), coldstakeBox);
     selfStakeHeading->setTextFormat(Qt::RichText);
+    auto* selfStakeHelp = makeHelpButton(
+        tr("Local stake guide"),
+        tr("Stake your own quantum coins"),
+        tr("<h3>When to use this</h3>"
+           "<p>Use local quantum staking when this wallet should both own and stake the coins. This is the simplest quantum-staking path for a user who keeps the node online.</p>"
+           "<h3>Lock periods</h3>"
+           "<p>The lock period is a staking-weight choice. Liquid staking remains spend-flexible but receives lower weight. Longer locks increase weight and require unbonding before ordinary spending.</p>"
+           "<h3>Workflow</h3>"
+           "<ol>"
+           "<li>Choose a lock period.</li>"
+           "<li>Create a staking address.</li>"
+           "<li>Fund the address with spendable quantum coins.</li>"
+           "<li>Use Stop staking when you want to unbond or withdraw the selected staking output.</li>"
+           "</ol>"),
+        coldstakeBox);
     m_selfstake_lock_period = new QComboBox(coldstakeBox);
     m_selfstake_lock_period->setObjectName(QStringLiteral("selfStakeLockPeriod"));
     populateStakeLockCombo(m_selfstake_lock_period);
@@ -559,6 +695,23 @@ void StakingMiningPage::setupUi()
 
     auto* operatorHeading = new QLabel(tr("<b>Run a cold-staking node</b><br>Create the fixed 30-day node bond, keep this wallet online, and delegators can select this node from the verified registry after normal confirmations."), coldstakeBox);
     operatorHeading->setTextFormat(Qt::RichText);
+    auto* nodeHelp = makeHelpButton(
+        tr("Run a node guide"),
+        tr("Run a cold-staking node"),
+        tr("<h3>What a cold-staking node does</h3>"
+           "<p>A node keeps a wallet online and stakes delegated cold deposits. It does not receive owner-spend authority over delegated coins.</p>"
+           "<h3>Fixed 30-day bond</h3>"
+           "<p>Node operation uses a fixed 30-day bond. The lock is not selectable. It proves the node is intentionally participating and gives delegators a stable commitment to verify.</p>"
+           "<h3>How to become available</h3>"
+           "<ol>"
+           "<li>Create a node key.</li>"
+           "<li>Fund the node bond address.</li>"
+           "<li>Wait for normal confirmations.</li>"
+           "<li>Refresh the node registry. Delegators can then select the verified node.</li>"
+           "</ol>"
+           "<h3>Stopping</h3>"
+           "<p>Stop node starts the fixed unbonding period. After it matures, the wallet can complete withdrawal to a fresh quantum address.</p>"),
+        coldstakeBox);
     m_operator_address = new QLineEdit(coldstakeBox);
     m_operator_address->setObjectName(QStringLiteral("coldstakeOperatorAddress"));
     configureLineEdit(m_operator_address);
@@ -618,6 +771,24 @@ void StakingMiningPage::setupUi()
 
     auto* delegateHeading = new QLabel(tr("<b>Delegate coins to a node</b><br>Select a verified node, create a wallet-backed delegation address, then fund it. This wallet keeps the owner-spend key."), coldstakeBox);
     delegateHeading->setTextFormat(Qt::RichText);
+    auto* delegateHelp = makeHelpButton(
+        tr("Delegate guide"),
+        tr("Delegate coins to a cold-staking node"),
+        tr("<h3>What delegation does</h3>"
+           "<p>Delegation lets another node stake your quantum coins while your wallet keeps the owner-spend key. The node can help create blocks; it cannot spend your principal.</p>"
+           "<h3>Choosing a node</h3>"
+           "<p>Select a verified node from the registry. The wallet verifies each registry claim against chainstate before treating it as selectable.</p>"
+           "<h3>Workflow</h3>"
+           "<ol>"
+           "<li>Select a verified node.</li>"
+           "<li>Choose a lock period for the delegated deposit.</li>"
+           "<li>Create a delegation deposit address.</li>"
+           "<li>Delegate coins. Pending funding appears immediately and becomes active after confirmation.</li>"
+           "<li>Use Stop delegation to owner-spend back to a fresh quantum address.</li>"
+           "</ol>"
+           "<h3>Gold Rush rewards</h3>"
+           "<p>If your selected amount depends on unmoved Gold Rush rewards, the wallet first creates the required fresh quantum move and then completes delegation when possible.</p>"),
+        coldstakeBox);
     m_coldstake_quantum_available = new QLabel(QStringLiteral("-"), coldstakeBox);
     m_coldstake_quantum_available->setObjectName(QStringLiteral("coldstakeQuantumAvailable"));
     m_coldstake_quantum_available->setWordWrap(true);
@@ -668,7 +839,8 @@ void StakingMiningPage::setupUi()
     m_coldstake_status->setWordWrap(true);
 
     r = 0;
-    selfStakeGrid->addWidget(selfStakeHeading, r++, 0, 1, 4);
+    selfStakeGrid->addWidget(selfStakeHeading, r, 0, 1, 3);
+    selfStakeGrid->addWidget(selfStakeHelp, r++, 3);
     selfStakeGrid->addWidget(new QLabel(tr("Choose lock period:"), selfStakeTab), r, 0);
     selfStakeGrid->addWidget(m_selfstake_lock_period, r, 1, 1, 2);
     selfStakeGrid->addWidget(m_selfstake_new, r++, 3);
@@ -688,7 +860,8 @@ void StakingMiningPage::setupUi()
     selfStakeGrid->setColumnStretch(2, 1);
 
     r = 0;
-    operatorGrid->addWidget(operatorHeading, r++, 0, 1, 4);
+    operatorGrid->addWidget(operatorHeading, r, 0, 1, 3);
+    operatorGrid->addWidget(nodeHelp, r++, 3);
     operatorGrid->addWidget(new QLabel(tr("Node bond lock:"), operatorTab), r, 0);
     operatorGrid->addWidget(new QLabel(tr("30 days fixed"), operatorTab), r++, 1, 1, 3);
     operatorGrid->addWidget(new QLabel(tr("Saved node key:"), operatorTab), r, 0);
@@ -714,7 +887,8 @@ void StakingMiningPage::setupUi()
     operatorGrid->setColumnStretch(2, 1);
 
     r = 0;
-    delegateGrid->addWidget(delegateHeading, r++, 0, 1, 4);
+    delegateGrid->addWidget(delegateHeading, r, 0, 1, 3);
+    delegateGrid->addWidget(delegateHelp, r++, 3);
     delegateGrid->addWidget(new QLabel(tr("Available quantum balance:"), delegateTab), r, 0);
     delegateGrid->addWidget(m_coldstake_quantum_available, r++, 1, 1, 3);
     delegateGrid->addWidget(new QLabel(tr("Delegations:"), delegateTab), r, 0);
@@ -837,8 +1011,50 @@ void StakingMiningPage::setupUi()
     m_eutxo_status = new QLabel(tr("EUTXO states not loaded."), migrationBox);
     m_eutxo_status->setObjectName(QStringLiteral("eutxoStatus"));
     m_eutxo_status->setWordWrap(true);
+    auto* migrationHelp = makeHelpButton(
+        tr("Migration guide"),
+        tr("Quantum migration guide"),
+        tr("<h3>What migration means</h3>"
+           "<p>Migration moves value from legacy spend paths into quantum witness outputs. During the transition, upgraded nodes track both the legacy ledger and the quantum ledger rules.</p>"
+           "<h3>Legacy to quantum</h3>"
+           "<p>Use Move legacy to quantum to sweep spendable legacy wallet funds to a fresh wallet-backed quantum address. Back up the wallet after creating new quantum addresses.</p>"
+           "<h3>Gold Rush rewards</h3>"
+           "<p>Gold Rush reward outputs need one fresh move before normal use. This proves the owner is aware of the received quantum reward and establishes a fresh wallet-backed destination.</p>"
+           "<h3>What to watch</h3>"
+           "<ul>"
+           "<li><b>Legacy left:</b> value still controlled by legacy spend paths.</li>"
+           "<li><b>Quantum held:</b> value already visible to the quantum wallet.</li>"
+           "<li><b>Gold Rush to move:</b> reward value that must be moved once before use.</li>"
+           "</ul>"),
+        migrationBox);
+    auto* demurrageHelp = makeHelpButton(
+        tr("Demurrage guide"),
+        tr("Demurrage and liveness attestations"),
+        tr("<h3>Purpose</h3>"
+           "<p>Demurrage is a post-migration inactivity rule for quantum outputs. It is not active during Gold Rush and does not replace the migration deadline.</p>"
+           "<h3>Attestations</h3>"
+           "<p>A liveness attestation is a small fee-paying transaction for a selected quantum address. It proves the key is still being actively maintained and resets the inactivity clock for that key.</p>"
+           "<h3>Exemptions</h3>"
+           "<p>Cold-stake contract outputs, treasury outputs, young outputs, and recently attested keys are guarded according to the consensus rules. The panel shows the current exposure, effective value, and guard state.</p>"),
+        migrationBox);
+    auto* assetHelp = makeHelpButton(
+        tr("RGB / EUTXO guide"),
+        tr("RGB and EUTXO asset/state guide"),
+        tr("<h3>RGB assets</h3>"
+           "<p>RGB records wallet-known client-side asset state. The table shows assets, balances, supply, assignments, and contract identifiers known to this wallet.</p>"
+           "<h3>EUTXO states</h3>"
+           "<p>EUTXO records extended UTXO metadata such as datum and validator commitments. This is advanced state data for contract-like flows.</p>"
+           "<h3>Current workflow status</h3>"
+           "<p>The wallet can display known RGB and EUTXO state. Guided creation, transfer, import, and export flows remain advanced console workflows until those screens are built out further.</p>"
+           "<h3>Safe use</h3>"
+           "<p>Use the tables for inspection. Do not assume an asset or state transition is complete until the corresponding wallet or RPC workflow reports the transition as accepted and confirmed.</p>"),
+        migrationBox);
 
     r = 0;
+    mgrid->addWidget(new QLabel(tr("Guides:"), migrationBox), r, 0);
+    mgrid->addWidget(migrationHelp, r, 1);
+    mgrid->addWidget(demurrageHelp, r, 2);
+    mgrid->addWidget(assetHelp, r++, 3);
     mgrid->addWidget(new QLabel(tr("Phase:"), migrationBox), r, 0);
     mgrid->addWidget(m_migration_phase, r++, 1, 1, 2);
     mgrid->addWidget(new QLabel(tr("Deadline:"), migrationBox), r, 0);
@@ -2611,6 +2827,36 @@ bool StakingMiningPage::requestNormalUnlock()
         m_wallet_model->updateStatus();
     }
     return true;
+}
+
+void StakingMiningPage::showHelpDialog(const QString& title, const QString& html)
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(title);
+    dialog.resize(760, 560);
+    dialog.setMinimumSize(520, 360);
+
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* browser = new QTextBrowser(&dialog);
+    browser->setOpenExternalLinks(false);
+    browser->setReadOnly(true);
+    browser->setHtml(tr(
+        "<html><body style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; line-height: 1.45;\">"
+        "<style>"
+        "h3 { margin-top: 16px; margin-bottom: 6px; }"
+        "p { margin-top: 4px; margin-bottom: 10px; }"
+        "li { margin-bottom: 5px; }"
+        "ol, ul { margin-top: 4px; }"
+        "</style>"
+        "%1"
+        "</body></html>").arg(html));
+    layout->addWidget(browser);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    dialog.exec();
 }
 
 QString StakingMiningPage::selectedColdStakeOperatorPubKey() const
