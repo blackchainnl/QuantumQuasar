@@ -27,11 +27,26 @@
 #include <string>
 
 #include <QLatin1String>
+#include <QObject>
 
 using wallet::ISMINE_ALL;
 using wallet::ISMINE_SPENDABLE;
 using wallet::ISMINE_WATCH_ONLY;
 using wallet::isminetype;
+
+namespace {
+QString GoldRushWalletControlLabel(const interfaces::WalletTx& wtx)
+{
+    const auto it = wtx.value_map.find("comment");
+    if (it == wtx.value_map.end()) return {};
+    if (it->second == "Blackcoin shadow signal") return QObject::tr("Gold Rush signal");
+    if (it->second == "Quantum Quasar built-in shadow PoW claim" ||
+        it->second == "Blackcoin shadow PoW claim") {
+        return QObject::tr("Gold Rush PoW claim");
+    }
+    return {};
+}
+} // namespace
 
 QString TransactionDesc::FormatTxStatus(const interfaces::WalletTxStatus& status, bool inMempool)
 {
@@ -121,6 +136,7 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     CAmount nCredit = wtx.credit;
     CAmount nDebit = wtx.debit;
     CAmount nNet = nCredit - nDebit;
+    const QString gold_rush_control_label = GoldRushWalletControlLabel(wtx);
 
     strHTML += "<b>" + tr("Status") + ":</b> " + FormatTxStatus(status, inMempool);
     strHTML += "<br>";
@@ -130,7 +146,12 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     //
     // From
     //
-    if (wtx.is_coinbase)
+    if (!gold_rush_control_label.isEmpty())
+    {
+        strHTML += "<b>" + tr("Source") + ":</b> " + tr("Wallet self-authentication") + "<br>";
+        strHTML += "<b>" + tr("Action") + ":</b> " + gold_rush_control_label + "<br>";
+    }
+    else if (wtx.is_coinbase)
     {
         strHTML += "<b>" + tr("Source") + ":</b> " + tr("Generated") + "<br>";
     }
@@ -188,7 +209,15 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     //
     // Amount
     //
-    if (wtx.is_coinbase && nCredit == 0)
+    if (!gold_rush_control_label.isEmpty())
+    {
+        const CAmount nTxFee = nDebit - wtx.tx->GetValueOut();
+        if (nTxFee > 0) {
+            strHTML += "<b>" + tr("Transaction fee") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, -nTxFee) + "<br>";
+        }
+        strHTML += "<b>" + tr("Net amount") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, nNet, true) + "<br>";
+    }
+    else if (wtx.is_coinbase && nCredit == 0)
     {
         //
         // Coinbase
@@ -298,7 +327,9 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
         }
     }
 
-    strHTML += "<b>" + tr("Net amount") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, nNet, true) + "<br>";
+    if (gold_rush_control_label.isEmpty()) {
+        strHTML += "<b>" + tr("Net amount") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, nNet, true) + "<br>";
+    }
 
     //
     // Message

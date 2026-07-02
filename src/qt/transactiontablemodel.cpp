@@ -433,6 +433,9 @@ QString TransactionTableModel::formatTxToAddress(const TransactionRecord *wtx, b
     case TransactionRecord::SendToOther:
         return QString::fromStdString(wtx->address) + watchAddress;
     default:
+        if (!wtx->address.empty()) {
+            return QString::fromStdString(wtx->address) + watchAddress;
+        }
         return tr("(n/a)") + watchAddress;
     }
 }

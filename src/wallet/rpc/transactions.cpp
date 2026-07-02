@@ -15,6 +15,15 @@
 using interfaces::FoundBlock;
 
 namespace wallet {
+static bool IsGoldRushWalletControlTx(const CWalletTx& wtx)
+{
+    const auto it = wtx.mapValue.find("comment");
+    if (it == wtx.mapValue.end()) return false;
+    return it->second == "Quantum Quasar built-in shadow PoW claim" ||
+           it->second == "Blackcoin shadow PoW claim" ||
+           it->second == "Blackcoin shadow signal";
+}
+
 static void WalletTxToJSON(const CWallet& wallet, const CWalletTx& wtx, UniValue& entry)
     EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
 {
@@ -328,6 +337,22 @@ static void ListTransactions(const CWallet& wallet, const CWalletTx& wtx, int nM
     }
 
     bool involvesWatchonly = CachedTxIsFromMe(wallet, wtx, ISMINE_WATCH_ONLY);
+
+    if (IsGoldRushWalletControlTx(wtx) && !filter_label.has_value()) {
+        UniValue entry(UniValue::VOBJ);
+        if (involvesWatchonly) {
+            entry.pushKV("involvesWatchonly", true);
+        }
+        entry.pushKV("category", "send");
+        entry.pushKV("amount", ValueFromAmount(0));
+        entry.pushKV("label", wtx.mapValue.at("comment"));
+        entry.pushKV("vout", 0);
+        entry.pushKV("fee", ValueFromAmount(-nFee));
+        if (fLong) WalletTxToJSON(wallet, wtx, entry);
+        entry.pushKV("abandoned", wtx.isAbandoned());
+        ret.push_back(entry);
+        return;
+    }
 
     // Sent
     if (!filter_label.has_value())
