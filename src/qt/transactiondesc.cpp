@@ -40,10 +40,10 @@ QString GoldRushWalletControlLabel(const interfaces::WalletTx& wtx)
 {
     const auto it = wtx.value_map.find("comment");
     if (it == wtx.value_map.end()) return {};
-    if (it->second == "Blackcoin shadow signal") return QObject::tr("Gold Rush signal");
+    if (it->second == "Blackcoin shadow signal") return QObject::tr("Quantum PoS Claim");
     if (it->second == "Quantum Quasar built-in shadow PoW claim" ||
         it->second == "Blackcoin shadow PoW claim") {
-        return QObject::tr("Gold Rush PoW claim");
+        return QObject::tr("Quantum PoW Claim");
     }
     return {};
 }
@@ -52,8 +52,8 @@ QString GoldRushClaimLabel(const interfaces::WalletTx& wtx)
 {
     const auto it = wtx.value_map.find("comment");
     if (it == wtx.value_map.end()) return {};
-    if (it->second == "PoS - Quantum Stake") return QObject::tr("PoS - Quantum Stake");
-    if (it->second == "PoW - Quantum Claim") return QObject::tr("PoW - Quantum Claim");
+    if (it->second == "PoS - Quantum Stake") return QObject::tr("Quantum PoS Reward");
+    if (it->second == "PoW - Quantum Claim") return QObject::tr("Quantum PoW Reward");
     return {};
 }
 
@@ -204,7 +204,7 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     //
     if (!gold_rush_claim_label.isEmpty())
     {
-        strHTML += "<b>" + tr("Source") + ":</b> " + tr("Gold Rush reward") + "<br>";
+        strHTML += "<b>" + tr("Source") + ":</b> " + tr("Quantum reward") + "<br>";
         strHTML += "<b>" + tr("Action") + ":</b> " + GoldRushClaimAction(wtx) + "<br>";
     }
     else if (!gold_rush_control_label.isEmpty())
@@ -266,7 +266,12 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     //
     // To
     //
-    if (wtx.value_map.count("to") && !wtx.value_map["to"].empty())
+    if (!gold_rush_claim_label.isEmpty() && wtx.value_map.count("to") && !wtx.value_map["to"].empty())
+    {
+        strHTML += "<b>" + tr("To") + ":</b> ";
+        strHTML += GUIUtil::HtmlEscape(wtx.value_map["to"]) + "<br>";
+    }
+    else if (wtx.value_map.count("to") && !wtx.value_map["to"].empty())
     {
         // Online transaction
         std::string strAddress = wtx.value_map["to"];

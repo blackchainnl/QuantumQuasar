@@ -161,7 +161,8 @@ struct AutoShadowSignalCandidate
 };
 
 static constexpr const char* SHADOW_SIGNAL_COMMENT{"Blackcoin shadow signal"};
-static constexpr const char* SHADOW_SIGNAL_PAYOUT_LABEL{"goldrush-pos"};
+static constexpr const char* SHADOW_SIGNAL_PAYOUT_LABEL{"Quantum PoS Reward Address"};
+static constexpr const char* LEGACY_SHADOW_SIGNAL_PAYOUT_LABEL{"goldrush-pos"};
 
 bool HasPendingShadowSignal(CWallet& wallet) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
 {
@@ -179,7 +180,8 @@ bool EnsureShadowSignalPayout(CWallet& wallet, CScript& payout_script, std::stri
     {
         LOCK(wallet.cs_wallet);
         for (const auto& [dest, entry] : wallet.m_address_book) {
-            if (entry.IsChange() || entry.GetLabel() != SHADOW_SIGNAL_PAYOUT_LABEL) continue;
+            const std::string label = entry.GetLabel();
+            if (entry.IsChange() || (label != SHADOW_SIGNAL_PAYOUT_LABEL && label != LEGACY_SHADOW_SIGNAL_PAYOUT_LABEL)) continue;
             if (!IsValidDestination(dest) || !IsQuantumMigrationDestination(dest)) continue;
             if (wallet.IsMine(dest) == ISMINE_NO) continue;
             payout_address = EncodeDestination(dest);

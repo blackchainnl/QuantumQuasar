@@ -360,6 +360,11 @@ QString ShortClaimDestination(const QString& address)
     if (address.size() <= 28) return address;
     return address.left(12) + QStringLiteral("...") + address.right(10);
 }
+
+bool IsQuantumClaimControlLabel(const std::string& address)
+{
+    return address == "Quantum PoW Claim" || address == "Quantum PoS Claim";
+}
 } // namespace
 
 /* Look up address in address book, if found return label (address)
@@ -385,12 +390,18 @@ QString TransactionTableModel::formatGoldRushClaimType(const TransactionRecord *
     if (wtx->address.empty()) return claim_type;
 
     const QString address = QString::fromStdString(wtx->address);
-    const QString label = walletModel->getAddressTableModel()->labelForAddress(address);
-    const QString destination = label.isEmpty() ?
-        ShortClaimDestination(address) :
-        tr("%1 (%2)").arg(label, ShortClaimDestination(address));
+    return claim_type + tr(" -> ") + ShortClaimDestination(address);
+}
 
-    return claim_type + tr(" -> ") + destination;
+QString TransactionTableModel::formatGoldRushToAddress(const TransactionRecord *wtx, bool tooltip) const
+{
+    const QString reward_type = wtx->type == TransactionRecord::GoldRushPowClaim ?
+        tr("Quantum PoW Reward") :
+        tr("Quantum PoS Reward");
+    if (wtx->address.empty()) return reward_type;
+
+    const QString address = QString::fromStdString(wtx->address);
+    return reward_type + tr(" -> ") + (tooltip ? address : ShortClaimDestination(address));
 }
 
 QString TransactionTableModel::formatTxType(const TransactionRecord *wtx) const
@@ -409,10 +420,11 @@ QString TransactionTableModel::formatTxType(const TransactionRecord *wtx) const
     case TransactionRecord::Staked:
         return tr("Staked");
     case TransactionRecord::GoldRushPosStake:
-        return formatGoldRushClaimType(wtx, tr("PoS - Quantum Stake"));
+        return formatGoldRushClaimType(wtx, tr("Quantum PoS Reward"));
     case TransactionRecord::GoldRushPowClaim:
-        return formatGoldRushClaimType(wtx, tr("PoW - Quantum Claim"));
+        return formatGoldRushClaimType(wtx, tr("Quantum PoW Reward"));
     case TransactionRecord::Other:
+        if (IsQuantumClaimControlLabel(wtx->address)) return QString::fromStdString(wtx->address);
         return tr("Other");
     default:
         return QString();
@@ -458,12 +470,16 @@ QString TransactionTableModel::formatTxToAddress(const TransactionRecord *wtx, b
     case TransactionRecord::SendToAddress:
     case TransactionRecord::Generated:
     case TransactionRecord::Staked:
+        return lookupAddress(wtx->address, tooltip) + watchAddress;
     case TransactionRecord::GoldRushPosStake:
     case TransactionRecord::GoldRushPowClaim:
-        return lookupAddress(wtx->address, tooltip) + watchAddress;
+        return formatGoldRushToAddress(wtx, tooltip) + watchAddress;
     case TransactionRecord::SendToOther:
         return QString::fromStdString(wtx->address) + watchAddress;
     default:
+        if (IsQuantumClaimControlLabel(wtx->address)) {
+            return tr("Legacy-chain control transaction") + watchAddress;
+        }
         if (!wtx->address.empty()) {
             return QString::fromStdString(wtx->address) + watchAddress;
         }
@@ -480,8 +496,6 @@ QVariant TransactionTableModel::addressColor(const TransactionRecord *wtx) const
     case TransactionRecord::SendToAddress:
     case TransactionRecord::Generated:
     case TransactionRecord::Staked:
-    case TransactionRecord::GoldRushPosStake:
-    case TransactionRecord::GoldRushPowClaim:
         {
         QString label = walletModel->getAddressTableModel()->labelForAddress(QString::fromStdString(wtx->address));
         if(label.isEmpty())
@@ -652,6 +666,9 @@ QVariant TransactionTableModel::data(const QModelIndex &index, int role) const
     case AddressRole:
         return QString::fromStdString(rec->address);
     case LabelRole:
+        if (rec->type == TransactionRecord::GoldRushPosStake || rec->type == TransactionRecord::GoldRushPowClaim) {
+            return formatGoldRushToAddress(rec, false);
+        }
         return walletModel->getAddressTableModel()->labelForAddress(QString::fromStdString(rec->address));
     case AmountRole:
         return qint64(rec->credit + rec->debit);
@@ -673,7 +690,13 @@ QVariant TransactionTableModel::data(const QModelIndex &index, int role) const
                 details.append(formatTxType(rec));
                 details.append(" ");
             }
-            if(!rec->address.empty()) {
+            if(rec->type == TransactionRecord::GoldRushPosStake || rec->type == TransactionRecord::GoldRushPowClaim) {
+                details.append(formatGoldRushToAddress(rec, true));
+                details.append(" ");
+            } else if(IsQuantumClaimControlLabel(rec->address)) {
+                details.append(formatTxToAddress(rec, true));
+                details.append(" ");
+            } else if(!rec->address.empty()) {
                 if(txLabel.isEmpty())
                     details.append(tr("(no label)") + " ");
                 else {

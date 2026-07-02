@@ -6728,7 +6728,8 @@ bool CWallet::IsPowMiningClosing() const
 
 bool CWallet::EnsurePowPayoutAddress(bilingual_str& error)
 {
-    static constexpr const char* POW_PAYOUT_LABEL{"goldrush-pow"};
+    static constexpr const char* POW_PAYOUT_LABEL{"Quantum PoW Reward Address"};
+    static constexpr const char* LEGACY_POW_PAYOUT_LABEL{"goldrush-pow"};
     std::string restored_payout;
     {
         LOCK(cs_wallet);
@@ -6740,7 +6741,8 @@ bool CWallet::EnsurePowPayoutAddress(bilingual_str& error)
         }
 
         for (const auto& [dest, entry] : m_address_book) {
-            if (entry.IsChange() || entry.GetLabel() != POW_PAYOUT_LABEL) continue;
+            const std::string label = entry.GetLabel();
+            if (entry.IsChange() || (label != POW_PAYOUT_LABEL && label != LEGACY_POW_PAYOUT_LABEL)) continue;
             if (!IsValidDestination(dest) || !IsQuantumMigrationDestination(dest)) continue;
             if (IsMine(dest) == ISMINE_NO) continue;
             restored_payout = EncodeDestination(dest);

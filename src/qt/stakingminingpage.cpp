@@ -372,7 +372,7 @@ void StakingMiningPage::setupUi()
            "<li><b>Choose a staking mode.</b> Stake locally if you want this machine to secure the network with your coins, run a node if you want to stake delegated cold deposits, or delegate to a verified node if you want owner keys offline.</li>"
            "</ol>"
            "<h3>Where transactions appear</h3>"
-           "<p>Legacy-visible Gold Rush participation is recorded through QQSIGNAL and QQSPROOF control transactions. Quantum rewards are tracked by upgraded nodes as quantum shadow-ledger credits and displayed in the wallet as <b>PoS - Quantum Stake</b> or <b>PoW - Quantum Claim</b>.</p>"),
+           "<p>Legacy-visible Gold Rush participation is recorded through QQSIGNAL and QQSPROOF control transactions. Quantum rewards are tracked by upgraded nodes as quantum shadow-ledger credits and displayed in the wallet as <b>Quantum PoS Reward</b> or <b>Quantum PoW Reward</b>.</p>"),
         dashboardBox);
     auto* safetyHelp = makeHelpButton(
         tr("Safety"),
@@ -460,7 +460,7 @@ void StakingMiningPage::setupUi()
            "<li>The wallet must be normally unlocked so it can publish a QQSIGNAL transaction. Staking-only unlock is not enough for this part.</li>"
            "</ul>"
            "<h3>How payouts work</h3>"
-           "<p>Qualified active signalers share the PoS Gold Rush pool. The wallet displays these reward credits as <b>PoS - Quantum Stake</b> and shows the quantum payout address in the transaction list.</p>"
+           "<p>Qualified active signalers share the PoS Gold Rush pool. The wallet displays these reward credits as <b>Quantum PoS Reward</b> and shows the quantum payout address in the transaction list.</p>"
            "<h3>Example</h3>"
            "<p>If your wallet was whitelisted and solves a PoS block, keep staking enabled and unlock with <b>Quantum and Legacy Staking</b>. The wallet publishes the signal and remains in the active signaler set until the activity window expires.</p>"),
         stakingBox);
@@ -577,7 +577,7 @@ void StakingMiningPage::setupUi()
            "<h3>CPU controls</h3>"
            "<p>The default is intentionally conservative: 1 core at 1 percent. Increase cores or percent only if you want this computer to spend more CPU time mining claims.</p>"
            "<h3>What you will see</h3>"
-           "<p>The wallet shows the control transaction fee on the legacy side and the quantum reward as <b>PoW - Quantum Claim</b> when the upgraded ledger credit is accepted.</p>"),
+           "<p>The wallet shows the control transaction fee on the legacy side and the quantum reward as <b>Quantum PoW Reward</b> when the upgraded ledger credit is accepted.</p>"),
         powBox);
     auto* payoutHelp = makeHelpButton(
         tr("Payout"),
