@@ -15,6 +15,7 @@ class PlatformStyle;
 
 QT_BEGIN_NAMESPACE
 class QCheckBox;
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -60,6 +61,8 @@ private Q_SLOTS:
     void onCreateQuantumAddress();
     void onCopyQuantumAddress();
     void onCopyQuantumPubkey();
+    void onCreateSelfStakeAddress();
+    void onCopySelfStakeAddress();
     void onCreateOperatorKey();
     void onCopyOperatorKey();
     void onUseOperatorKeyForDelegation();
@@ -115,12 +118,18 @@ private:
     QPushButton* m_quantum_new{nullptr};
     QPushButton* m_quantum_copy{nullptr};
     QPushButton* m_quantum_pubkey_copy{nullptr};
+    QComboBox* m_selfstake_lock_period{nullptr};
+    QLineEdit* m_selfstake_address{nullptr};
+    QPushButton* m_selfstake_new{nullptr};
+    QPushButton* m_selfstake_copy{nullptr};
+    QLabel* m_selfstake_status{nullptr};
     QLineEdit* m_operator_address{nullptr};
     QLineEdit* m_operator_pubkey{nullptr};
     QPushButton* m_operator_new{nullptr};
     QPushButton* m_operator_copy{nullptr};
     QPushButton* m_operator_use_for_delegation{nullptr};
     QLabel* m_operator_status{nullptr};
+    QComboBox* m_coldstake_lock_period{nullptr};
     QLineEdit* m_coldstake_staker_pubkey{nullptr};
     QLineEdit* m_coldstake_address{nullptr};
     QPushButton* m_coldstake_new{nullptr};

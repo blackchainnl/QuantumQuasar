@@ -299,6 +299,9 @@ public:
     //! Create a wallet-backed Blackcoin ML-DSA migration address.
     virtual util::Result<WalletQuantumAddressInfo> createQuantumAddress(const std::string& label) = 0;
 
+    //! Create a wallet-backed tiered Blackcoin ML-DSA staking address.
+    virtual util::Result<WalletQuantumAddressInfo> createQuantumStakeAddress(const std::string& label, uint16_t unbonding_blocks) = 0;
+
     //! List wallet-backed Blackcoin ML-DSA migration addresses.
     virtual std::vector<WalletQuantumAddressInfo> listQuantumAddresses() = 0;
 
@@ -306,7 +309,7 @@ public:
     virtual std::vector<WalletQuantumColdStakeInfo> listQuantumColdStakeDelegations() = 0;
 
     //! Create a Quantum Cold-Stake deposit address using a hex ML-DSA staking public key.
-    virtual util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label) = 0;
+    virtual util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label, uint16_t unbonding_blocks) = 0;
 
     //! Read wallet migration progress and deadline state.
     virtual WalletMigrationStatus getMigrationStatus() = 0;
@@ -510,6 +513,9 @@ struct WalletQuantumAddressInfo
     std::string public_key;
     int64_t creation_time{0};
     bool encrypted{false};
+    bool tiered{false};
+    uint16_t unbonding_blocks{0};
+    uint32_t unlock_height{0};
 };
 
 //! Wallet-known Quantum Cold-Stake delegation metadata.
@@ -520,6 +526,9 @@ struct WalletQuantumColdStakeInfo
     int64_t creation_time{0};
     bool has_staker_key{false};
     bool has_owner_key{false};
+    bool tiered{false};
+    uint16_t unbonding_blocks{0};
+    uint32_t unlock_height{0};
 };
 
 //! Wallet migration progress and deadline state.

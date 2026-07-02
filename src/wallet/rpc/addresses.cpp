@@ -5,6 +5,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <core_io.h>
+#include <consensus/quantum_witness.h>
 #include <crypto/mldsa.h>
 #include <interfaces/chain.h>
 #include <key_io.h>
@@ -62,6 +63,12 @@ static UniValue QuantumColdStakeInfoToJSON(const QuantumColdStakeDelegationInfo&
     result.pushKV("has_owner_key", info.has_owner_key);
     result.pushKV("can_stake", info.has_staker_key);
     result.pushKV("can_owner_spend", info.has_owner_key);
+    result.pushKV("tiered", info.tiered);
+    if (info.tiered) {
+        result.pushKV("tier_state", info.unlock_height == 0 ? "bonded" : "unbonding");
+        result.pushKV("unbonding_blocks", info.unbonding_blocks);
+        result.pushKV("unlock_height", info.unlock_height);
+    }
     return result;
 }
 
@@ -291,6 +298,7 @@ RPCHelpMan getnewquantumcoldstakingaddress()
                     {"options", RPCArg::Type::OBJ, RPCArg::Default{UniValue::VOBJ}, "Policy preflight options for the intended delegation.", {
                         {"delegation_amount", RPCArg::Type::AMOUNT, RPCArg::Optional::OMITTED, "Intended new delegation amount. When set, the wallet checks the per-pool cap before generating the address."},
                         {"enforce_pool_cap", RPCArg::Type::BOOL, RPCArg::Default{true}, "Refuse over-cap address creation only when an under-cap alternative exists; otherwise allow bootstrap and report the over-cap projection."},
+                        {"unbonding_blocks", RPCArg::Type::NUM, RPCArg::Default{0}, "Bonded unbonding delay in blocks. Use 0 for liquid cold staking, 9450 for 7-day full-weight vault cold staking."},
                     }},
                 },
                 RPCResult{
@@ -308,6 +316,10 @@ RPCHelpMan getnewquantumcoldstakingaddress()
                         {RPCResult::Type::BOOL, "has_owner_key", "Whether this wallet has the owner key."},
                         {RPCResult::Type::BOOL, "can_stake", "Whether this wallet can use the staker coinstake branch."},
                         {RPCResult::Type::BOOL, "can_owner_spend", "Whether this wallet can use the owner spend branch."},
+                        {RPCResult::Type::BOOL, "tiered", "Whether this QCS address uses the tiered staking witness program."},
+                        {RPCResult::Type::STR, "tier_state", /*optional=*/true, "Tier state."},
+                        {RPCResult::Type::NUM, "unbonding_blocks", /*optional=*/true, "Bonded unbonding delay in blocks."},
+                        {RPCResult::Type::NUM, "unlock_height", /*optional=*/true, "Unlock height for unbonding outputs."},
                         {RPCResult::Type::OBJ, "pool_cap_preflight", /*optional=*/true, "per-pool wallet/policy cap preflight result.", {
                             {RPCResult::Type::STR_AMOUNT, "delegation_amount", "Prospective delegation amount checked."},
                             {RPCResult::Type::STR_AMOUNT, "total_coldstake", "Current total cold-stake UTXO value."},
@@ -337,6 +349,10 @@ RPCHelpMan getnewquantumcoldstakingaddress()
     bool have_pool_preflight{false};
     UniValue pool_preflight(UniValue::VOBJ);
     const UniValue options = request.params[2].isNull() ? UniValue(UniValue::VOBJ) : request.params[2].get_obj();
+    const int unbonding_blocks_arg = options.exists("unbonding_blocks") ? options["unbonding_blocks"].getInt<int>() : 0;
+    if (unbonding_blocks_arg < 0 || unbonding_blocks_arg > std::numeric_limits<uint16_t>::max()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("unbonding_blocks must be between 0 and %u", std::numeric_limits<uint16_t>::max()));
+    }
     if (options.exists("delegation_amount")) {
         const CAmount delegation_amount = AmountFromValue(options["delegation_amount"]);
         if (delegation_amount <= 0) {
@@ -376,7 +392,7 @@ RPCHelpMan getnewquantumcoldstakingaddress()
     const auto owner_info = pwallet->GetQuantumKeyInfo(*owner_dest);
     CHECK_NONFATAL(owner_info.has_value());
 
-    auto qcs_dest = pwallet->AddQuantumColdStakeDelegation(staking_pubkey, owner_info->public_key, label, GetTime());
+    auto qcs_dest = pwallet->AddQuantumColdStakeDelegation(staking_pubkey, owner_info->public_key, label, GetTime(), /*record_as_receive=*/true, static_cast<uint16_t>(unbonding_blocks_arg), /*tiered=*/unbonding_blocks_arg > 0);
     if (!qcs_dest) {
         throw JSONRPCError(RPC_WALLET_ERROR, util::ErrorString(qcs_dest).original);
     }
@@ -475,6 +491,10 @@ RPCHelpMan listquantumcoldstakingdelegations()
                             {RPCResult::Type::BOOL, "has_owner_key", "Whether this wallet has the owner key."},
                             {RPCResult::Type::BOOL, "can_stake", "Whether this wallet can use the staker coinstake branch."},
                             {RPCResult::Type::BOOL, "can_owner_spend", "Whether this wallet can use the owner spend branch."},
+                            {RPCResult::Type::BOOL, "tiered", "Whether this QCS address uses the tiered staking witness program."},
+                            {RPCResult::Type::STR, "tier_state", /*optional=*/true, "Tier state."},
+                            {RPCResult::Type::NUM, "unbonding_blocks", /*optional=*/true, "Bonded unbonding delay in blocks."},
+                            {RPCResult::Type::NUM, "unlock_height", /*optional=*/true, "Unlock height for unbonding outputs."},
                             {RPCResult::Type::STR, "label", "Address-book label."},
                         }},
                     }},
