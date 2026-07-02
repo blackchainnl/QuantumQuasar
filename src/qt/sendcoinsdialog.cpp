@@ -88,13 +88,13 @@ SendCoinsDialog::SendCoinsDialog(const PlatformStyle *_platformStyle, QWidget *p
     spend_source_layout->setSpacing(8);
     auto* spend_source_label = new QLabel(tr("Spend from:"), this);
     m_spend_source_combo = new QComboBox(this);
-    m_spend_source_combo->addItem(tr("Legacy wallet funds"), SPEND_SOURCE_LEGACY);
-    m_spend_source_combo->addItem(tr("Quantum wallet funds"), SPEND_SOURCE_QUANTUM);
+    m_spend_source_combo->addItem(tr("Legacy BLK funds"), SPEND_SOURCE_LEGACY);
+    m_spend_source_combo->addItem(tr("Quantum BLK funds"), SPEND_SOURCE_QUANTUM);
     m_spend_source_combo->setToolTip(tr("Choose which wallet fund family may be selected as transaction inputs."));
     m_spend_source_combo->setMinimumContentsLength(22);
     m_spend_source_balance_label = new QLabel(this);
     m_spend_source_balance_label->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
-    m_spend_source_warning_label = new QLabel(tr("Quantum funds can only be sent to quantum addresses."), this);
+    m_spend_source_warning_label = new QLabel(tr("Quantum sends require quantum addresses; unmoved Gold Rush rewards are excluded."), this);
     m_spend_source_warning_label->setStyleSheet(QStringLiteral("QLabel{color:#aa0000;}"));
     spend_source_layout->addWidget(spend_source_label);
     spend_source_layout->addWidget(m_spend_source_combo);
@@ -277,6 +277,11 @@ bool SendCoinsDialog::PrepareSendText(QString& question_string, QString& informa
         that the displayed transaction details represent the transaction the user intends to create. */
     question_string.append(tr("Do you want to create this transaction?"));
     question_string.append("<br /><span style='font-size:10pt;'>");
+    const bool quantum_source = m_spend_source_combo && m_spend_source_combo->currentData().toInt() == SPEND_SOURCE_QUANTUM;
+    question_string.append(quantum_source
+        ? tr("<b>Spending from:</b> Quantum BLK funds. Outputs and change must stay quantum.")
+        : tr("<b>Spending from:</b> Legacy BLK funds."));
+    question_string.append("<br />");
     if (model->wallet().privateKeysDisabled() && !model->wallet().hasExternalSigner()) {
         /*: Text to inform a user attempting to create a transaction of their current options. At this stage,
             a user can only create a PSBT. This string is displayed when private keys are disabled and an external
@@ -654,9 +659,9 @@ void SendCoinsDialog::setBalance(const interfaces::WalletBalances& balances)
             ui->labelBalanceName->setText(tr("Watch-only balance:"));
         } else if (m_spend_source_combo && m_spend_source_combo->currentData().toInt() == SPEND_SOURCE_QUANTUM) {
             balance = balances.quantum_balance;
-            ui->labelBalanceName->setText(tr("Selected balance:"));
+            ui->labelBalanceName->setText(tr("Selected quantum balance:"));
         } else {
-            ui->labelBalanceName->setText(tr("Selected balance:"));
+            ui->labelBalanceName->setText(tr("Selected legacy balance:"));
         }
         ui->labelBalance->setText(BitcoinUnits::formatWithUnit(model->getOptionsModel()->getDisplayUnit(), balance));
         updateSpendSourceBalance();
