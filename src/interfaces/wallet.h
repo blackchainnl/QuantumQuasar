@@ -499,6 +499,7 @@ struct WalletPowMiningInfo
     int pos_active_signalers{0};     //!< active signal-once participants still inside the 14-day window
     int pos_claim_count{0};          //!< number of accepted PoS Gold Rush payouts
     int pos_last_payout_height{0};   //!< last accepted PoS Gold Rush payout height, or 0 if none
+    bool payout_address_available{true}; //!< false when the wallet lock is busy and the cached address was not read
 };
 
 //! Wallet-backed Blackcoin ML-DSA migration address metadata.
@@ -524,6 +525,7 @@ struct WalletQuantumColdStakeInfo
 //! Wallet migration progress and deadline state.
 struct WalletMigrationStatus
 {
+    bool available{true};
     std::string phase{"unknown"};
     int64_t median_time{0};
     int64_t deadline_mtp{0};

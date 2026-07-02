@@ -590,7 +590,9 @@ void StakingMiningPage::updateStatus()
             if (!m_pow_percent->hasFocus() && info.cpu_percent > 0) m_pow_percent->setValue(info.cpu_percent);
         }
     }
-    m_pow_payout->setText(QString::fromStdString(info.payout_address));
+    if (info.payout_address_available || !info.payout_address.empty()) {
+        m_pow_payout->setText(QString::fromStdString(info.payout_address));
+    }
 
     m_goldrush_badge->setText(info.epoch_active
         ? tr("Gold Rush: ACTIVE (%1 blocks remaining)").arg(info.blocks_remaining)
@@ -625,20 +627,24 @@ void StakingMiningPage::updateStatus()
 
     // Quantum migration
     const interfaces::WalletMigrationStatus migration = w.getMigrationStatus();
-    m_migration_phase->setText(QString::fromStdString(migration.phase));
-    m_migration_deadline->setText(migration.deadline_scheduled
-        ? tr("%1 blocks estimated").arg(QString::number(migration.blocks_until_deadline_est))
-        : tr("Not scheduled"));
-    m_migration_legacy_amount->setText(tr("%1 across %2 inputs")
-        .arg(formatBLK(migration.eligible_legacy_amount))
-        .arg(QString::number(migration.eligible_legacy_inputs)));
-    m_migration_quantum_amount->setText(tr("%1 across %2 outputs")
-        .arg(formatBLK(migration.migrated_quantum_amount))
-        .arg(QString::number(migration.migrated_quantum_outputs)));
-    m_migration_goldrush_amount->setText(tr("%1 across %2 outputs")
-        .arg(formatBLK(migration.goldrush_reward_amount_needing_move))
-        .arg(QString::number(migration.goldrush_reward_outputs_needing_move)));
-    m_migration_advice->setText(QString::fromStdString(migration.advice));
+    if (migration.available) {
+        m_migration_phase->setText(QString::fromStdString(migration.phase));
+        m_migration_deadline->setText(migration.deadline_scheduled
+            ? tr("%1 blocks estimated").arg(QString::number(migration.blocks_until_deadline_est))
+            : tr("Not scheduled"));
+        m_migration_legacy_amount->setText(tr("%1 across %2 inputs")
+            .arg(formatBLK(migration.eligible_legacy_amount))
+            .arg(QString::number(migration.eligible_legacy_inputs)));
+        m_migration_quantum_amount->setText(tr("%1 across %2 outputs")
+            .arg(formatBLK(migration.migrated_quantum_amount))
+            .arg(QString::number(migration.migrated_quantum_outputs)));
+        m_migration_goldrush_amount->setText(tr("%1 across %2 outputs")
+            .arg(formatBLK(migration.goldrush_reward_amount_needing_move))
+            .arg(QString::number(migration.goldrush_reward_outputs_needing_move)));
+        m_migration_advice->setText(QString::fromStdString(migration.advice));
+    } else {
+        m_migration_advice->setText(tr("Wallet is busy; migration status will refresh shortly."));
+    }
 
     const std::vector<interfaces::WalletQuantumAddressInfo> quantum_addresses = w.listQuantumAddresses();
     const std::vector<interfaces::WalletQuantumColdStakeInfo> coldstake_delegations = w.listQuantumColdStakeDelegations();

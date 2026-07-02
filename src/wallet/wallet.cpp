@@ -6359,6 +6359,11 @@ bool IsShadowPowMiningTarget(const CScript& script)
            !IsEUTXOScript(script);
 }
 
+bool IsShadowPowClaimConflict(const bilingual_str& error)
+{
+    return error.original.find("shadow-proof-mempool-conflict") != std::string::npos;
+}
+
 bool SelectShadowPowMiningTarget(CWallet& wallet, const CScript& quantum_payout_script, CScript& target, CTxDestination& dest, bilingual_str& error)
 {
     AssertLockHeld(wallet.cs_wallet);
@@ -6546,6 +6551,7 @@ bool CWallet::SubmitShadowPowClaim(const CScript& target, const CTxDestination& 
 
     CMutableTransaction claim_tx;
     CAmount fee{0};
+    std::map<COutPoint, Coin> coins;
     {
         LOCK(cs_wallet);
         if (IsLocked()) {
@@ -6582,15 +6588,11 @@ bool CWallet::SubmitShadowPowClaim(const CScript& target, const CTxDestination& 
             }
 
             candidate.vout[0].nValue = candidate_change;
-            std::map<int, bilingual_str> input_errors;
-            if (!SignTransaction(candidate, input_errors)) {
-                if (!input_errors.empty()) {
-                    error = strprintf(_("Signing Gold Rush PoW claim failed: %s"), input_errors.begin()->second.original);
-                } else {
-                    error = _("Signing Gold Rush PoW claim failed.");
-                }
-                return false;
-            }
+            const auto tx_it = mapWallet.find(output.outpoint.hash);
+            if (tx_it == mapWallet.end() || output.outpoint.n >= tx_it->second.tx->vout.size()) continue;
+            const CWalletTx& wtx = tx_it->second;
+            const int prev_height = wtx.state<TxStateConfirmed>() ? wtx.state<TxStateConfirmed>()->confirmed_block_height : 0;
+            coins.emplace(output.outpoint, Coin(output.txout, prev_height, wtx.IsCoinBase(), wtx.IsCoinStake(), wtx.nTimeSmart));
 
             claim_tx = std::move(candidate);
             fee = candidate_fee;
@@ -6600,6 +6602,16 @@ bool CWallet::SubmitShadowPowClaim(const CScript& target, const CTxDestination& 
 
     if (claim_tx.vin.empty()) {
         error = _("No spendable non-dust UTXO found for the Gold Rush PoW claim address.");
+        return false;
+    }
+
+    std::map<int, bilingual_str> input_errors;
+    if (!SignTransaction(claim_tx, coins, SIGHASH_DEFAULT, input_errors)) {
+        if (!input_errors.empty()) {
+            error = strprintf(_("Signing Gold Rush PoW claim failed: %s"), input_errors.begin()->second.original);
+        } else {
+            error = _("Signing Gold Rush PoW claim failed.");
+        }
         return false;
     }
 
@@ -6777,9 +6789,27 @@ void CWallet::ThreadShadowPoWMiner(int worker_id)
                     if (!SleepPowMiner(*this, std::chrono::seconds{1})) break;
                 }
             } else {
+                const bool conflict = IsShadowPowClaimConflict(error);
                 WalletLogPrintf("Gold Rush PoW worker %d could not submit claim: %s\n", worker_id, error.original);
-                LOCK(m_pow_miner_mutex);
-                m_pow_claim_inflight = false;
+                if (conflict) {
+                    while (!IsPowMiningClosing() && m_pow_mining_enabled.load()) {
+                        bool tip_changed = false;
+                        {
+                            ChainstateManager& chainman = chain().chainman();
+                            LOCK(cs_main);
+                            const CBlockIndex* tip = chainman.ActiveChain().Tip();
+                            tip_changed = tip && tip->GetBlockHash() != tip_hash;
+                        }
+                        if (tip_changed) break;
+                        if (!SleepPowMiner(*this, std::chrono::seconds{1})) break;
+                    }
+                } else {
+                    {
+                        LOCK(m_pow_miner_mutex);
+                        m_pow_claim_inflight = false;
+                    }
+                    SleepPowMiner(*this, std::chrono::seconds{2});
+                }
             }
         }
 
