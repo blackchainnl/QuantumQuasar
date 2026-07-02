@@ -15,11 +15,14 @@
 #include <wallet/wallet.h>
 
 #include <algorithm>
+#include <array>
+#include <limits>
 #include <thread>
 
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QComboBox>
 #include <QFrame>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -34,8 +37,40 @@
 #include <QSpinBox>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QVariant>
 
 namespace {
+constexpr uint16_t OPERATOR_COMMITMENT_BLOCKS = 40500;
+
+struct StakeLockPreset
+{
+    const char* label;
+    uint16_t blocks;
+};
+
+constexpr std::array<StakeLockPreset, 6> STAKE_LOCK_PRESETS{{
+    {"Liquid - no lock (0.25x)", 0},
+    {"1 day (0.5335x)", 1350},
+    {"2 days (0.6509x)", 2700},
+    {"3.5 days (0.7803x)", 4725},
+    {"5 days (0.8839x)", 6750},
+    {"7 days full weight (1.00x)", 9450},
+}};
+
+void populateStakeLockCombo(QComboBox* combo)
+{
+    for (const StakeLockPreset& preset : STAKE_LOCK_PRESETS) {
+        combo->addItem(QObject::tr(preset.label), QVariant::fromValue(static_cast<int>(preset.blocks)));
+    }
+}
+
+uint16_t selectedStakeLockBlocks(const QComboBox* combo)
+{
+    if (!combo) return 0;
+    const int blocks = combo->currentData().toInt();
+    return static_cast<uint16_t>(std::clamp(blocks, 0, int{std::numeric_limits<uint16_t>::max()}));
+}
+
 QString formatBLK(CAmount amount)
 {
     // Light-touch formatter (8 decimals); the page is informational, not a money entry surface.
@@ -67,6 +102,8 @@ StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget
     connect(m_quantum_new, &QPushButton::clicked, this, &StakingMiningPage::onCreateQuantumAddress);
     connect(m_quantum_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopyQuantumAddress);
     connect(m_quantum_pubkey_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopyQuantumPubkey);
+    connect(m_selfstake_new, &QPushButton::clicked, this, &StakingMiningPage::onCreateSelfStakeAddress);
+    connect(m_selfstake_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopySelfStakeAddress);
     connect(m_operator_new, &QPushButton::clicked, this, &StakingMiningPage::onCreateOperatorKey);
     connect(m_operator_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopyOperatorKey);
     connect(m_operator_use_for_delegation, &QPushButton::clicked, this, &StakingMiningPage::onUseOperatorKeyForDelegation);
@@ -225,6 +262,25 @@ void StakingMiningPage::setupUi()
     auto* coldstakeBox = new QGroupBox(tr("Quantum cold staking"), this);
     auto* cgrid = new QGridLayout(coldstakeBox);
 
+    auto* selfStakeHeading = new QLabel(tr("<b>Stake your own quantum coins</b>"), coldstakeBox);
+    selfStakeHeading->setTextFormat(Qt::RichText);
+    m_selfstake_lock_period = new QComboBox(coldstakeBox);
+    m_selfstake_lock_period->setObjectName(QStringLiteral("selfStakeLockPeriod"));
+    populateStakeLockCombo(m_selfstake_lock_period);
+    m_selfstake_lock_period->setToolTip(tr("Creates a tiered quantum staking address. Longer lock periods increase staking weight and must unbond before ordinary spending."));
+    m_selfstake_address = new QLineEdit(coldstakeBox);
+    m_selfstake_address->setObjectName(QStringLiteral("selfStakeAddress"));
+    configureLineEdit(m_selfstake_address);
+    m_selfstake_address->setReadOnly(true);
+    m_selfstake_address->setToolTip(tr("Last wallet-backed tiered quantum staking address created by this wallet."));
+    m_selfstake_new = new QPushButton(tr("Create staking address"), coldstakeBox);
+    m_selfstake_new->setObjectName(QStringLiteral("newSelfStakeAddress"));
+    m_selfstake_copy = new QPushButton(tr("Copy"), coldstakeBox);
+    m_selfstake_copy->setObjectName(QStringLiteral("selfStakeCopy"));
+    m_selfstake_status = new QLabel(QStringLiteral("-"), coldstakeBox);
+    m_selfstake_status->setObjectName(QStringLiteral("selfStakeStatus"));
+    m_selfstake_status->setWordWrap(true);
+
     auto* operatorHeading = new QLabel(tr("<b>Operate a cold-staking node</b>"), coldstakeBox);
     operatorHeading->setTextFormat(Qt::RichText);
     m_operator_address = new QLineEdit(coldstakeBox);
@@ -237,18 +293,22 @@ void StakingMiningPage::setupUi()
     configureLineEdit(m_operator_pubkey);
     m_operator_pubkey->setReadOnly(true);
     m_operator_pubkey->setToolTip(tr("Public ML-DSA staking key to give delegators. Keep the wallet online to stake for delegated cold deposits."));
-    m_operator_new = new QPushButton(tr("Create operator staking key"), coldstakeBox);
+    m_operator_new = new QPushButton(tr("Create 30-day operator bond key"), coldstakeBox);
     m_operator_new->setObjectName(QStringLiteral("newColdstakeOperatorKey"));
     m_operator_copy = new QPushButton(tr("Copy operator key"), coldstakeBox);
     m_operator_copy->setObjectName(QStringLiteral("coldstakeOperatorCopy"));
     m_operator_use_for_delegation = new QPushButton(tr("Use for delegation"), coldstakeBox);
     m_operator_use_for_delegation->setObjectName(QStringLiteral("coldstakeOperatorUseForDelegation"));
-    m_operator_status = new QLabel(tr("No operator key selected"), coldstakeBox);
+    m_operator_status = new QLabel(tr("No operator key selected. Operators must fund a 30-day bonded staking address before delegators can verify them."), coldstakeBox);
     m_operator_status->setObjectName(QStringLiteral("coldstakeOperatorStatus"));
     m_operator_status->setWordWrap(true);
 
     auto* delegateHeading = new QLabel(tr("<b>Delegate coins to an operator</b>"), coldstakeBox);
     delegateHeading->setTextFormat(Qt::RichText);
+    m_coldstake_lock_period = new QComboBox(coldstakeBox);
+    m_coldstake_lock_period->setObjectName(QStringLiteral("coldstakeLockPeriod"));
+    populateStakeLockCombo(m_coldstake_lock_period);
+    m_coldstake_lock_period->setToolTip(tr("Creates a tiered cold-stake deposit address when a non-liquid lock period is selected."));
     m_coldstake_count = new QLabel(QStringLiteral("0"), coldstakeBox);
     m_coldstake_count->setObjectName(QStringLiteral("quantumColdstakeCount"));
     m_coldstake_staker_pubkey = new QLineEdit(coldstakeBox);
@@ -270,6 +330,14 @@ void StakingMiningPage::setupUi()
     m_coldstake_status->setWordWrap(true);
 
     r = 0;
+    cgrid->addWidget(selfStakeHeading, r++, 0, 1, 4);
+    cgrid->addWidget(new QLabel(tr("Lock period:"), coldstakeBox), r, 0);
+    cgrid->addWidget(m_selfstake_lock_period, r, 1, 1, 2);
+    cgrid->addWidget(m_selfstake_new, r++, 3);
+    cgrid->addWidget(new QLabel(tr("Staking address:"), coldstakeBox), r, 0);
+    cgrid->addWidget(m_selfstake_address, r, 1, 1, 2);
+    cgrid->addWidget(m_selfstake_copy, r++, 3);
+    cgrid->addWidget(m_selfstake_status, r++, 0, 1, 4);
     cgrid->addWidget(operatorHeading, r++, 0, 1, 4);
     cgrid->addWidget(new QLabel(tr("Operator address:"), coldstakeBox), r, 0);
     cgrid->addWidget(m_operator_address, r, 1, 1, 2);
@@ -282,6 +350,8 @@ void StakingMiningPage::setupUi()
     cgrid->addWidget(delegateHeading, r++, 0, 1, 4);
     cgrid->addWidget(new QLabel(tr("Delegations:"), coldstakeBox), r, 0);
     cgrid->addWidget(m_coldstake_count, r++, 1);
+    cgrid->addWidget(new QLabel(tr("Lock period:"), coldstakeBox), r, 0);
+    cgrid->addWidget(m_coldstake_lock_period, r++, 1, 1, 3);
     cgrid->addWidget(new QLabel(tr("Operator public key:"), coldstakeBox), r, 0);
     cgrid->addWidget(m_coldstake_staker_pubkey, r++, 1, 1, 3);
     cgrid->addWidget(new QLabel(tr("Delegation address:"), coldstakeBox), r, 0);
@@ -581,13 +651,40 @@ void StakingMiningPage::onCopyQuantumPubkey()
     }
 }
 
+void StakingMiningPage::onCreateSelfStakeAddress()
+{
+    if (!m_wallet_model) return;
+    WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
+    if (!ctx.isValid()) return;
+
+    const uint16_t unbonding_blocks = selectedStakeLockBlocks(m_selfstake_lock_period);
+    auto result = m_wallet_model->wallet().createQuantumStakeAddress("quantum-stake", unbonding_blocks);
+    if (!result) {
+        const QString msg = QString::fromStdString(util::ErrorString(result).original);
+        m_selfstake_status->setText(msg);
+        QMessageBox::warning(this, tr("Quantum staking"), msg);
+        return;
+    }
+    m_selfstake_address->setText(QString::fromStdString(result->address));
+    m_selfstake_status->setText(tr("Tiered staking address created with %1 bonded blocks.").arg(result->unbonding_blocks));
+    QApplication::clipboard()->setText(m_selfstake_address->text());
+    updateStatus();
+}
+
+void StakingMiningPage::onCopySelfStakeAddress()
+{
+    if (m_selfstake_address && !m_selfstake_address->text().isEmpty()) {
+        QApplication::clipboard()->setText(m_selfstake_address->text());
+    }
+}
+
 void StakingMiningPage::onCreateOperatorKey()
 {
     if (!m_wallet_model) return;
     WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
     if (!ctx.isValid()) return;
 
-    auto result = m_wallet_model->wallet().createQuantumAddress("coldstake-operator");
+    auto result = m_wallet_model->wallet().createQuantumStakeAddress("coldstake-operator", OPERATOR_COMMITMENT_BLOCKS);
     if (!result) {
         const QString msg = QString::fromStdString(util::ErrorString(result).original);
         m_operator_status->setText(msg);
@@ -596,7 +693,7 @@ void StakingMiningPage::onCreateOperatorKey()
     }
     m_operator_address->setText(QString::fromStdString(result->address));
     m_operator_pubkey->setText(QString::fromStdString(result->public_key));
-    m_operator_status->setText(tr("Operator staking key ready"));
+    m_operator_status->setText(tr("30-day operator bond key ready. Fund this address so delegators can verify your operator commitment."));
     QApplication::clipboard()->setText(m_operator_pubkey->text());
     updateStatus();
 }
@@ -622,7 +719,8 @@ void StakingMiningPage::onCreateColdStakeAddress()
     if (!ctx.isValid()) return;
 
     const QString staking_pubkey = m_coldstake_staker_pubkey->text().trimmed();
-    auto result = m_wallet_model->wallet().createQuantumColdStakeAddress(staking_pubkey.toStdString(), "coldstake-gui");
+    const uint16_t unbonding_blocks = selectedStakeLockBlocks(m_coldstake_lock_period);
+    auto result = m_wallet_model->wallet().createQuantumColdStakeAddress(staking_pubkey.toStdString(), "coldstake-gui", unbonding_blocks);
     if (!result) {
         const QString msg = QString::fromStdString(util::ErrorString(result).original);
         m_coldstake_status->setText(msg);
@@ -631,8 +729,8 @@ void StakingMiningPage::onCreateColdStakeAddress()
     }
     m_coldstake_address->setText(QString::fromStdString(result->address));
     m_coldstake_status->setText(result->has_staker_key
-        ? tr("Cold-stake address created. This wallet can stake and owner-spend this delegation.")
-        : tr("Cold-stake address created. This wallet holds the owner key."));
+        ? tr("Cold-stake address created with %1 bonded blocks. This wallet can stake and owner-spend this delegation.").arg(result->unbonding_blocks)
+        : tr("Cold-stake address created with %1 bonded blocks. This wallet holds the owner key.").arg(result->unbonding_blocks));
     QApplication::clipboard()->setText(m_coldstake_address->text());
     updateStatus();
 }
@@ -748,16 +846,25 @@ void StakingMiningPage::updateStatus()
         m_quantum_address->setText(QString::fromStdString(quantum_addresses.back().address));
         m_quantum_pubkey->setText(QString::fromStdString(quantum_addresses.back().public_key));
     }
+    if (m_selfstake_address->text().isEmpty()) {
+        const auto selfstake_it = std::find_if(quantum_addresses.begin(), quantum_addresses.end(), [](const interfaces::WalletQuantumAddressInfo& info) {
+            return info.tiered && info.label == "quantum-stake";
+        });
+        if (selfstake_it != quantum_addresses.end()) {
+            m_selfstake_address->setText(QString::fromStdString(selfstake_it->address));
+            m_selfstake_status->setText(tr("Tiered staking address ready with %1 bonded blocks.").arg(selfstake_it->unbonding_blocks));
+        }
+    }
     if (m_operator_pubkey->text().isEmpty()) {
         const auto operator_it = std::find_if(quantum_addresses.begin(), quantum_addresses.end(), [](const interfaces::WalletQuantumAddressInfo& info) {
-            return info.label == "coldstake-operator";
+            return info.tiered && info.label == "coldstake-operator" && info.unbonding_blocks >= OPERATOR_COMMITMENT_BLOCKS;
         });
         if (operator_it != quantum_addresses.end()) {
             m_operator_address->setText(QString::fromStdString(operator_it->address));
             m_operator_pubkey->setText(QString::fromStdString(operator_it->public_key));
-            m_operator_status->setText(tr("Operator staking key ready"));
+            m_operator_status->setText(tr("30-day operator bond key ready. Fund this address so delegators can verify your operator commitment."));
         } else {
-            m_operator_status->setText(tr("No operator key selected"));
+            m_operator_status->setText(tr("No operator key selected. Operators must fund a 30-day bonded staking address before delegators can verify them."));
         }
     }
     if (m_coldstake_address->text().isEmpty() && !coldstake_delegations.empty()) {
@@ -804,9 +911,11 @@ void StakingMiningPage::resetStatusForNoWallet()
     m_coldstake_count->setText(QStringLiteral("0"));
     m_quantum_address->clear();
     m_quantum_pubkey->clear();
+    m_selfstake_address->clear();
+    m_selfstake_status->setText(QStringLiteral("-"));
     m_operator_address->clear();
     m_operator_pubkey->clear();
-    m_operator_status->setText(tr("No operator key selected"));
+    m_operator_status->setText(tr("No operator key selected. Operators must fund a 30-day bonded staking address before delegators can verify them."));
     m_coldstake_staker_pubkey->clear();
     m_coldstake_address->clear();
     m_coldstake_status->setText(QStringLiteral("-"));
@@ -842,9 +951,13 @@ void StakingMiningPage::refreshControlsEnabled()
     m_quantum_new->setEnabled(can_create_quantum);
     m_quantum_copy->setEnabled(m_quantum_address && !m_quantum_address->text().isEmpty());
     m_quantum_pubkey_copy->setEnabled(m_quantum_pubkey && !m_quantum_pubkey->text().isEmpty());
+    m_selfstake_lock_period->setEnabled(can_create_quantum);
+    m_selfstake_new->setEnabled(can_create_quantum);
+    m_selfstake_copy->setEnabled(m_selfstake_address && !m_selfstake_address->text().isEmpty());
     m_operator_new->setEnabled(can_create_quantum);
     m_operator_copy->setEnabled(m_operator_pubkey && !m_operator_pubkey->text().isEmpty());
     m_operator_use_for_delegation->setEnabled(m_operator_pubkey && !m_operator_pubkey->text().isEmpty());
+    m_coldstake_lock_period->setEnabled(can_create_quantum);
     m_coldstake_new->setEnabled(can_create_quantum && m_coldstake_staker_pubkey && !m_coldstake_staker_pubkey->text().trimmed().isEmpty());
     m_coldstake_copy->setEnabled(m_coldstake_address && !m_coldstake_address->text().isEmpty());
     m_donation_enable->setEnabled(has_wallet);

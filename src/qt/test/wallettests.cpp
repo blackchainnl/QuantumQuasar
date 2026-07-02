@@ -321,12 +321,18 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QPushButton* quantum_new = page.findChild<QPushButton*>("newQuantumAddress");
     QPushButton* quantum_copy = page.findChild<QPushButton*>("quantumCopy");
     QPushButton* quantum_pubkey_copy = page.findChild<QPushButton*>("quantumPubkeyCopy");
+    QComboBox* selfstake_lock_period = page.findChild<QComboBox*>("selfStakeLockPeriod");
+    QLineEdit* selfstake_address = page.findChild<QLineEdit*>("selfStakeAddress");
+    QPushButton* selfstake_new = page.findChild<QPushButton*>("newSelfStakeAddress");
+    QPushButton* selfstake_copy = page.findChild<QPushButton*>("selfStakeCopy");
+    QLabel* selfstake_status = page.findChild<QLabel*>("selfStakeStatus");
     QLineEdit* coldstake_operator_address = page.findChild<QLineEdit*>("coldstakeOperatorAddress");
     QLineEdit* coldstake_operator_pubkey = page.findChild<QLineEdit*>("coldstakeOperatorPubkey");
     QPushButton* coldstake_operator_new = page.findChild<QPushButton*>("newColdstakeOperatorKey");
     QPushButton* coldstake_operator_copy = page.findChild<QPushButton*>("coldstakeOperatorCopy");
     QPushButton* coldstake_operator_use = page.findChild<QPushButton*>("coldstakeOperatorUseForDelegation");
     QLabel* coldstake_operator_status = page.findChild<QLabel*>("coldstakeOperatorStatus");
+    QComboBox* coldstake_lock_period = page.findChild<QComboBox*>("coldstakeLockPeriod");
     QLineEdit* coldstake_staker_pubkey = page.findChild<QLineEdit*>("coldstakeStakerPubkey");
     QLineEdit* coldstake_address = page.findChild<QLineEdit*>("coldstakeAddress");
     QPushButton* coldstake_new = page.findChild<QPushButton*>("newColdstakeAddress");
@@ -360,12 +366,18 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(quantum_new);
     QVERIFY(quantum_copy);
     QVERIFY(quantum_pubkey_copy);
+    QVERIFY(selfstake_lock_period);
+    QVERIFY(selfstake_address);
+    QVERIFY(selfstake_new);
+    QVERIFY(selfstake_copy);
+    QVERIFY(selfstake_status);
     QVERIFY(coldstake_operator_address);
     QVERIFY(coldstake_operator_pubkey);
     QVERIFY(coldstake_operator_new);
     QVERIFY(coldstake_operator_copy);
     QVERIFY(coldstake_operator_use);
     QVERIFY(coldstake_operator_status);
+    QVERIFY(coldstake_lock_period);
     QVERIFY(coldstake_staker_pubkey);
     QVERIFY(coldstake_address);
     QVERIFY(coldstake_new);
@@ -393,6 +405,8 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QCOMPARE(quantum_coldstake_count->text(), QString("0"));
     QVERIFY(!quantum_copy->isEnabled());
     QVERIFY(!quantum_pubkey_copy->isEnabled());
+    QVERIFY(selfstake_new->isEnabled());
+    QVERIFY(!selfstake_copy->isEnabled());
     QVERIFY(coldstake_operator_new->isEnabled());
     QVERIFY(!coldstake_operator_copy->isEnabled());
     QVERIFY(!coldstake_operator_use->isEnabled());
@@ -415,6 +429,18 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     quantum_pubkey_copy->click();
     QCOMPARE(QApplication::clipboard()->text(), quantum_pubkey->text());
 
+    selfstake_lock_period->setCurrentIndex(5);
+    selfstake_new->click();
+    qApp->processEvents();
+    const CTxDestination gui_selfstake_dest = DecodeDestination(selfstake_address->text().toStdString());
+    QVERIFY(IsValidDestination(gui_selfstake_dest));
+    QVERIFY(IsQuantumMigrationDestination(gui_selfstake_dest));
+    QVERIFY(selfstake_copy->isEnabled());
+    QVERIFY(selfstake_status->text().contains(QString("9450")));
+
+    selfstake_copy->click();
+    QCOMPARE(QApplication::clipboard()->text(), selfstake_address->text());
+
     coldstake_operator_new->click();
     qApp->processEvents();
     const CTxDestination gui_operator_dest = DecodeDestination(coldstake_operator_address->text().toStdString());
@@ -424,13 +450,14 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QCOMPARE(coldstake_operator_pubkey->text().size(), int{ML_DSA::PUBLICKEY_BYTES * 2});
     QVERIFY(coldstake_operator_copy->isEnabled());
     QVERIFY(coldstake_operator_use->isEnabled());
-    QVERIFY(coldstake_operator_status->text().contains(QString("ready")));
+    QVERIFY(coldstake_operator_status->text().contains(QString("30-day")));
 
     coldstake_operator_copy->click();
     QCOMPARE(QApplication::clipboard()->text(), coldstake_operator_pubkey->text());
     coldstake_operator_use->click();
     QCOMPARE(coldstake_staker_pubkey->text(), coldstake_operator_pubkey->text());
 
+    coldstake_lock_period->setCurrentIndex(5);
     QVERIFY(coldstake_new->isEnabled());
     coldstake_new->click();
     qApp->processEvents();

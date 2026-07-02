@@ -3607,6 +3607,12 @@ std::optional<QuantumColdStakeDelegationInfo> CWallet::GetQuantumColdStakeDelega
     info.creation_time = it->second.creation_time;
     info.has_staker_key = HaveQuantumKeyForProgram(VectorForUint256(info.staker_pubkey_hash));
     info.has_owner_key = HaveQuantumKeyForProgram(VectorForUint256(info.owner_pubkey_hash));
+    QuantumStakeTierProgram tier;
+    if (DecodeQuantumStakeTierProgram(QUANTUM_COLDSTAKE_WITNESS_VERSION, witness_program, tier) && tier.tiered) {
+        info.tiered = true;
+        info.unbonding_blocks = tier.unbonding_blocks;
+        info.unlock_height = tier.unlock_height;
+    }
     return info;
 }
 
@@ -4322,7 +4328,7 @@ util::Result<CTxDestination> CWallet::AddQuantumKey(const std::vector<unsigned c
     return dest;
 }
 
-util::Result<CTxDestination> CWallet::AddQuantumColdStakeDelegation(const std::vector<unsigned char>& staker_pubkey, const std::vector<unsigned char>& owner_pubkey, const std::string& label, int64_t creation_time, bool record_as_receive)
+util::Result<CTxDestination> CWallet::AddQuantumColdStakeDelegation(const std::vector<unsigned char>& staker_pubkey, const std::vector<unsigned char>& owner_pubkey, const std::string& label, int64_t creation_time, bool record_as_receive, uint16_t unbonding_blocks, bool tiered)
 {
     if (staker_pubkey.size() != ML_DSA::PUBLICKEY_BYTES) {
         return util::Error{strprintf(_("Error: staking public key must be %u bytes"), ML_DSA::PUBLICKEY_BYTES)};
@@ -4331,10 +4337,12 @@ util::Result<CTxDestination> CWallet::AddQuantumColdStakeDelegation(const std::v
         return util::Error{strprintf(_("Error: owner public key must be %u bytes"), ML_DSA::PUBLICKEY_BYTES)};
     }
 
-    const std::vector<unsigned char> witness_program = QuantumColdStakeProgramForPubkeys(staker_pubkey, owner_pubkey);
-    const CTxDestination dest = WitnessUnknown{QUANTUM_COLDSTAKE_WITNESS_VERSION, witness_program};
     const uint256 staker_hash = Uint256FromVector(QuantumMigrationProgramForPubkey(staker_pubkey));
     const uint256 owner_hash = Uint256FromVector(QuantumMigrationProgramForPubkey(owner_pubkey));
+    const std::vector<unsigned char> witness_program = tiered
+        ? QuantumTieredColdStakeProgramForKeyHashes(staker_hash, owner_hash, QUANTUM_TIERED_STATE_BONDED, unbonding_blocks, /*unlock_height=*/0)
+        : QuantumColdStakeProgramForPubkeys(staker_pubkey, owner_pubkey);
+    const CTxDestination dest = WitnessUnknown{QUANTUM_COLDSTAKE_WITNESS_VERSION, witness_program};
     const int64_t key_time = creation_time > 0 ? creation_time : GetTime();
 
     bool updated = false;

@@ -10,6 +10,7 @@
 #include <chainparams.h>
 #include <common/args.h>
 #include <consensus/amount.h>
+#include <consensus/quantum_witness.h>
 #include <crypto/mldsa.h>
 #include <interfaces/chain.h>
 #include <interfaces/handler.h>
@@ -88,6 +89,12 @@ WalletQuantumAddressInfo MakeWalletQuantumAddressInfo(const CWallet& wallet, con
     result.public_key = HexStr(info.public_key);
     result.creation_time = info.creation_time;
     result.encrypted = info.encrypted;
+    QuantumStakeTierProgram tier;
+    if (DecodeQuantumStakeTierProgram(QUANTUM_MIGRATION_WITNESS_VERSION, info.witness_program, tier) && tier.tiered) {
+        result.tiered = true;
+        result.unbonding_blocks = tier.unbonding_blocks;
+        result.unlock_height = tier.unlock_height;
+    }
     return result;
 }
 
@@ -102,6 +109,9 @@ WalletQuantumColdStakeInfo MakeWalletQuantumColdStakeInfo(const CWallet& wallet,
     result.creation_time = info.creation_time;
     result.has_staker_key = info.has_staker_key;
     result.has_owner_key = info.has_owner_key;
+    result.tiered = info.tiered;
+    result.unbonding_blocks = info.unbonding_blocks;
+    result.unlock_height = info.unlock_height;
     return result;
 }
 
@@ -666,6 +676,15 @@ public:
         if (!info) return util::Error{_("Error: Created quantum address is not wallet-backed")};
         return MakeWalletQuantumAddressInfo(*m_wallet, *info);
     }
+    util::Result<WalletQuantumAddressInfo> createQuantumStakeAddress(const std::string& label, uint16_t unbonding_blocks) override
+    {
+        auto dest = m_wallet->GetNewTieredQuantumDestination(label, unbonding_blocks);
+        if (!dest) return util::Error{util::ErrorString(dest)};
+        LOCK(m_wallet->cs_wallet);
+        const auto info = m_wallet->GetQuantumKeyInfo(*dest);
+        if (!info) return util::Error{_("Error: Created quantum staking address is not wallet-backed")};
+        return MakeWalletQuantumAddressInfo(*m_wallet, *info);
+    }
     std::vector<WalletQuantumAddressInfo> listQuantumAddresses() override
     {
         std::vector<WalletQuantumAddressInfo> result;
@@ -690,7 +709,7 @@ public:
         }
         return result;
     }
-    util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label) override
+    util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label, uint16_t unbonding_blocks) override
     {
         if (!IsHex(staking_pubkey_hex)) {
             return util::Error{_("Error: staking public key must be hex")};
@@ -708,7 +727,7 @@ public:
         const auto owner_info = m_wallet->GetQuantumKeyInfo(*owner_dest);
         if (!owner_info) return util::Error{_("Error: Created quantum owner address is not wallet-backed")};
 
-        auto qcs_dest = m_wallet->AddQuantumColdStakeDelegation(staking_pubkey, owner_info->public_key, label, GetTime());
+        auto qcs_dest = m_wallet->AddQuantumColdStakeDelegation(staking_pubkey, owner_info->public_key, label, GetTime(), /*record_as_receive=*/true, unbonding_blocks, /*tiered=*/unbonding_blocks > 0);
         if (!qcs_dest) return util::Error{util::ErrorString(qcs_dest)};
 
         const auto qcs_info = m_wallet->GetQuantumColdStakeDelegationInfo(*qcs_dest);

@@ -371,6 +371,9 @@ struct QuantumColdStakeDelegationInfo
     int64_t creation_time{0};
     bool has_staker_key{false};
     bool has_owner_key{false};
+    bool tiered{false};
+    uint16_t unbonding_blocks{0};
+    uint32_t unlock_height{0};
 };
 
 struct RGBContractRecord
@@ -1030,7 +1033,7 @@ public:
     util::Result<CTxDestination> GetNewTieredQuantumDestination(const std::string label, uint16_t unbonding_blocks);
     util::Result<CTxDestination> GetNewQuantumChangeDestination();
     util::Result<CTxDestination> AddQuantumKey(const std::vector<unsigned char>& public_key, const CKeyingMaterial& private_key, const std::string& label, int64_t creation_time, bool record_as_receive = true);
-    util::Result<CTxDestination> AddQuantumColdStakeDelegation(const std::vector<unsigned char>& staker_pubkey, const std::vector<unsigned char>& owner_pubkey, const std::string& label, int64_t creation_time, bool record_as_receive = true);
+    util::Result<CTxDestination> AddQuantumColdStakeDelegation(const std::vector<unsigned char>& staker_pubkey, const std::vector<unsigned char>& owner_pubkey, const std::string& label, int64_t creation_time, bool record_as_receive = true, uint16_t unbonding_blocks = 0, bool tiered = false);
 
     bool LoadQuantumKey(const std::vector<unsigned char>& public_key, const CKeyingMaterial& private_key, int64_t creation_time) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     bool LoadCryptedQuantumKey(const std::vector<unsigned char>& public_key, const std::vector<unsigned char>& crypted_private_key, int64_t creation_time) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
