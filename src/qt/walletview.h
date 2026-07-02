@@ -8,6 +8,7 @@
 #include <consensus/amount.h>
 #include <qt/bitcoinunits.h>
 
+#include <QSize>
 #include <QStackedWidget>
 
 class ClientModel;
@@ -39,6 +40,8 @@ class WalletView : public QStackedWidget
 public:
     explicit WalletView(WalletModel* wallet_model, const PlatformStyle* platformStyle, QWidget* parent);
     ~WalletView();
+
+    QSize minimumSizeHint() const override;
 
     /** Set the client model.
         The client model represents the part of the core that communicates with the P2P network, and is wallet-agnostic.

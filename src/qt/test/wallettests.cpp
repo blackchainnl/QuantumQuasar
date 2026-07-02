@@ -52,6 +52,7 @@
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QTableView>
+#include <QTest>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QTextEdit>
@@ -320,6 +321,12 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QPushButton* quantum_new = page.findChild<QPushButton*>("newQuantumAddress");
     QPushButton* quantum_copy = page.findChild<QPushButton*>("quantumCopy");
     QPushButton* quantum_pubkey_copy = page.findChild<QPushButton*>("quantumPubkeyCopy");
+    QLineEdit* coldstake_operator_address = page.findChild<QLineEdit*>("coldstakeOperatorAddress");
+    QLineEdit* coldstake_operator_pubkey = page.findChild<QLineEdit*>("coldstakeOperatorPubkey");
+    QPushButton* coldstake_operator_new = page.findChild<QPushButton*>("newColdstakeOperatorKey");
+    QPushButton* coldstake_operator_copy = page.findChild<QPushButton*>("coldstakeOperatorCopy");
+    QPushButton* coldstake_operator_use = page.findChild<QPushButton*>("coldstakeOperatorUseForDelegation");
+    QLabel* coldstake_operator_status = page.findChild<QLabel*>("coldstakeOperatorStatus");
     QLineEdit* coldstake_staker_pubkey = page.findChild<QLineEdit*>("coldstakeStakerPubkey");
     QLineEdit* coldstake_address = page.findChild<QLineEdit*>("coldstakeAddress");
     QPushButton* coldstake_new = page.findChild<QPushButton*>("newColdstakeAddress");
@@ -353,6 +360,12 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(quantum_new);
     QVERIFY(quantum_copy);
     QVERIFY(quantum_pubkey_copy);
+    QVERIFY(coldstake_operator_address);
+    QVERIFY(coldstake_operator_pubkey);
+    QVERIFY(coldstake_operator_new);
+    QVERIFY(coldstake_operator_copy);
+    QVERIFY(coldstake_operator_use);
+    QVERIFY(coldstake_operator_status);
     QVERIFY(coldstake_staker_pubkey);
     QVERIFY(coldstake_address);
     QVERIFY(coldstake_new);
@@ -380,6 +393,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QCOMPARE(quantum_coldstake_count->text(), QString("0"));
     QVERIFY(!quantum_copy->isEnabled());
     QVERIFY(!quantum_pubkey_copy->isEnabled());
+    QVERIFY(coldstake_operator_new->isEnabled());
+    QVERIFY(!coldstake_operator_copy->isEnabled());
+    QVERIFY(!coldstake_operator_use->isEnabled());
     QVERIFY(!coldstake_new->isEnabled());
     QVERIFY(!coldstake_copy->isEnabled());
 
@@ -399,7 +415,22 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     quantum_pubkey_copy->click();
     QCOMPARE(QApplication::clipboard()->text(), quantum_pubkey->text());
 
-    coldstake_staker_pubkey->setText(quantum_pubkey->text());
+    coldstake_operator_new->click();
+    qApp->processEvents();
+    const CTxDestination gui_operator_dest = DecodeDestination(coldstake_operator_address->text().toStdString());
+    QVERIFY(IsValidDestination(gui_operator_dest));
+    QVERIFY(IsQuantumMigrationDestination(gui_operator_dest));
+    QVERIFY(IsHex(coldstake_operator_pubkey->text().toStdString()));
+    QCOMPARE(coldstake_operator_pubkey->text().size(), int{ML_DSA::PUBLICKEY_BYTES * 2});
+    QVERIFY(coldstake_operator_copy->isEnabled());
+    QVERIFY(coldstake_operator_use->isEnabled());
+    QVERIFY(coldstake_operator_status->text().contains(QString("ready")));
+
+    coldstake_operator_copy->click();
+    QCOMPARE(QApplication::clipboard()->text(), coldstake_operator_pubkey->text());
+    coldstake_operator_use->click();
+    QCOMPARE(coldstake_staker_pubkey->text(), coldstake_operator_pubkey->text());
+
     QVERIFY(coldstake_new->isEnabled());
     coldstake_new->click();
     qApp->processEvents();
@@ -449,10 +480,16 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     pow_enable->click();
     qApp->processEvents();
 
-    interfaces::WalletPowMiningInfo info = walletModel.wallet().getPowMiningInfo();
+    interfaces::WalletPowMiningInfo info;
+    for (int i = 0; i < 50; ++i) {
+        info = walletModel.wallet().getPowMiningInfo();
+        if (info.enabled && info.payout_address_available && !info.payout_address.empty()) break;
+        QTest::qWait(20);
+    }
     QVERIFY(info.enabled);
     QCOMPARE(info.threads, requested_threads);
     QCOMPARE(info.cpu_percent, 25);
+    QVERIFY(info.payout_address_available);
     QVERIFY(!info.payout_address.empty());
 
     const CTxDestination payout_dest = DecodeDestination(info.payout_address);
