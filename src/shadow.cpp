@@ -906,7 +906,10 @@ ShadowClaimResult FindPowShadowClaim(const CBlock& block, const CBlockIndex* pin
             // no shadow-ledger credit.
             ShadowProof decoded;
             const ShadowProofValidation status = ValidateQQProof(*proof, pindex, pool, decoded, proof_evals, proof_limit_exceeded);
-            if (proof_limit_exceeded) return {std::nullopt, false, true};
+            if (proof_limit_exceeded) {
+                result.proof_limit_exceeded = true;
+                return result;
+            }
             if (status == ShadowProofValidation::INTERNAL_ERROR) {
                 return {std::nullopt, true};
             }
@@ -915,7 +918,6 @@ ShadowClaimResult FindPowShadowClaim(const CBlock& block, const CBlockIndex* pin
                 const CAmount amount = ClaimablePoolAmount(pool, decoded.mode);
                 if (amount <= 0) continue;
                 if (result.claim) {
-                    result.claim.reset();
                     result.duplicate_claim = true;
                     return result;
                 }
@@ -1215,7 +1217,6 @@ bool GetShadowPowDirectPayouts(const CCoinsViewCache& view, const CBlock& block,
 
     ShadowClaimResult pow_claim = FindPowShadowClaim(block, pindex, blockundo, pool);
     if (pow_claim.internal_error) return false;
-    if (pow_claim.proof_limit_exceeded || pow_claim.duplicate_claim) return true;
     if (!pow_claim.claim || !pow_claim.claim->direct) return true;
     if (!IsDirectQuantumMigrationScript(pow_claim.claim->target)) return false;
     payouts_out.emplace(pow_claim.claim->target, pow_claim.claim->amount);
@@ -1714,9 +1715,6 @@ bool ApplyShadowBlock(CCoinsViewCache& view, const CBlock& block, const CBlockIn
     if (pow_claim.proof_limit_exceeded) {
         LogPrintf("Quantum Quasar: ignored QQPROOF claims at height %d after the %u-proof validation limit; block remains legacy-compatible\n",
             pindex->nHeight, MAX_SHADOW_POW_EVALS_PER_BLOCK);
-    }
-    if (pow_claim.duplicate_claim || pow_claim.proof_limit_exceeded) {
-        pow_claim.claim.reset();
     }
 
     std::map<CScript, CAmount> pos_payouts;

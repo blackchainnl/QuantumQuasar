@@ -992,7 +992,7 @@ BOOST_AUTO_TEST_CASE(pow_shadow_claim_binds_quantum_payout_to_proof_hash)
     BOOST_CHECK(direct_payouts.empty());
 }
 
-BOOST_AUTO_TEST_CASE(pow_shadow_ignores_duplicate_valid_claims_in_legacy_compatible_block)
+BOOST_AUTO_TEST_CASE(pow_shadow_credits_first_valid_claim_when_duplicates_follow)
 {
     CCoinsView base;
     CCoinsViewCache view{&base, true};
@@ -1027,12 +1027,13 @@ BOOST_AUTO_TEST_CASE(pow_shadow_ignores_duplicate_valid_claims_in_legacy_compati
     std::map<CScript, CAmount> direct_payouts;
     CAmount direct_total{0};
     BOOST_CHECK(GetShadowPowDirectPayouts(view, claim_block, &claim_index, &claim_undo, direct_payouts, direct_total));
-    BOOST_CHECK_EQUAL(direct_total, 0);
-    BOOST_CHECK(direct_payouts.empty());
+    BOOST_CHECK_EQUAL(direct_total, 580 * COIN);
+    BOOST_REQUIRE_EQUAL(direct_payouts.size(), 1U);
+    BOOST_CHECK_EQUAL(direct_payouts[quantum_payout], 580 * COIN);
     BOOST_CHECK(ApplyShadowBlock(view, claim_block, &claim_index, &claim_undo));
     const ShadowGoldRushInfo info = GetShadowGoldRushInfo(view, &claim_index);
-    BOOST_CHECK_EQUAL(info.pow_amount, 580 * COIN);
-    BOOST_CHECK_EQUAL(info.pow_count, 0U);
+    BOOST_CHECK_EQUAL(info.pow_amount, 0);
+    BOOST_CHECK_EQUAL(info.pow_count, 1U);
 }
 
 BOOST_AUTO_TEST_CASE(pow_shadow_ignores_proofs_inside_coinstake)
@@ -1157,6 +1158,52 @@ BOOST_AUTO_TEST_CASE(pow_shadow_ignores_claims_over_proof_evaluation_cap)
     const ShadowGoldRushInfo info = GetShadowGoldRushInfo(view, &reward_index);
     BOOST_CHECK_EQUAL(info.pow_amount, 290 * COIN);
     BOOST_CHECK_EQUAL(info.pow_count, 0U);
+}
+
+BOOST_AUTO_TEST_CASE(pow_shadow_preserves_first_valid_claim_when_later_proofs_exceed_cap)
+{
+    CCoinsView base;
+    CCoinsViewCache view{&base, true};
+
+    uint256 whitelist_hash;
+    CBlockIndex whitelist_index;
+    InitIndex(whitelist_index, SHADOW_WHITELIST_HEIGHT, nullptr, whitelist_hash);
+    ApplyLegacyWhitelistSnapshot(view, &whitelist_index);
+
+    uint256 prev_hash;
+    CBlockIndex prev_index;
+    InitIndex(prev_index, SHADOW_REWARD_START_HEIGHT, &whitelist_index, prev_hash);
+    CBlock prev_block;
+    prev_block.vtx.push_back(MakeCoinbaseTx(CScript{} << OP_TRUE));
+    BOOST_REQUIRE(ApplyShadowBlock(view, prev_block, &prev_index));
+
+    const CScript pow_target = CScript{} << OP_2;
+    const CScript quantum_payout = QuantumScript(0x4a);
+    std::vector<unsigned char> pow_proof;
+    BOOST_REQUIRE(MineShadowProofData(pow_target, quantum_payout, &prev_index, view, 50'000, pow_proof));
+
+    uint256 claim_hash;
+    CBlockIndex claim_index;
+    InitIndex(claim_index, SHADOW_REWARD_START_HEIGHT + 1, &prev_index, claim_hash);
+    CBlock claim_block;
+    claim_block.vtx.push_back(MakeCoinbaseTx(CScript{} << OP_4));
+    claim_block.vtx.push_back(MakeCoinstakeTx(CScript{} << OP_5, {}, {CTxOut(580 * COIN, quantum_payout)}));
+    claim_block.vtx.push_back(MakePowClaimTx(pow_target, pow_proof));
+    for (uint64_t i = 0; i < 65; ++i) {
+        claim_block.vtx.push_back(MakeBadProofTx(i, pow_target, MakeInvalidPowProofData(i, pow_target, quantum_payout)));
+    }
+    CBlockUndo claim_undo = MakeUndoWithInputScripts(claim_block, {{1, CScript{} << OP_5}, {2, pow_target}});
+
+    std::map<CScript, CAmount> direct_payouts;
+    CAmount direct_total{0};
+    BOOST_CHECK(GetShadowPowDirectPayouts(view, claim_block, &claim_index, &claim_undo, direct_payouts, direct_total));
+    BOOST_CHECK_EQUAL(direct_total, 580 * COIN);
+    BOOST_REQUIRE_EQUAL(direct_payouts.size(), 1U);
+    BOOST_CHECK_EQUAL(direct_payouts[quantum_payout], 580 * COIN);
+    BOOST_REQUIRE(ApplyShadowBlock(view, claim_block, &claim_index, &claim_undo));
+    const ShadowGoldRushInfo info = GetShadowGoldRushInfo(view, &claim_index);
+    BOOST_CHECK_EQUAL(info.pow_amount, 0);
+    BOOST_CHECK_EQUAL(info.pow_count, 1U);
 }
 
 BOOST_AUTO_TEST_CASE(obsolete_goldrush_direct_payout_markers_are_exact_and_reorg_safe)
