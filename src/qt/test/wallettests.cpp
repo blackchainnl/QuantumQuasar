@@ -327,6 +327,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QLineEdit* selfstake_address = page.findChild<QLineEdit*>("selfStakeAddress");
     QPushButton* selfstake_new = page.findChild<QPushButton*>("newSelfStakeAddress");
     QPushButton* selfstake_copy = page.findChild<QPushButton*>("selfStakeCopy");
+    BitcoinAmountField* selfstake_fund_amount = page.findChild<BitcoinAmountField*>("selfStakeFundAmount");
+    QPushButton* selfstake_fund = page.findChild<QPushButton*>("selfStakeFund");
+    QPushButton* selfstake_withdraw = page.findChild<QPushButton*>("selfStakeWithdraw");
     QLabel* selfstake_status = page.findChild<QLabel*>("selfStakeStatus");
     QLineEdit* coldstake_operator_address = page.findChild<QLineEdit*>("coldstakeOperatorAddress");
     QLineEdit* coldstake_operator_pubkey = page.findChild<QLineEdit*>("coldstakeOperatorPubkey");
@@ -379,6 +382,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(selfstake_address);
     QVERIFY(selfstake_new);
     QVERIFY(selfstake_copy);
+    QVERIFY(selfstake_fund_amount);
+    QVERIFY(selfstake_fund);
+    QVERIFY(selfstake_withdraw);
     QVERIFY(selfstake_status);
     QVERIFY(coldstake_operator_address);
     QVERIFY(coldstake_operator_pubkey);
@@ -423,6 +429,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(!quantum_pubkey_copy->isEnabled());
     QVERIFY(selfstake_new->isEnabled());
     QVERIFY(!selfstake_copy->isEnabled());
+    QVERIFY(!selfstake_fund_amount->isEnabled());
+    QVERIFY(!selfstake_fund->isEnabled());
+    QVERIFY(!selfstake_withdraw->isEnabled());
     QVERIFY(coldstake_operator_new->isEnabled());
     QVERIFY(!coldstake_operator_copy->isEnabled());
     QVERIFY(!coldstake_operator_use->isEnabled());
@@ -459,6 +468,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(IsValidDestination(gui_selfstake_dest));
     QVERIFY(IsQuantumMigrationDestination(gui_selfstake_dest));
     QVERIFY(selfstake_copy->isEnabled());
+    QVERIFY(selfstake_fund_amount->isEnabled());
+    QVERIFY(selfstake_fund->isEnabled());
+    QVERIFY(selfstake_withdraw->isEnabled());
     QVERIFY(selfstake_status->text().contains(QString("9450")));
 
     selfstake_copy->click();

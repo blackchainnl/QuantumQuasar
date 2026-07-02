@@ -12,7 +12,9 @@
 #include <qt/platformstyle.h>
 #include <qt/walletmodel.h>
 
+#include <addresstype.h>
 #include <interfaces/wallet.h>
+#include <key_io.h>
 #include <wallet/wallet.h>
 
 #include <algorithm>
@@ -94,6 +96,18 @@ QString formatBps(int64_t bps)
 {
     return QString::number(static_cast<double>(bps) / 100.0, 'f', 2) + QStringLiteral("%");
 }
+
+uint16_t stakingAddressLockBlocks(const QString& address)
+{
+    const CTxDestination dest = DecodeDestination(address.toStdString());
+    const auto* witness = std::get_if<WitnessUnknown>(&dest);
+    if (!witness) return 0;
+    QuantumStakeTierProgram tier;
+    if (!DecodeQuantumStakeTierProgram(witness->GetWitnessVersion(), witness->GetWitnessProgram(), tier) || !tier.tiered || tier.cold_stake) {
+        return 0;
+    }
+    return tier.unbonding_blocks;
+}
 } // namespace
 
 StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget* parent)
@@ -121,6 +135,8 @@ StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget
     connect(m_quantum_pubkey_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopyQuantumPubkey);
     connect(m_selfstake_new, &QPushButton::clicked, this, &StakingMiningPage::onCreateSelfStakeAddress);
     connect(m_selfstake_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopySelfStakeAddress);
+    connect(m_selfstake_fund, &QPushButton::clicked, this, &StakingMiningPage::onFundSelfStakeAddress);
+    connect(m_selfstake_withdraw, &QPushButton::clicked, this, &StakingMiningPage::onWithdrawSelfStakeAddress);
     connect(m_operator_new, &QPushButton::clicked, this, &StakingMiningPage::onCreateOperatorKey);
     connect(m_operator_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopyOperatorKey);
     connect(m_operator_use_for_delegation, &QPushButton::clicked, this, &StakingMiningPage::onUseOperatorKeyForDelegation);
@@ -300,6 +316,17 @@ void StakingMiningPage::setupUi()
     m_selfstake_new->setObjectName(QStringLiteral("newSelfStakeAddress"));
     m_selfstake_copy = new QPushButton(tr("Copy"), coldstakeBox);
     m_selfstake_copy->setObjectName(QStringLiteral("selfStakeCopy"));
+    m_selfstake_fund_amount = new BitcoinAmountField(coldstakeBox);
+    m_selfstake_fund_amount->setObjectName(QStringLiteral("selfStakeFundAmount"));
+    m_selfstake_fund_amount->SetMinValue(CENT);
+    m_selfstake_fund_amount->setValue(COIN);
+    m_selfstake_fund_amount->setToolTip(tr("Amount to send to this wallet-backed quantum staking address."));
+    m_selfstake_fund = new QPushButton(tr("Fund staking address"), coldstakeBox);
+    m_selfstake_fund->setObjectName(QStringLiteral("selfStakeFund"));
+    m_selfstake_fund->setToolTip(tr("Create, sign, and broadcast a wallet transaction funding this quantum staking address."));
+    m_selfstake_withdraw = new QPushButton(tr("Stop / withdraw staking funds"), coldstakeBox);
+    m_selfstake_withdraw->setObjectName(QStringLiteral("selfStakeWithdraw"));
+    m_selfstake_withdraw->setToolTip(tr("If bonded, starts unbonding for the selected lock period. If already unbonded and mature, withdraws to a fresh quantum address."));
     m_selfstake_status = new QLabel(QStringLiteral("-"), coldstakeBox);
     m_selfstake_status->setObjectName(QStringLiteral("selfStakeStatus"));
     m_selfstake_status->setWordWrap(true);
@@ -392,6 +419,10 @@ void StakingMiningPage::setupUi()
     cgrid->addWidget(new QLabel(tr("Staking address:"), coldstakeBox), r, 0);
     cgrid->addWidget(m_selfstake_address, r, 1, 1, 2);
     cgrid->addWidget(m_selfstake_copy, r++, 3);
+    cgrid->addWidget(new QLabel(tr("Fund amount:"), coldstakeBox), r, 0);
+    cgrid->addWidget(m_selfstake_fund_amount, r, 1);
+    cgrid->addWidget(m_selfstake_fund, r, 2);
+    cgrid->addWidget(m_selfstake_withdraw, r++, 3);
     cgrid->addWidget(m_selfstake_status, r++, 0, 1, 4);
     cgrid->addWidget(operatorHeading, r++, 0, 1, 4);
     cgrid->addWidget(new QLabel(tr("Operator address:"), coldstakeBox), r, 0);
@@ -731,6 +762,7 @@ void StakingMiningPage::onCreateSelfStakeAddress()
         return;
     }
     m_selfstake_address->setText(QString::fromStdString(result->address));
+    m_selfstake_last_action_status.clear();
     m_selfstake_status->setText(tr("Tiered staking address created with %1 bonded blocks.").arg(result->unbonding_blocks));
     QApplication::clipboard()->setText(m_selfstake_address->text());
     updateStatus();
@@ -741,6 +773,89 @@ void StakingMiningPage::onCopySelfStakeAddress()
     if (m_selfstake_address && !m_selfstake_address->text().isEmpty()) {
         QApplication::clipboard()->setText(m_selfstake_address->text());
     }
+}
+
+void StakingMiningPage::onFundSelfStakeAddress()
+{
+    if (!m_wallet_model || !m_selfstake_fund_amount) return;
+    if (m_selfstake_address->text().isEmpty()) {
+        m_selfstake_status->setText(tr("Create a quantum staking address first."));
+        return;
+    }
+    if (!m_selfstake_fund_amount->validate()) {
+        m_selfstake_status->setText(tr("Enter a valid staking amount."));
+        return;
+    }
+    const CAmount amount = m_selfstake_fund_amount->value();
+    if (amount <= 0) {
+        m_selfstake_status->setText(tr("Staking amount must be positive."));
+        return;
+    }
+
+    WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
+    if (!ctx.isValid()) return;
+
+    auto result = m_wallet_model->wallet().fundQuantumStakeAddress(m_selfstake_address->text().toStdString(), amount);
+    if (!result) {
+        const QString msg = QString::fromStdString(util::ErrorString(result).original);
+        m_selfstake_status->setText(msg);
+        QMessageBox::warning(this, tr("Fund staking address"), msg);
+        return;
+    }
+
+    m_selfstake_last_action_status = tr("Staking address funding broadcast: %1. Amount: %2. Fee: %3.")
+        .arg(QString::fromStdString(result->txid))
+        .arg(formatBLK(result->amount))
+        .arg(formatBLK(result->fee));
+    m_selfstake_status->setText(m_selfstake_last_action_status);
+    updateStatus();
+}
+
+void StakingMiningPage::onWithdrawSelfStakeAddress()
+{
+    if (!m_wallet_model) return;
+    if (m_selfstake_address->text().isEmpty()) {
+        m_selfstake_status->setText(tr("Create a quantum staking address first."));
+        return;
+    }
+
+    const interfaces::WalletQuantumOperatorBondInfo info =
+        m_wallet_model->wallet().getQuantumStakeAddressBondInfo(m_selfstake_address->text().toStdString());
+    if (info.valid_operator_address && info.bonded_outputs > 0) {
+        const int rc = QMessageBox::question(
+            this,
+            tr("Stop quantum staking"),
+            tr("This will start unbonding for %1. The principal remains locked until the staking address's unlock height. Continue?")
+                .arg(formatBLK(info.bonded_amount)));
+        if (rc != QMessageBox::Yes) return;
+    }
+
+    WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
+    if (!ctx.isValid()) return;
+
+    auto result = m_wallet_model->wallet().withdrawQuantumStakeAddress(m_selfstake_address->text().toStdString());
+    if (!result) {
+        const QString msg = QString::fromStdString(util::ErrorString(result).original);
+        m_selfstake_status->setText(msg);
+        QMessageBox::warning(this, tr("Stop quantum staking"), msg);
+        return;
+    }
+
+    if (result->started_unbonding) {
+        m_selfstake_last_action_status = tr("Quantum staking unbonding started: %1. Amount: %2. Unlock height: %3. Fee: %4.")
+            .arg(QString::fromStdString(result->txid))
+            .arg(formatBLK(result->amount))
+            .arg(result->unlock_height)
+            .arg(formatBLK(result->fee));
+    } else {
+        m_selfstake_last_action_status = tr("Quantum staking funds withdrawn: %1. Amount: %2. Destination: %3. Fee: %4.")
+            .arg(QString::fromStdString(result->txid))
+            .arg(formatBLK(result->amount))
+            .arg(QString::fromStdString(result->address))
+            .arg(formatBLK(result->fee));
+    }
+    m_selfstake_status->setText(m_selfstake_last_action_status);
+    updateStatus();
 }
 
 void StakingMiningPage::onCreateOperatorKey()
@@ -1098,6 +1213,42 @@ void StakingMiningPage::updateStatus()
             m_selfstake_status->setText(tr("Tiered staking address ready with %1 bonded blocks.").arg(selfstake_it->unbonding_blocks));
         }
     }
+    if (!m_selfstake_address->text().isEmpty()) {
+        const uint16_t lock_blocks = stakingAddressLockBlocks(m_selfstake_address->text());
+        const interfaces::WalletQuantumOperatorBondInfo stake_info =
+            w.getQuantumStakeAddressBondInfo(m_selfstake_address->text().toStdString());
+        if (stake_info.valid_operator_address) {
+            if (stake_info.bonded_outputs > 0) {
+                m_selfstake_status->setText(tr("Quantum staking active: %1 across %2 output(s). Lock period: %3 blocks. Stop/withdraw starts this address's unbonding period.")
+                    .arg(formatBLK(stake_info.bonded_amount))
+                    .arg(stake_info.bonded_outputs)
+                    .arg(lock_blocks));
+                m_selfstake_withdraw->setText(tr("Start withdrawal"));
+            } else if (stake_info.withdrawable_outputs > 0) {
+                m_selfstake_status->setText(tr("Quantum staking funds are unbonded and withdrawable: %1 across %2 output(s).")
+                    .arg(formatBLK(stake_info.withdrawable_amount))
+                    .arg(stake_info.withdrawable_outputs));
+                m_selfstake_withdraw->setText(tr("Complete withdrawal"));
+            } else if (stake_info.unbonding_outputs > 0) {
+                m_selfstake_status->setText(tr("Quantum staking funds are unbonding: %1 across %2 output(s). Next unlock height: %3.")
+                    .arg(formatBLK(stake_info.unbonding_amount))
+                    .arg(stake_info.unbonding_outputs)
+                    .arg(stake_info.next_unlock_height));
+                m_selfstake_withdraw->setText(tr("Withdrawal pending"));
+            } else {
+                m_selfstake_status->setText(tr("Quantum staking address ready with %1 bonded blocks. Click Fund staking address to activate it.")
+                    .arg(lock_blocks));
+                m_selfstake_withdraw->setText(tr("Stop / withdraw staking funds"));
+            }
+        }
+    } else {
+        m_selfstake_withdraw->setText(tr("Stop / withdraw staking funds"));
+        m_selfstake_last_action_status.clear();
+    }
+    if (!m_selfstake_last_action_status.isEmpty() &&
+        !m_selfstake_status->text().startsWith(m_selfstake_last_action_status)) {
+        m_selfstake_status->setText(m_selfstake_last_action_status + QStringLiteral("\n") + m_selfstake_status->text());
+    }
     if (m_operator_pubkey->text().isEmpty()) {
         const auto operator_it = std::find_if(quantum_addresses.begin(), quantum_addresses.end(), [](const interfaces::WalletQuantumAddressInfo& info) {
             return info.tiered && info.label == "coldstake-operator" && info.unbonding_blocks >= OPERATOR_COMMITMENT_BLOCKS;
@@ -1187,7 +1338,10 @@ void StakingMiningPage::resetStatusForNoWallet()
     m_quantum_address->clear();
     m_quantum_pubkey->clear();
     m_selfstake_address->clear();
+    if (m_selfstake_fund_amount) m_selfstake_fund_amount->setValue(COIN);
+    m_selfstake_last_action_status.clear();
     m_selfstake_status->setText(QStringLiteral("-"));
+    m_selfstake_withdraw->setText(tr("Stop / withdraw staking funds"));
     m_operator_address->clear();
     m_operator_pubkey->clear();
     if (m_operator_bond_amount) m_operator_bond_amount->setValue(COIN);
@@ -1238,6 +1392,10 @@ void StakingMiningPage::refreshControlsEnabled()
     m_selfstake_lock_period->setEnabled(can_create_quantum);
     m_selfstake_new->setEnabled(can_create_quantum);
     m_selfstake_copy->setEnabled(m_selfstake_address && !m_selfstake_address->text().isEmpty());
+    const bool has_selfstake_address = m_selfstake_address && !m_selfstake_address->text().isEmpty();
+    m_selfstake_fund_amount->setEnabled(can_create_quantum && has_selfstake_address);
+    m_selfstake_fund->setEnabled(can_create_quantum && has_selfstake_address);
+    m_selfstake_withdraw->setEnabled(can_create_quantum && has_selfstake_address);
     m_operator_new->setEnabled(can_create_quantum);
     m_operator_copy->setEnabled(m_operator_pubkey && !m_operator_pubkey->text().isEmpty());
     m_operator_use_for_delegation->setEnabled(m_operator_pubkey && !m_operator_pubkey->text().isEmpty());
