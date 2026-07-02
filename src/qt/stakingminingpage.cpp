@@ -58,6 +58,8 @@ StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget
     connect(m_donation_percent, qOverload<int>(&QSpinBox::valueChanged), this, &StakingMiningPage::onDonationPercentChanged);
     connect(m_pow_enable, &QCheckBox::clicked, this, &StakingMiningPage::onPowEnableToggled);
     connect(m_pow_unlock_wallet, &QCheckBox::clicked, this, &StakingMiningPage::onPowUnlockWalletToggled);
+    connect(m_pow_cores, qOverload<int>(&QSpinBox::valueChanged), this, &StakingMiningPage::onPowSettingsChanged);
+    connect(m_pow_percent, qOverload<int>(&QSpinBox::valueChanged), this, &StakingMiningPage::onPowSettingsChanged);
     connect(m_pow_apply, &QPushButton::clicked, this, &StakingMiningPage::onApplyPow);
     connect(m_pow_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopyPayoutAddress);
     connect(m_quantum_new, &QPushButton::clicked, this, &StakingMiningPage::onCreateQuantumAddress);
@@ -308,6 +310,7 @@ void StakingMiningPage::setWalletModel(WalletModel* walletModel)
     m_wallet_model = walletModel;
     m_updating = false;
     m_pow_apply_pending = false;
+    m_pow_settings_dirty = false;
 
     if (m_wallet_model) {
         connect(m_wallet_model, &QObject::destroyed, this, [this] {
@@ -315,6 +318,7 @@ void StakingMiningPage::setWalletModel(WalletModel* walletModel)
             if (m_timer) m_timer->stop();
             m_updating = false;
             m_pow_apply_pending = false;
+            m_pow_settings_dirty = false;
             resetStatusForNoWallet();
         });
         updateStatus();
@@ -433,6 +437,16 @@ void StakingMiningPage::onPowUnlockWalletToggled(bool enabled)
     updateStatus();
 }
 
+void StakingMiningPage::onPowSettingsChanged(int)
+{
+    if (m_updating || !m_wallet_model) return;
+    m_pow_settings_dirty = true;
+    if (m_pow_enable->isChecked()) {
+        m_pow_status->setText(tr("PoW miner settings changed. Click Apply to update the miner."));
+    }
+    refreshControlsEnabled();
+}
+
 void StakingMiningPage::onApplyPow()
 {
     if (m_updating || !m_wallet_model || m_pow_apply_pending) return;
@@ -465,6 +479,7 @@ void StakingMiningPage::onApplyPow()
         refreshControlsEnabled();
         return;
     }
+    m_pow_settings_dirty = false;
     updateStatus();
 }
 
@@ -570,8 +585,10 @@ void StakingMiningPage::updateStatus()
     if (!m_pow_apply_pending) {
         m_pow_enable->setChecked(info.enabled);
         m_pow_unlock_wallet->setChecked(normal_unlocked);
-        if (!m_pow_cores->hasFocus() && info.threads > 0) m_pow_cores->setValue(info.threads);
-        if (!m_pow_percent->hasFocus() && info.cpu_percent > 0) m_pow_percent->setValue(info.cpu_percent);
+        if (!m_pow_settings_dirty) {
+            if (!m_pow_cores->hasFocus() && info.threads > 0) m_pow_cores->setValue(info.threads);
+            if (!m_pow_percent->hasFocus() && info.cpu_percent > 0) m_pow_percent->setValue(info.cpu_percent);
+        }
     }
     m_pow_payout->setText(QString::fromStdString(info.payout_address));
 
@@ -593,6 +610,8 @@ void StakingMiningPage::updateStatus()
 
     if (m_pow_apply_pending) {
         m_pow_status->setText(m_pow_pending_enabled ? tr("Starting Gold Rush PoW mining...") : tr("Stopping Gold Rush PoW mining..."));
+    } else if (m_pow_settings_dirty && info.enabled) {
+        m_pow_status->setText(tr("PoW miner settings changed. Click Apply to update the miner."));
     } else if (info.epoch_active) {
         m_pow_status->setText(tr("Hashrate: %1 tries/s   |   Next claim payout: %2   |   Claims submitted: %3")
             .arg(QString::number(info.hashrate, 'f', 1))
@@ -659,6 +678,7 @@ void StakingMiningPage::resetStatusForNoWallet()
 
     m_pow_enable->setChecked(false);
     m_pow_unlock_wallet->setChecked(false);
+    m_pow_settings_dirty = false;
     m_pow_payout->clear();
     m_pow_status->setText(tr("Load a wallet to use Gold Rush PoW mining."));
 
