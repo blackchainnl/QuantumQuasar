@@ -545,6 +545,8 @@ void StakingMiningPage::setupUi()
     cgrid->addWidget(m_selfstake_withdraw, r++, 3);
     cgrid->addWidget(m_selfstake_status, r++, 0, 1, 4);
     cgrid->addWidget(operatorHeading, r++, 0, 1, 4);
+    cgrid->addWidget(new QLabel(tr("Operator lock:"), coldstakeBox), r, 0);
+    cgrid->addWidget(new QLabel(tr("30 days fixed"), coldstakeBox), r++, 1, 1, 3);
     cgrid->addWidget(new QLabel(tr("Saved operator key:"), coldstakeBox), r, 0);
     cgrid->addWidget(m_operator_selector, r++, 1, 1, 3);
     cgrid->addWidget(new QLabel(tr("Operator address:"), coldstakeBox), r, 0);
@@ -1369,8 +1371,12 @@ void StakingMiningPage::updateStatus()
         m_operator_selector->addItem(tr("Select saved operator key"), QString());
         for (const interfaces::WalletQuantumAddressInfo& info : quantum_addresses) {
             const QString address = QString::fromStdString(info.address);
-            if (!info.tiered || info.label != "coldstake-operator" || !isBondedTieredStakingAddress(address)) continue;
-            m_operator_selector->addItem(addressSelectorLabel(info.label, info.address, info.unbonding_blocks), address);
+            if (!info.tiered || info.label != "coldstake-operator" ||
+                info.unbonding_blocks != OPERATOR_COMMITMENT_BLOCKS ||
+                !isBondedTieredStakingAddress(address)) {
+                continue;
+            }
+            m_operator_selector->addItem(addressSelectorLabel(info.label, info.address, /*lock_blocks=*/0), address);
             m_operator_selector->setItemData(m_operator_selector->count() - 1, QString::fromStdString(info.public_key), Qt::UserRole + 1);
             ++saved_operator_count;
         }
@@ -1479,7 +1485,7 @@ void StakingMiningPage::updateStatus()
     }
     if (m_operator_pubkey->text().isEmpty()) {
         const auto operator_it = std::find_if(quantum_addresses.begin(), quantum_addresses.end(), [](const interfaces::WalletQuantumAddressInfo& info) {
-            return info.tiered && info.label == "coldstake-operator" && info.unbonding_blocks >= OPERATOR_COMMITMENT_BLOCKS;
+            return info.tiered && info.label == "coldstake-operator" && info.unbonding_blocks == OPERATOR_COMMITMENT_BLOCKS;
         });
         if (operator_it != quantum_addresses.end()) {
             m_operator_address->setText(QString::fromStdString(operator_it->address));

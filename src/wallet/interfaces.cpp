@@ -144,8 +144,8 @@ util::Result<QuantumStakeTierProgram> DecodeTieredStakeAddress(const std::string
         tier.cold_stake || !tier.IsBonded()) {
         return util::Error{_("Error: Address must be a wallet-backed bonded quantum staking address")};
     }
-    if (require_operator_lock && tier.unbonding_blocks < OPERATOR_COMMITMENT_BLOCKS) {
-        return util::Error{_("Error: Operator address must be a wallet-backed 30-day bonded quantum staking address")};
+    if (require_operator_lock && tier.unbonding_blocks != OPERATOR_COMMITMENT_BLOCKS) {
+        return util::Error{_("Error: Operator address must be a wallet-backed fixed 30-day bonded quantum staking address")};
     }
     return tier;
 }
