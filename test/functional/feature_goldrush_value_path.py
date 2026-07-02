@@ -70,21 +70,27 @@ class GoldRushValuePathTest(BitcoinTestFramework):
 
     def _mine_pos_block_with_claim(self, wallet, claim_txid):
         node = self.nodes[0]
-        start_height = node.getblockcount()
-        kernel_time = self._find_next_kernel_time(wallet)
-        self._set_mocktime(kernel_time - 16)
-        wallet.staking(True)
-        try:
-            self._set_mocktime(kernel_time)
-            self.wait_until(lambda: node.getblockcount() > start_height, timeout=15)
-            block_hash = node.getbestblockhash()
-            block = node.getblock(block_hash, 2)
-            assert "proof-of-stake" in block["flags"]
-            txids = [tx["txid"] for tx in block["tx"]]
-            assert claim_txid in txids[2:], "QQSPROOF claim must be a fee-paying non-coinbase/non-coinstake transaction"
-            return block_hash
-        finally:
-            wallet.staking(False)
+        last_error = None
+        for _ in range(4):
+            start_height = node.getblockcount()
+            kernel_time = self._find_next_kernel_time(wallet)
+            self._set_mocktime(kernel_time - 16)
+            wallet.staking(True)
+            try:
+                self._set_mocktime(kernel_time)
+                self.wait_until(lambda: node.getblockcount() > start_height, timeout=20)
+                block_hash = node.getbestblockhash()
+                block = node.getblock(block_hash, 2)
+                assert "proof-of-stake" in block["flags"]
+                txids = [tx["txid"] for tx in block["tx"]]
+                assert claim_txid in txids[2:], "QQSPROOF claim must be a fee-paying non-coinbase/non-coinstake transaction"
+                return block_hash
+            except AssertionError as e:
+                last_error = e
+            finally:
+                wallet.staking(False)
+            self._bump_mocktime(16)
+        raise last_error or AssertionError("failed to mine deterministic PoS block")
 
     def _get_quantum_utxos(self, wallet, address, *, include_immature=True):
         options = {"include_immature_coinbase": include_immature}

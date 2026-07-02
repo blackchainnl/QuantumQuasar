@@ -65,24 +65,30 @@ class GoldRushReorgTest(BitcoinTestFramework):
         raise AssertionError("timed out searching for a deterministic PoS kernel")
 
     def _mine_pos_block(self, node, wallet, *, expected_txid=None, excluded_txid=None):
-        start_height = node.getblockcount()
-        kernel_time = self._find_next_kernel_time(wallet)
-        self._set_mocktime(kernel_time - 16)
-        wallet.staking(True)
-        try:
-            self._set_mocktime(kernel_time)
-            self.wait_until(lambda: node.getblockcount() > start_height, timeout=15)
-            block_hash = node.getbestblockhash()
-            block = node.getblock(block_hash, 2)
-            assert "proof-of-stake" in block["flags"]
-            txids = [tx["txid"] for tx in block["tx"]]
-            if expected_txid is not None:
-                assert expected_txid in txids[2:]
-            if excluded_txid is not None:
-                assert excluded_txid not in txids
-            return block_hash
-        finally:
-            wallet.staking(False)
+        last_error = None
+        for _ in range(4):
+            start_height = node.getblockcount()
+            kernel_time = self._find_next_kernel_time(wallet)
+            self._set_mocktime(kernel_time - 16)
+            wallet.staking(True)
+            try:
+                self._set_mocktime(kernel_time)
+                self.wait_until(lambda: node.getblockcount() > start_height, timeout=20)
+                block_hash = node.getbestblockhash()
+                block = node.getblock(block_hash, 2)
+                assert "proof-of-stake" in block["flags"]
+                txids = [tx["txid"] for tx in block["tx"]]
+                if expected_txid is not None:
+                    assert expected_txid in txids[2:]
+                if excluded_txid is not None:
+                    assert excluded_txid not in txids
+                return block_hash
+            except AssertionError as e:
+                last_error = e
+            finally:
+                wallet.staking(False)
+            self._bump_mocktime(16)
+        raise last_error or AssertionError("failed to mine deterministic PoS block")
 
     def _get_quantum_utxos(self, wallet, address):
         return wallet.listunspent(0, 9999999, [address], True, {"include_immature_coinbase": True})

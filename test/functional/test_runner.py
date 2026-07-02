@@ -154,6 +154,7 @@ BASE_SCRIPTS = [
     'feature_goldrush_migration_rpc.py',
     'feature_goldrush_coinstatsindex.py',
     'feature_goldrush_reorg.py',
+    'feature_goldrush_schedule_controls.py',
     'feature_quantum_lifecycle.py',
     'feature_quantum_final_lockout_sighash.py',
     'feature_weak_subjectivity_checkpoint.py',

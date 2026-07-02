@@ -799,6 +799,63 @@ BOOST_AUTO_TEST_CASE(pow_shadow_claim_records_ledger_credit_without_coinstake_pa
     BOOST_CHECK_EQUAL(ScanSpendableCoins(view, quantum_payout).count, 0U);
 }
 
+BOOST_AUTO_TEST_CASE(pow_shadow_claim_in_proof_of_work_block_records_ledger_credit)
+{
+    CCoinsView base;
+    CCoinsViewCache view{&base, true};
+
+    const CScript pos_target = CScript{} << OP_TRUE;
+    const CScript pow_target = CScript{} << OP_2;
+    const CScript quantum_payout = QuantumScript(0x4d);
+    AddCoinForScript(view, COutPoint{uint256::ONE, 0}, 10'000 * COIN, pos_target);
+
+    uint256 whitelist_hash;
+    CBlockIndex whitelist_index;
+    InitIndex(whitelist_index, SHADOW_WHITELIST_HEIGHT, nullptr, whitelist_hash);
+    ApplyLegacyWhitelistSnapshot(view, &whitelist_index);
+
+    uint256 first_hash;
+    CBlockIndex first_index;
+    InitIndex(first_index, SHADOW_REWARD_START_HEIGHT, &whitelist_index, first_hash);
+    CBlock first_block;
+    first_block.vtx.push_back(MakeCoinbaseTx(CScript{} << OP_3));
+    first_block.vtx.push_back(MakeCoinstakeTx(pos_target));
+    CBlockUndo first_undo = MakeUndoWithInputScripts(first_block, {{1, pos_target}});
+    BOOST_REQUIRE(ApplyShadowBlock(view, first_block, &first_index, &first_undo));
+
+    std::vector<unsigned char> pow_proof;
+    BOOST_REQUIRE(MineShadowProofData(pow_target, quantum_payout, &first_index, view, 50'000, pow_proof));
+
+    uint256 claim_hash;
+    CBlockIndex claim_index;
+    InitIndex(claim_index, SHADOW_REWARD_START_HEIGHT + 1, &first_index, claim_hash);
+    CBlock claim_block;
+    claim_block.vtx.push_back(MakeCoinbaseTx(CScript{} << OP_4));
+    claim_block.vtx.push_back(MakePowClaimTx(pow_target, pow_proof));
+    BOOST_REQUIRE(!claim_block.IsProofOfStake());
+    CBlockUndo claim_undo = MakeUndoWithInputScripts(claim_block, {{1, pow_target}});
+
+    std::map<CScript, CAmount> direct_payouts;
+    CAmount direct_total{0};
+    BOOST_REQUIRE(GetShadowPowDirectPayouts(view, claim_block, &claim_index, &claim_undo, direct_payouts, direct_total));
+    BOOST_CHECK_EQUAL(direct_total, 580 * COIN);
+    BOOST_REQUIRE_EQUAL(direct_payouts.size(), 1U);
+    BOOST_CHECK_EQUAL(direct_payouts[quantum_payout], 580 * COIN);
+
+    BOOST_REQUIRE(ApplyShadowBlock(view, claim_block, &claim_index, &claim_undo));
+    BOOST_CHECK_EQUAL(ScanShadowClaimMarkers(view, quantum_payout).count, 1U);
+    BOOST_CHECK_EQUAL(ScanSpendableCoins(view, quantum_payout).count, 1U);
+
+    const ShadowGoldRushInfo info = GetShadowGoldRushInfo(view, &claim_index);
+    BOOST_CHECK_EQUAL(info.pow_amount, 0);
+    BOOST_CHECK_EQUAL(info.claimed_amount, 580 * COIN);
+    BOOST_CHECK_EQUAL(info.pow_count, 1U);
+
+    BOOST_REQUIRE(UndoShadowBlock(view, claim_block, &claim_index, &claim_undo));
+    BOOST_CHECK_EQUAL(ScanShadowClaimMarkers(view, quantum_payout).count, 0U);
+    BOOST_CHECK_EQUAL(ScanSpendableCoins(view, quantum_payout).count, 0U);
+}
+
 BOOST_AUTO_TEST_CASE(pow_shadow_mempool_policy_is_next_tip_bound_and_not_whitelist_gated)
 {
     CCoinsView base;

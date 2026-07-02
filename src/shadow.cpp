@@ -885,7 +885,6 @@ bool BuildPosPayouts(const ShadowPoolState& credited_pool, const std::optional<C
 
 ShadowClaimResult FindPowShadowClaim(const CBlock& block, const CBlockIndex* pindex, const CBlockUndo* blockundo, const ShadowPoolState& pool)
 {
-    if (!block.IsProofOfStake()) return {};
     unsigned int proof_evals = 0;
     bool proof_limit_exceeded = false;
     ShadowClaimResult result;
