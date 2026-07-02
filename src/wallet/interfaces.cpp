@@ -620,12 +620,17 @@ public:
         info.hashrate = m_wallet->m_pow_hashrate;
         info.claims_submitted = m_wallet->m_pow_claims_submitted;
         {
-            LOCK(m_wallet->cs_wallet);
-            info.payout_address = m_wallet->m_pow_payout_quantum;
+            TRY_LOCK(m_wallet->cs_wallet, wallet_lock);
+            if (wallet_lock) {
+                info.payout_address = m_wallet->m_pow_payout_quantum;
+            } else {
+                info.payout_address_available = false;
+            }
         }
         if (m_wallet->HaveChain()) {
             ChainstateManager& chainman = m_wallet->chain().chainman();
-            LOCK(::cs_main);
+            TRY_LOCK(::cs_main, main_lock);
+            if (!main_lock) return info;
             Chainstate& active = chainman.ActiveChainstate();
             const CBlockIndex* tip = active.m_chain.Tip();
             if (tip) {
@@ -663,8 +668,9 @@ public:
     }
     std::vector<WalletQuantumAddressInfo> listQuantumAddresses() override
     {
-        LOCK(m_wallet->cs_wallet);
         std::vector<WalletQuantumAddressInfo> result;
+        TRY_LOCK(m_wallet->cs_wallet, wallet_lock);
+        if (!wallet_lock) return result;
         const auto infos = m_wallet->ListQuantumKeyInfos();
         result.reserve(infos.size());
         for (const QuantumKeyInfo& info : infos) {
@@ -674,8 +680,9 @@ public:
     }
     std::vector<WalletQuantumColdStakeInfo> listQuantumColdStakeDelegations() override
     {
-        LOCK(m_wallet->cs_wallet);
         std::vector<WalletQuantumColdStakeInfo> result;
+        TRY_LOCK(m_wallet->cs_wallet, wallet_lock);
+        if (!wallet_lock) return result;
         const auto infos = m_wallet->ListQuantumColdStakeDelegationInfos();
         result.reserve(infos.size());
         for (const QuantumColdStakeDelegationInfo& info : infos) {
@@ -713,10 +720,20 @@ public:
         WalletMigrationStatus status;
         if (!m_wallet->HaveChain()) return status;
 
-        LOCK2(::cs_main, m_wallet->cs_wallet);
+        TRY_LOCK(::cs_main, main_lock);
+        if (!main_lock) {
+            status.available = false;
+            return status;
+        }
+        TRY_LOCK(m_wallet->cs_wallet, wallet_lock);
+        if (!wallet_lock) {
+            status.available = false;
+            return status;
+        }
 
         const Consensus::Params& consensus = Params().GetConsensus();
-        const CBlockIndex* tip = m_wallet->chain().getTip();
+        ChainstateManager& chainman = m_wallet->chain().chainman();
+        const CBlockIndex* tip = chainman.ActiveChain().Tip();
         const int64_t mtp = tip ? tip->GetMedianTimePast() : 0;
         const int next_height = tip ? tip->nHeight + 1 : 0;
         const bool scheduled = consensus.nQuantumMigrationDeadlineTime != 0;
@@ -735,7 +752,6 @@ public:
         status.goldrush_remigration_active = consensus.IsQuantumMigrationWindow(mtp);
         status.quantum_spends_active = quantum_active;
 
-        ChainstateManager& chainman = m_wallet->chain().chainman();
         const CCoinsViewCache& view = chainman.ActiveChainstate().CoinsTip();
         for (const COutput& out : AvailableCoinsListUnspent(*m_wallet).All()) {
             const CScript& spk = out.txout.scriptPubKey;
