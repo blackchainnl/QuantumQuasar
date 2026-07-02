@@ -354,6 +354,14 @@ QString TransactionTableModel::formatTxDate(const TransactionRecord *wtx) const
     return QString();
 }
 
+namespace {
+QString ShortClaimDestination(const QString& address)
+{
+    if (address.size() <= 28) return address;
+    return address.left(12) + QStringLiteral("...") + address.right(10);
+}
+} // namespace
+
 /* Look up address in address book, if found return label (address)
    otherwise just return (address)
  */
@@ -372,6 +380,19 @@ QString TransactionTableModel::lookupAddress(const std::string &address, bool to
     return description;
 }
 
+QString TransactionTableModel::formatGoldRushClaimType(const TransactionRecord *wtx, const QString& claim_type) const
+{
+    if (wtx->address.empty()) return claim_type;
+
+    const QString address = QString::fromStdString(wtx->address);
+    const QString label = walletModel->getAddressTableModel()->labelForAddress(address);
+    const QString destination = label.isEmpty() ?
+        ShortClaimDestination(address) :
+        tr("%1 (%2)").arg(label, ShortClaimDestination(address));
+
+    return claim_type + tr(" -> ") + destination;
+}
+
 QString TransactionTableModel::formatTxType(const TransactionRecord *wtx) const
 {
     switch(wtx->type)
@@ -388,9 +409,9 @@ QString TransactionTableModel::formatTxType(const TransactionRecord *wtx) const
     case TransactionRecord::Staked:
         return tr("Staked");
     case TransactionRecord::GoldRushPosStake:
-        return tr("PoS - Quantum Stake");
+        return formatGoldRushClaimType(wtx, tr("PoS - Quantum Stake"));
     case TransactionRecord::GoldRushPowClaim:
-        return tr("PoW - Quantum Claim");
+        return formatGoldRushClaimType(wtx, tr("PoW - Quantum Claim"));
     case TransactionRecord::Other:
         return tr("Other");
     default:

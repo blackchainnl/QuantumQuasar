@@ -57,6 +57,18 @@ QString GoldRushClaimLabel(const interfaces::WalletTx& wtx)
     return {};
 }
 
+QString GoldRushClaimAction(const interfaces::WalletTx& wtx)
+{
+    QString action = GoldRushClaimLabel(wtx);
+    if (action.isEmpty()) return {};
+
+    const auto to_it = wtx.value_map.find("to");
+    if (to_it != wtx.value_map.end() && !to_it->second.empty()) {
+        action += QObject::tr(" -> ") + GUIUtil::HtmlEscape(to_it->second);
+    }
+    return action;
+}
+
 bool IsQuantumOutput(const CTxOut& txout)
 {
     return IsQuantumMigrationScript(txout.scriptPubKey) || IsQuantumColdStakeScript(txout.scriptPubKey);
@@ -193,7 +205,7 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     if (!gold_rush_claim_label.isEmpty())
     {
         strHTML += "<b>" + tr("Source") + ":</b> " + tr("Gold Rush reward") + "<br>";
-        strHTML += "<b>" + tr("Action") + ":</b> " + gold_rush_claim_label + "<br>";
+        strHTML += "<b>" + tr("Action") + ":</b> " + GoldRushClaimAction(wtx) + "<br>";
     }
     else if (!gold_rush_control_label.isEmpty())
     {
