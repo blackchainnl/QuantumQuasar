@@ -598,7 +598,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
 
     pow_copy->click();
     QCOMPARE(QApplication::clipboard()->text(), pow_payout->text());
-    QVERIFY(pow_warning->text().contains(QString("migration window")));
+    QVERIFY(pow_warning->text().contains(QString("fresh quantum address")));
 
     pow_enable->click();
     qApp->processEvents();

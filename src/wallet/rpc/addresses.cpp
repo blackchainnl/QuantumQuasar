@@ -436,6 +436,10 @@ RPCHelpMan importquantumcoldstakingdelegation()
                         {RPCResult::Type::BOOL, "has_owner_key", "Whether this wallet has the owner key."},
                         {RPCResult::Type::BOOL, "can_stake", "Whether this wallet can use the staker coinstake branch."},
                         {RPCResult::Type::BOOL, "can_owner_spend", "Whether this wallet can use the owner spend branch."},
+                        {RPCResult::Type::BOOL, "tiered", "Whether this QCS address uses the tiered staking witness program."},
+                        {RPCResult::Type::STR, "tier_state", /*optional=*/true, "Tier state."},
+                        {RPCResult::Type::NUM, "unbonding_blocks", /*optional=*/true, "Bonded unbonding delay in blocks."},
+                        {RPCResult::Type::NUM, "unlock_height", /*optional=*/true, "Unlock height for unbonding outputs."},
                     }},
                 RPCExamples{
                     HelpExampleCli("importquantumcoldstakingdelegation", "\"<owner_pubkey>\" \"<staking_pubkey>\"")

@@ -69,7 +69,9 @@ public:
         SendToOther,
         RecvWithAddress,
         RecvFromOther,
-        Staked
+        Staked,
+        GoldRushPosStake,
+        GoldRushPowClaim
     };
 
     /** Number of confirmation recommended for accepting a transaction */

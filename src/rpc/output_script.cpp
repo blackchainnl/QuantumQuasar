@@ -148,7 +148,7 @@ static RPCHelpMan createquantummigrationaddress()
     ret.pushKV("fundable_now", true);
     ret.pushKV("spendable_now", false);
     ret.pushKV("consensus_spend_guard_active", false);
-    ret.pushKV("warning", "Address is fundable. It is spendable only by the ML-DSA private key whose public key hashes to this witness program; before the migration window, spends remain locked by consensus.");
+    ret.pushKV("warning", "Address is fundable. It is spendable only by the ML-DSA private key whose public key hashes to this witness program once quantum witness spending is active.");
     return ret;
 },
     };

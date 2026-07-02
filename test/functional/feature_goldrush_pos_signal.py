@@ -267,23 +267,13 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
         lookback_utxo = next(u for u in lookback_utxos if u["txid"] != payout_utxo["txid"] or u["vout"] != payout_utxo["vout"])
         assert Decimal(str(lookback_utxo["amount"])) > 0
 
-        self.log.info("Rejecting QQSIGNAL payout spends before the migration window")
+        self.log.info("Rejecting immature QQSIGNAL payout spends during Gold Rush")
         next_quantum = wallet.getnewquantumaddress()["address"]
-        premature_raw, _ = self._build_quantum_spend(wallet, payout_utxo, next_quantum)
-        premature_accept = node.testmempoolaccept([premature_raw])[0]
+        _, premature_signed = self._build_quantum_spend(wallet, payout_utxo, next_quantum)
+        assert_equal(premature_signed["complete"], True)
+        premature_accept = node.testmempoolaccept([premature_signed["hex"]])[0]
         assert_equal(premature_accept["allowed"], False)
-        assert premature_accept["reject-reason"] in (
-            "goldrush-remigration-premature",
-            "bad-txns-premature-spend-of-coinbase",
-        ), premature_accept
-
-        self.log.info("Advancing to migration and rejecting the still-immature QQSIGNAL payout")
-        self._advance_to_migration_window()
-        _, immature_signed = self._build_quantum_spend(wallet, payout_utxo, next_quantum)
-        assert_equal(immature_signed["complete"], True)
-        immature_accept = node.testmempoolaccept([immature_signed["hex"]])[0]
-        assert_equal(immature_accept["allowed"], False)
-        assert_equal(immature_accept["reject-reason"], "bad-txns-premature-spend-of-coinbase")
+        assert_equal(premature_accept["reject-reason"], "bad-txns-premature-spend-of-coinbase")
 
         self.log.info("Maturing and spending the QQSIGNAL payout to a fresh quantum address")
         self.generatetoaddress(node, COINBASE_MATURITY, node.get_deterministic_priv_key().address, sync_fun=self.no_op)

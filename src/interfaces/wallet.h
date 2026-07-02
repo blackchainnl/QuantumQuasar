@@ -368,7 +368,7 @@ public:
     //! Sweep spendable legacy coins into a wallet-backed quantum address.
     virtual util::Result<WalletQuantumActionTx> migrateLegacyToQuantum() = 0;
 
-    //! Move wallet-owned Gold Rush reward outputs to a fresh quantum address during the migration window.
+    //! Move wallet-owned Gold Rush reward outputs to a fresh quantum address once quantum reward spends are active.
     virtual util::Result<WalletQuantumActionTx> migrateGoldRushRewards() = 0;
 
     //! List wallet-owned RGB assets and assignments.
@@ -680,6 +680,13 @@ struct WalletQuantumOperatorBondTx
     uint32_t unlock_height{0};
     bool started_unbonding{false};
     bool completed_withdrawal{false};
+    bool created_migration{false};
+    bool completed_delegation{true};
+    std::string migration_txid;
+    std::string migration_address;
+    CAmount migration_amount{0};
+    CAmount migration_fee{0};
+    std::string warning;
 };
 
 //! Wallet migration progress and deadline state.

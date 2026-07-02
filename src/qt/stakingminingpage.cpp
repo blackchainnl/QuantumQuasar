@@ -46,6 +46,7 @@
 #include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTabWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QVariant>
@@ -391,7 +392,7 @@ void StakingMiningPage::setupUi()
     m_pow_warning->setTextFormat(Qt::RichText);
     m_pow_warning->setText(tr("<b>Important:</b> Gold Rush PoW rewards are paid to the quantum address above. "
                               "Back up this wallet after the address is created, then move Gold Rush rewards "
-                              "to a fresh quantum address during the migration window before final lockout."));
+                              "to a fresh quantum address before final lockout."));
     m_pow_warning->setStyleSheet(QStringLiteral("QLabel { color: #8a6d00; background: #fff6d6; padding: 6px; border-radius: 4px; }"));
 
     int r = 0;
@@ -411,8 +412,19 @@ void StakingMiningPage::setupUi()
     outer->addWidget(powBox);
 
     // ---- Quantum cold-staking section ----
-    auto* coldstakeBox = new QGroupBox(tr("Quantum cold staking"), this);
-    auto* cgrid = new QGridLayout(coldstakeBox);
+    auto* coldstakeBox = new QGroupBox(tr("Quantum staking and cold staking"), this);
+    auto* coldstakeOuter = new QVBoxLayout(coldstakeBox);
+    auto* coldstakeTabs = new QTabWidget(coldstakeBox);
+    auto* selfStakeTab = new QWidget(coldstakeTabs);
+    auto* selfStakeGrid = new QGridLayout(selfStakeTab);
+    auto* operatorTab = new QWidget(coldstakeTabs);
+    auto* operatorGrid = new QGridLayout(operatorTab);
+    auto* delegateTab = new QWidget(coldstakeTabs);
+    auto* delegateGrid = new QGridLayout(delegateTab);
+    coldstakeTabs->addTab(selfStakeTab, tr("Stake my coins"));
+    coldstakeTabs->addTab(operatorTab, tr("Operate"));
+    coldstakeTabs->addTab(delegateTab, tr("Delegate"));
+    coldstakeOuter->addWidget(coldstakeTabs);
 
     auto* selfStakeHeading = new QLabel(tr("<b>Stake your own quantum coins</b>"), coldstakeBox);
     selfStakeHeading->setTextFormat(Qt::RichText);
@@ -491,14 +503,14 @@ void StakingMiningPage::setupUi()
     m_operator_withdraw = new QPushButton(tr("Stop / withdraw operator bond"), coldstakeBox);
     m_operator_withdraw->setObjectName(QStringLiteral("coldstakeOperatorWithdraw"));
     m_operator_withdraw->setToolTip(tr("If bonded, starts the 30-day unbonding spend. If already unbonded and mature, withdraws to a fresh quantum address."));
-    m_operator_status = new QLabel(tr("No operator key selected. Operators must fund a 30-day bonded staking address before delegators can verify them."), coldstakeBox);
+    m_operator_status = new QLabel(tr("No operator key selected. Fund a 30-day commitment bond; once the bond has normal confirmations, the operator is available for delegation."), coldstakeBox);
     m_operator_status->setObjectName(QStringLiteral("coldstakeOperatorStatus"));
     m_operator_status->setWordWrap(true);
 
     m_operator_registry = new QTableWidget(coldstakeBox);
     m_operator_registry->setObjectName(QStringLiteral("coldstakeOperatorRegistry"));
     m_operator_registry->setColumnCount(5);
-    m_operator_registry->setHorizontalHeaderLabels(QStringList{tr("Operator"), tr("Verified"), tr("Share"), tr("Bond"), tr("Cap")});
+    m_operator_registry->setHorizontalHeaderLabels(QStringList{tr("Operator"), tr("Delegated"), tr("Share"), tr("Status"), tr("Cap")});
     m_operator_registry->horizontalHeader()->setStretchLastSection(true);
     m_operator_registry->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_operator_registry->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -564,64 +576,74 @@ void StakingMiningPage::setupUi()
     m_coldstake_status->setWordWrap(true);
 
     r = 0;
-    cgrid->addWidget(selfStakeHeading, r++, 0, 1, 4);
-    cgrid->addWidget(new QLabel(tr("Lock period:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_selfstake_lock_period, r, 1, 1, 2);
-    cgrid->addWidget(m_selfstake_new, r++, 3);
-    cgrid->addWidget(new QLabel(tr("Saved staking address:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_selfstake_selector, r++, 1, 1, 3);
-    cgrid->addWidget(new QLabel(tr("Staking address:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_selfstake_address, r, 1, 1, 2);
-    cgrid->addWidget(m_selfstake_copy, r++, 3);
-    cgrid->addWidget(new QLabel(tr("Staked output:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_selfstake_output_selector, r++, 1, 1, 3);
-    cgrid->addWidget(new QLabel(tr("Fund amount:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_selfstake_fund_amount, r, 1);
-    cgrid->addWidget(m_selfstake_fund, r, 2);
-    cgrid->addWidget(m_selfstake_withdraw, r++, 3);
-    cgrid->addWidget(m_selfstake_status, r++, 0, 1, 4);
-    cgrid->addWidget(operatorHeading, r++, 0, 1, 4);
-    cgrid->addWidget(new QLabel(tr("Operator lock:"), coldstakeBox), r, 0);
-    cgrid->addWidget(new QLabel(tr("30 days fixed"), coldstakeBox), r++, 1, 1, 3);
-    cgrid->addWidget(new QLabel(tr("Saved operator key:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_operator_selector, r++, 1, 1, 3);
-    cgrid->addWidget(new QLabel(tr("Operator address:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_operator_address, r, 1, 1, 2);
-    cgrid->addWidget(m_operator_new, r++, 3);
-    cgrid->addWidget(new QLabel(tr("Operator public key:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_operator_pubkey, r, 1, 1, 2);
-    cgrid->addWidget(m_operator_copy, r++, 3);
-    cgrid->addWidget(m_operator_use_for_delegation, r++, 1);
-    cgrid->addWidget(new QLabel(tr("Bond amount:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_operator_bond_amount, r, 1);
-    cgrid->addWidget(m_operator_fund, r, 2);
-    cgrid->addWidget(m_operator_withdraw, r++, 3);
-    cgrid->addWidget(m_operator_status, r++, 0, 1, 4);
-    cgrid->addWidget(new QLabel(tr("Available operators:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_operator_registry_refresh, r, 1);
-    cgrid->addWidget(m_operator_registry_use, r++, 2, 1, 2);
-    cgrid->addWidget(m_operator_registry, r++, 0, 1, 4);
-    cgrid->addWidget(m_operator_registry_status, r++, 0, 1, 4);
-    cgrid->addWidget(delegateHeading, r++, 0, 1, 4);
-    cgrid->addWidget(new QLabel(tr("Available quantum balance:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_coldstake_quantum_available, r++, 1, 1, 3);
-    cgrid->addWidget(new QLabel(tr("Delegations:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_coldstake_count, r++, 1);
-    cgrid->addWidget(new QLabel(tr("Saved delegation:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_coldstake_existing_selector, r++, 1, 1, 3);
-    cgrid->addWidget(new QLabel(tr("Lock period:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_coldstake_lock_period, r++, 1, 1, 3);
-    cgrid->addWidget(new QLabel(tr("Operator:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_coldstake_operator_selector, r++, 1, 1, 3);
-    cgrid->addWidget(new QLabel(tr("Delegation address:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_coldstake_address, r, 1, 1, 2);
-    cgrid->addWidget(m_coldstake_copy, r++, 3);
-    cgrid->addWidget(m_coldstake_new, r++, 1, 1, 2);
-    cgrid->addWidget(new QLabel(tr("Fund amount:"), coldstakeBox), r, 0);
-    cgrid->addWidget(m_coldstake_fund_amount, r, 1);
-    cgrid->addWidget(m_coldstake_fund, r, 2);
-    cgrid->addWidget(m_coldstake_withdraw, r++, 3);
-    cgrid->addWidget(m_coldstake_status, r++, 0, 1, 4);
+    selfStakeGrid->addWidget(selfStakeHeading, r++, 0, 1, 4);
+    selfStakeGrid->addWidget(new QLabel(tr("Choose lock period:"), selfStakeTab), r, 0);
+    selfStakeGrid->addWidget(m_selfstake_lock_period, r, 1, 1, 2);
+    selfStakeGrid->addWidget(m_selfstake_new, r++, 3);
+    selfStakeGrid->addWidget(new QLabel(tr("Saved staking address:"), selfStakeTab), r, 0);
+    selfStakeGrid->addWidget(m_selfstake_selector, r++, 1, 1, 3);
+    selfStakeGrid->addWidget(new QLabel(tr("Funding address:"), selfStakeTab), r, 0);
+    selfStakeGrid->addWidget(m_selfstake_address, r, 1, 1, 2);
+    selfStakeGrid->addWidget(m_selfstake_copy, r++, 3);
+    selfStakeGrid->addWidget(new QLabel(tr("Fund amount:"), selfStakeTab), r, 0);
+    selfStakeGrid->addWidget(m_selfstake_fund_amount, r, 1);
+    selfStakeGrid->addWidget(m_selfstake_fund, r++, 2, 1, 2);
+    selfStakeGrid->addWidget(new QLabel(tr("Existing stake output:"), selfStakeTab), r, 0);
+    selfStakeGrid->addWidget(m_selfstake_output_selector, r++, 1, 1, 3);
+    selfStakeGrid->addWidget(m_selfstake_withdraw, r++, 1, 1, 3);
+    selfStakeGrid->addWidget(m_selfstake_status, r++, 0, 1, 4);
+    selfStakeGrid->setColumnStretch(1, 1);
+    selfStakeGrid->setColumnStretch(2, 1);
+
+    r = 0;
+    operatorGrid->addWidget(operatorHeading, r++, 0, 1, 4);
+    operatorGrid->addWidget(new QLabel(tr("Operator lock:"), operatorTab), r, 0);
+    operatorGrid->addWidget(new QLabel(tr("30 days fixed"), operatorTab), r++, 1, 1, 3);
+    operatorGrid->addWidget(new QLabel(tr("Saved operator key:"), operatorTab), r, 0);
+    operatorGrid->addWidget(m_operator_selector, r++, 1, 1, 3);
+    operatorGrid->addWidget(new QLabel(tr("Operator address:"), operatorTab), r, 0);
+    operatorGrid->addWidget(m_operator_address, r, 1, 1, 2);
+    operatorGrid->addWidget(m_operator_new, r++, 3);
+    operatorGrid->addWidget(new QLabel(tr("Operator public key:"), operatorTab), r, 0);
+    operatorGrid->addWidget(m_operator_pubkey, r, 1, 1, 2);
+    operatorGrid->addWidget(m_operator_copy, r++, 3);
+    operatorGrid->addWidget(m_operator_use_for_delegation, r++, 1, 1, 3);
+    operatorGrid->addWidget(new QLabel(tr("Bond amount:"), operatorTab), r, 0);
+    operatorGrid->addWidget(m_operator_bond_amount, r, 1);
+    operatorGrid->addWidget(m_operator_fund, r, 2);
+    operatorGrid->addWidget(m_operator_withdraw, r++, 3);
+    operatorGrid->addWidget(m_operator_status, r++, 0, 1, 4);
+    operatorGrid->addWidget(new QLabel(tr("Available operators:"), operatorTab), r, 0);
+    operatorGrid->addWidget(m_operator_registry_refresh, r, 1);
+    operatorGrid->addWidget(m_operator_registry_use, r++, 2, 1, 2);
+    operatorGrid->addWidget(m_operator_registry, r++, 0, 1, 4);
+    operatorGrid->addWidget(m_operator_registry_status, r++, 0, 1, 4);
+    operatorGrid->setColumnStretch(1, 1);
+    operatorGrid->setColumnStretch(2, 1);
+
+    r = 0;
+    delegateGrid->addWidget(delegateHeading, r++, 0, 1, 4);
+    delegateGrid->addWidget(new QLabel(tr("Available quantum balance:"), delegateTab), r, 0);
+    delegateGrid->addWidget(m_coldstake_quantum_available, r++, 1, 1, 3);
+    delegateGrid->addWidget(new QLabel(tr("Delegations:"), delegateTab), r, 0);
+    delegateGrid->addWidget(m_coldstake_count, r++, 1);
+    delegateGrid->addWidget(new QLabel(tr("Saved delegation:"), delegateTab), r, 0);
+    delegateGrid->addWidget(m_coldstake_existing_selector, r++, 1, 1, 3);
+    delegateGrid->addWidget(new QLabel(tr("Lock period:"), delegateTab), r, 0);
+    delegateGrid->addWidget(m_coldstake_lock_period, r++, 1, 1, 3);
+    delegateGrid->addWidget(new QLabel(tr("Operator:"), delegateTab), r, 0);
+    delegateGrid->addWidget(m_coldstake_operator_selector, r++, 1, 1, 3);
+    delegateGrid->addWidget(new QLabel(tr("Delegation address:"), delegateTab), r, 0);
+    delegateGrid->addWidget(m_coldstake_address, r, 1, 1, 2);
+    delegateGrid->addWidget(m_coldstake_copy, r++, 3);
+    delegateGrid->addWidget(m_coldstake_new, r++, 1, 1, 3);
+    delegateGrid->addWidget(new QLabel(tr("Fund amount:"), delegateTab), r, 0);
+    delegateGrid->addWidget(m_coldstake_fund_amount, r, 1);
+    delegateGrid->addWidget(m_coldstake_fund, r, 2);
+    delegateGrid->addWidget(m_coldstake_withdraw, r++, 3);
+    delegateGrid->addWidget(m_coldstake_status, r++, 0, 1, 4);
+    delegateGrid->setColumnStretch(1, 1);
+    delegateGrid->setColumnStretch(2, 1);
     outer->addWidget(coldstakeBox);
 
     // ---- Quantum migration section ----
@@ -666,7 +688,7 @@ void StakingMiningPage::setupUi()
     m_migration_legacy_sweep->setToolTip(tr("Create, sign, and broadcast a transaction moving all spendable legacy wallet funds to a fresh wallet-backed quantum address."));
     m_migration_goldrush_sweep = new QPushButton(tr("Move Gold Rush rewards"), migrationBox);
     m_migration_goldrush_sweep->setObjectName(QStringLiteral("migrationGoldrushSweep"));
-    m_migration_goldrush_sweep->setToolTip(tr("During the migration window, move wallet-owned Gold Rush reward outputs to a fresh quantum address before final lockout."));
+    m_migration_goldrush_sweep->setToolTip(tr("Move wallet-owned Gold Rush reward outputs to a fresh quantum address before using them for sends, staking, or delegation."));
     m_migration_action_status = new QLabel(QStringLiteral("-"), migrationBox);
     m_migration_action_status->setObjectName(QStringLiteral("migrationActionStatus"));
     m_migration_action_status->setWordWrap(true);
@@ -1036,7 +1058,7 @@ void StakingMiningPage::onMigrateGoldRushRewards()
     const int rc = QMessageBox::question(
         this,
         tr("Move Gold Rush rewards"),
-        tr("This will create a fresh wallet-backed quantum address and move wallet-owned Gold Rush reward outputs into it. Continue?"));
+        tr("This will create a fresh wallet-backed quantum address and move wallet-owned Gold Rush reward outputs into it. After confirmation, those funds can be used for sends, staking, operator bonds, or cold-stake delegation. Continue?"));
     if (rc != QMessageBox::Yes) return;
 
     WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
@@ -1051,8 +1073,9 @@ void StakingMiningPage::onMigrateGoldRushRewards()
     }
 
     m_quantum_address->setText(QString::fromStdString(result->address));
-    m_migration_action_status->setText(tr("Gold Rush reward migration broadcast: %1. Moved %2 from %3 output(s); fee %4. Back up this wallet now.")
+    m_migration_action_status->setText(tr("Gold Rush reward move broadcast: %1. Fresh quantum address: %2. Moved %3 from %4 output(s); fee %5. Back up this wallet now.")
         .arg(QString::fromStdString(result->txid))
+        .arg(QString::fromStdString(result->address))
         .arg(formatBLK(result->amount))
         .arg(result->selected_inputs)
         .arg(formatBLK(result->fee)));
@@ -1432,10 +1455,27 @@ void StakingMiningPage::onFundColdStakeAddress()
         return;
     }
 
-    m_coldstake_last_action_status = tr("Cold-stake delegation funding broadcast: %1. Amount: %2. Fee: %3.")
-        .arg(QString::fromStdString(result->txid))
-        .arg(formatBLK(result->amount))
-        .arg(formatBLK(result->fee));
+    if (result->created_migration && result->completed_delegation) {
+        m_coldstake_last_action_status = tr("Gold Rush rewards were first moved to fresh quantum address %1 (%2, fee %3), then delegation funding was broadcast: %4. Delegated %5; delegation fee %6.")
+            .arg(QString::fromStdString(result->migration_address))
+            .arg(QString::fromStdString(result->migration_txid))
+            .arg(formatBLK(result->migration_fee))
+            .arg(QString::fromStdString(result->txid))
+            .arg(formatBLK(result->amount))
+            .arg(formatBLK(result->fee));
+    } else if (result->created_migration) {
+        m_coldstake_last_action_status = tr("Gold Rush rewards were moved to fresh quantum address %1 (%2, fee %3). Delegation was not broadcast yet: %4")
+            .arg(QString::fromStdString(result->migration_address))
+            .arg(QString::fromStdString(result->migration_txid))
+            .arg(formatBLK(result->migration_fee))
+            .arg(QString::fromStdString(result->warning));
+        QMessageBox::information(this, tr("Gold Rush rewards moved"), m_coldstake_last_action_status);
+    } else {
+        m_coldstake_last_action_status = tr("Cold-stake delegation funding broadcast: %1. Amount: %2. Fee: %3.")
+            .arg(QString::fromStdString(result->txid))
+            .arg(formatBLK(result->amount))
+            .arg(formatBLK(result->fee));
+    }
     m_coldstake_status->setText(m_coldstake_last_action_status);
     m_force_full_refresh = true;
     updateStatus();
@@ -1514,7 +1554,7 @@ void StakingMiningPage::refreshOperatorRegistry()
         const QString label = !op.staking_pubkey.empty()
             ? shortenHex(op.staking_pubkey)
             : shortenHex(op.staking_pubkey_hash);
-        const QString bond = op.operator_commitment_verified ? tr("30-day") : tr("missing");
+        const QString bond = op.operator_commitment_verified ? tr("ready") : tr("missing bond");
         const QString cap = op.over_cap ? tr("over 20%") : tr("ok");
 
         auto* operator_item = new QTableWidgetItem(label);
@@ -1527,7 +1567,7 @@ void StakingMiningPage::refreshOperatorRegistry()
         m_operator_registry->setItem(row, 4, new QTableWidgetItem(cap));
 
         if (!pubkey.isEmpty()) {
-            const QString selector_label = tr("%1  |  %2 verified  |  %3 share  |  %4")
+            const QString selector_label = tr("%1  |  %2 delegated  |  %3 share  |  %4")
                 .arg(label)
                 .arg(formatBLK(op.verified_value))
                 .arg(formatBps(op.share_bps))
@@ -1565,7 +1605,7 @@ void StakingMiningPage::refreshOperatorRegistry()
 
     m_operator_registry_status->setText(pool.operators.empty()
         ? tr("No cold-staking operators are published in this node's local registry. Use getquantumpoolinfo in the console to inspect the same data.")
-        : tr("%1 operator(s) discovered. Total verified cold stake: %2. Wallet cap: %3.")
+        : tr("%1 operator(s) discovered. Total delegated cold stake: %2. Operators become available after normal confirmations; the 30-day bond is the unbonding commitment. Wallet cap: %3.")
               .arg(static_cast<int>(pool.operators.size()))
               .arg(formatBLK(pool.total_coldstake))
               .arg(formatBps(pool.cap_bps)));
@@ -1743,7 +1783,7 @@ void StakingMiningPage::updateStatus()
                   .arg(formatBLK(migration.staked_quantum_amount))
             : QString();
         if (migration.goldrush_reward_amount_needing_move > 0) {
-            m_coldstake_quantum_available->setText(tr("%1 total quantum wallet balance. %2 direct quantum available for delegation. %3 Gold Rush rewards must be moved during the migration window before delegation.%4")
+            m_coldstake_quantum_available->setText(tr("%1 total quantum wallet balance. %2 direct quantum available for delegation. %3 Gold Rush rewards need a fresh quantum migration before cold staking; Fund delegation will move them first when quantum spending is active.%4")
                 .arg(formatBLK(balances.quantum_balance))
                 .arg(formatBLK(direct_delegation_balance))
                 .arg(formatBLK(migration.goldrush_reward_amount_needing_move))

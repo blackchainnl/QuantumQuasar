@@ -214,6 +214,16 @@ void UpsertQuantumPoolClaims(const uint256& staker_pubkey_hash, std::vector<Quan
 void UpsertQuantumPoolOperator(const uint256& staker_pubkey_hash, std::vector<unsigned char> staker_pubkey, std::vector<QuantumPoolClaim> claims, bool operator_commitment_verified, COutPoint operator_commitment_outpoint)
 {
     LOCK(g_quantum_pool_mutex);
+    const auto existing = g_quantum_pool_registry.find(staker_pubkey_hash);
+    if (existing != g_quantum_pool_registry.end()) {
+        if (staker_pubkey.empty()) {
+            staker_pubkey = existing->second.staker_pubkey;
+        }
+        if (!operator_commitment_verified && existing->second.operator_commitment_verified) {
+            operator_commitment_verified = true;
+            operator_commitment_outpoint = existing->second.operator_commitment_outpoint;
+        }
+    }
     QuantumPoolOperatorRecord record;
     record.staker_pubkey = std::move(staker_pubkey);
     record.claims = std::move(claims);

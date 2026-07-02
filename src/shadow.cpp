@@ -1292,9 +1292,9 @@ bool IsShadowMarkerScript(const CScript& script)
            ParseMarkerScript(script, MARKER_ACTIVE_SIGNAL);
 }
 
-std::vector<CTransactionRef> GetAppliedShadowClaimPayoutTransactions(const CCoinsViewCache& view, int height, const uint256& block_hash, int64_t block_time)
+std::vector<ShadowSyntheticPayoutTransaction> GetAppliedShadowClaimPayoutTransactionRecords(const CCoinsViewCache& view, int height, const uint256& block_hash, int64_t block_time)
 {
-    std::vector<CTransactionRef> payouts;
+    std::vector<ShadowSyntheticPayoutTransaction> payouts;
     if (height < SHADOW_REWARD_START_HEIGHT || height > SHADOW_REWARD_END_HEIGHT) return payouts;
 
     for (uint32_t marker_index = 0; marker_index < MAX_SHADOW_CLAIM_MARKERS_PER_BLOCK; ++marker_index) {
@@ -1305,7 +1305,21 @@ std::vector<CTransactionRef> GetAppliedShadowClaimPayoutTransactions(const CCoin
             !IsQuantumMigrationScript(claim->target)) {
             break;
         }
-        payouts.push_back(BuildClaimPayoutTransaction(height, block_hash, block_time, marker_index, *claim));
+        payouts.push_back(ShadowSyntheticPayoutTransaction{
+            BuildClaimPayoutTransaction(height, block_hash, block_time, marker_index, *claim),
+            claim->target,
+            claim->amount,
+            claim->mode == ShadowProofMode::POW,
+        });
+    }
+    return payouts;
+}
+
+std::vector<CTransactionRef> GetAppliedShadowClaimPayoutTransactions(const CCoinsViewCache& view, int height, const uint256& block_hash, int64_t block_time)
+{
+    std::vector<CTransactionRef> payouts;
+    for (const ShadowSyntheticPayoutTransaction& payout : GetAppliedShadowClaimPayoutTransactionRecords(view, height, block_hash, block_time)) {
+        payouts.push_back(payout.tx);
     }
     return payouts;
 }

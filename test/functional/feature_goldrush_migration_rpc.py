@@ -117,7 +117,8 @@ class GoldRushMigrationRpcTest(BitcoinTestFramework):
 
     def _assert_one_reward_needs_move(self, wallet, amount):
         status = wallet.getmigrationstatus()
-        assert_equal(status["phase"], "gold_rush" if not status["goldrush_remigration_active"] else "migration")
+        assert_equal(status["phase"], "gold_rush")
+        assert_equal(status["goldrush_remigration_active"], True)
         assert_equal(status["goldrush_reward_outputs_needing_move"], 1)
         assert_equal(Decimal(status["goldrush_reward_amount_needing_move"]), amount)
 
@@ -152,13 +153,14 @@ class GoldRushMigrationRpcTest(BitcoinTestFramework):
         payout_amount = Decimal(str(payout_utxo["amount"]))
         self._assert_one_reward_needs_move(wallet, payout_amount)
 
-        self.log.info("migrategoldrushrewards is rejected before the migration window")
-        assert_raises_rpc_error(
-            -4,
-            "Gold Rush reward migration is only allowed after Gold Rush ends",
-            wallet.migrategoldrushrewards,
-            {"dry_run": True},
-        )
+        self.log.info("migrategoldrushrewards can dry-run during Gold Rush once quantum reward spends are active")
+        goldrush_destination = wallet.getnewquantumaddress()["address"]
+        goldrush_dry_run = wallet.migrategoldrushrewards({"dry_run": True, "existing_address": goldrush_destination})
+        assert_equal(goldrush_dry_run["phase"], "gold_rush")
+        assert_equal(goldrush_dry_run["eligible_inputs"], 1)
+        assert_equal(Decimal(goldrush_dry_run["eligible_amount"]), payout_amount)
+        assert_equal(goldrush_dry_run["destination"], goldrush_destination)
+        assert_equal(wallet.getmigrationstatus()["goldrush_reward_outputs_needing_move"], 1)
 
         self.log.info("Advancing to the migration window")
         mining_address = wallet.getnewquantumaddress()["address"]

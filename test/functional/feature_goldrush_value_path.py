@@ -177,25 +177,15 @@ class GoldRushValuePathTest(BitcoinTestFramework):
         self.wait_until(lambda: node.getbestblockhash() == claim_block_hash)
         payout_utxo = self._wait_for_quantum_utxo(wallet, payout_address)
 
-        self.log.info("Gold Rush payout spends are rejected before the migration window")
+        self.log.info("Immature Gold Rush payout spends are rejected during Gold Rush")
         next_quantum = wallet.getnewquantumaddress()["address"]
-        premature_raw, _ = self._build_quantum_spend(wallet, payout_utxo, next_quantum)
-        premature_accept = node.testmempoolaccept([premature_raw])[0]
+        _, premature_signed = self._build_quantum_spend(wallet, payout_utxo, next_quantum)
+        assert_equal(premature_signed["complete"], True)
+        premature_accept = node.testmempoolaccept([premature_signed["hex"]])[0]
         assert_equal(premature_accept["allowed"], False)
-        assert premature_accept["reject-reason"] in (
-            "goldrush-remigration-premature",
-            "bad-txns-premature-spend-of-coinbase",
-        ), premature_accept
+        assert_equal(premature_accept["reject-reason"], "bad-txns-premature-spend-of-coinbase")
 
-        self.log.info("Advancing to migration and rejecting the still-immature synthetic payout")
-        self._advance_to_migration_window()
-        immature_raw, immature_signed = self._build_quantum_spend(wallet, payout_utxo, next_quantum)
-        assert_equal(immature_signed["complete"], True)
-        immature_accept = node.testmempoolaccept([immature_signed["hex"]])[0]
-        assert_equal(immature_accept["allowed"], False)
-        assert_equal(immature_accept["reject-reason"], "bad-txns-premature-spend-of-coinbase")
-
-        self.log.info("Maturing the synthetic coin during the migration window")
+        self.log.info("Maturing the synthetic coin during Gold Rush")
         self.generatetoaddress(node, COINBASE_MATURITY, node.get_deterministic_priv_key().address, sync_fun=self.no_op)
         self._sync_mocktime_to_tip()
         matured_utxo = self._wait_for_quantum_utxo(wallet, payout_address)

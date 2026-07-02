@@ -8,6 +8,7 @@
 #include <chain.h>
 #include <interfaces/wallet.h>
 #include <key_io.h>
+#include <script/solver.h>
 #include <wallet/types.h>
 
 #include <stdint.h>
@@ -34,6 +35,15 @@ std::string GoldRushWalletControlLabel(const std::map<std::string, std::string>&
     if (it->second.find("signal") != std::string::npos) return "Gold Rush signal";
     if (it->second.find("PoW claim") != std::string::npos || it->second.find("shadow PoW") != std::string::npos) return "Gold Rush PoW claim";
     return "Gold Rush";
+}
+
+TransactionRecord::Type GoldRushClaimType(const std::map<std::string, std::string>& map_value)
+{
+    const auto it = map_value.find("comment");
+    if (it == map_value.end()) return TransactionRecord::Other;
+    if (it->second == "PoS - Quantum Stake") return TransactionRecord::GoldRushPosStake;
+    if (it->second == "PoW - Quantum Claim") return TransactionRecord::GoldRushPowClaim;
+    return TransactionRecord::Other;
 }
 
 bool IsQuantumOutput(const CTxOut& txout)
@@ -86,6 +96,16 @@ CAmount QuantumWalletTransferAmount(const interfaces::WalletTx& wtx)
     }
     return amount;
 }
+
+std::string FirstQuantumOutputAddress(const interfaces::WalletTx& wtx)
+{
+    for (const CTxOut& txout : wtx.tx->vout) {
+        if (txout.nValue <= 0 || !IsQuantumOutput(txout)) continue;
+        CTxDestination dest;
+        if (ExtractDestination(txout.scriptPubKey, dest)) return EncodeDestination(dest);
+    }
+    return {};
+}
 } // namespace
 
 using wallet::ISMINE_NO;
@@ -112,6 +132,19 @@ QList<TransactionRecord> TransactionRecord::decomposeTransaction(const interface
     CAmount nNet = nCredit - nDebit;
     uint256 hash = wtx.tx->GetHash();
     std::map<std::string, std::string> mapValue = wtx.value_map;
+
+    const TransactionRecord::Type goldrush_claim_type = GoldRushClaimType(mapValue);
+    if (goldrush_claim_type == TransactionRecord::GoldRushPosStake || goldrush_claim_type == TransactionRecord::GoldRushPowClaim) {
+        std::string address;
+        const auto to_it = mapValue.find("to");
+        if (to_it != mapValue.end()) address = to_it->second;
+        if (address.empty()) address = FirstQuantumOutputAddress(wtx);
+        TransactionRecord sub(hash, nTime, goldrush_claim_type, address, 0, nCredit > 0 ? nCredit : wtx.tx->GetValueOut());
+        sub.idx = 0;
+        sub.involvesWatchAddress = false;
+        parts.append(sub);
+        return parts;
+    }
 
     if (IsGoldRushWalletControlTx(mapValue)) {
         TransactionRecord sub(hash, nTime, TransactionRecord::Other, GoldRushWalletControlLabel(mapValue), nNet, 0);

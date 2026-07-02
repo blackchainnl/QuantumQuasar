@@ -387,6 +387,10 @@ QString TransactionTableModel::formatTxType(const TransactionRecord *wtx) const
         return tr("Mined");
     case TransactionRecord::Staked:
         return tr("Staked");
+    case TransactionRecord::GoldRushPosStake:
+        return tr("PoS - Quantum Stake");
+    case TransactionRecord::GoldRushPowClaim:
+        return tr("PoW - Quantum Claim");
     case TransactionRecord::Other:
         return tr("Other");
     default:
@@ -402,6 +406,10 @@ QVariant TransactionTableModel::txAddressDecoration(const TransactionRecord *wtx
         return QIcon(":/icons/tx_mined");
     case TransactionRecord::Staked:
 	    return QIcon(":/icons/tx_staked");
+    case TransactionRecord::GoldRushPosStake:
+        return QIcon(":/icons/tx_staked");
+    case TransactionRecord::GoldRushPowClaim:
+        return QIcon(":/icons/tx_mined");
     case TransactionRecord::RecvWithAddress:
     case TransactionRecord::RecvFromOther:
         return QIcon(":/icons/tx_input");
@@ -429,6 +437,8 @@ QString TransactionTableModel::formatTxToAddress(const TransactionRecord *wtx, b
     case TransactionRecord::SendToAddress:
     case TransactionRecord::Generated:
     case TransactionRecord::Staked:
+    case TransactionRecord::GoldRushPosStake:
+    case TransactionRecord::GoldRushPowClaim:
         return lookupAddress(wtx->address, tooltip) + watchAddress;
     case TransactionRecord::SendToOther:
         return QString::fromStdString(wtx->address) + watchAddress;
@@ -449,6 +459,8 @@ QVariant TransactionTableModel::addressColor(const TransactionRecord *wtx) const
     case TransactionRecord::SendToAddress:
     case TransactionRecord::Generated:
     case TransactionRecord::Staked:
+    case TransactionRecord::GoldRushPosStake:
+    case TransactionRecord::GoldRushPowClaim:
         {
         QString label = walletModel->getAddressTableModel()->labelForAddress(QString::fromStdString(wtx->address));
         if(label.isEmpty())

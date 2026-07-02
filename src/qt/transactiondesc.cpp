@@ -48,6 +48,15 @@ QString GoldRushWalletControlLabel(const interfaces::WalletTx& wtx)
     return {};
 }
 
+QString GoldRushClaimLabel(const interfaces::WalletTx& wtx)
+{
+    const auto it = wtx.value_map.find("comment");
+    if (it == wtx.value_map.end()) return {};
+    if (it->second == "PoS - Quantum Stake") return QObject::tr("PoS - Quantum Stake");
+    if (it->second == "PoW - Quantum Claim") return QObject::tr("PoW - Quantum Claim");
+    return {};
+}
+
 bool IsQuantumOutput(const CTxOut& txout)
 {
     return IsQuantumMigrationScript(txout.scriptPubKey) || IsQuantumColdStakeScript(txout.scriptPubKey);
@@ -170,6 +179,7 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     CAmount nDebit = wtx.debit;
     CAmount nNet = nCredit - nDebit;
     const QString gold_rush_control_label = GoldRushWalletControlLabel(wtx);
+    const QString gold_rush_claim_label = GoldRushClaimLabel(wtx);
     const bool quantum_wallet_transfer = IsQuantumWalletTransferTx(wtx);
 
     strHTML += "<b>" + tr("Status") + ":</b> " + FormatTxStatus(status, inMempool);
@@ -180,7 +190,12 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     //
     // From
     //
-    if (!gold_rush_control_label.isEmpty())
+    if (!gold_rush_claim_label.isEmpty())
+    {
+        strHTML += "<b>" + tr("Source") + ":</b> " + tr("Gold Rush reward") + "<br>";
+        strHTML += "<b>" + tr("Action") + ":</b> " + gold_rush_claim_label + "<br>";
+    }
+    else if (!gold_rush_control_label.isEmpty())
     {
         strHTML += "<b>" + tr("Source") + ":</b> " + tr("Wallet self-authentication") + "<br>";
         strHTML += "<b>" + tr("Action") + ":</b> " + gold_rush_control_label + "<br>";
@@ -255,7 +270,11 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     //
     // Amount
     //
-    if (!gold_rush_control_label.isEmpty())
+    if (!gold_rush_claim_label.isEmpty())
+    {
+        strHTML += "<b>" + tr("Credit") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, nCredit) + "<br>";
+    }
+    else if (!gold_rush_control_label.isEmpty())
     {
         const CAmount nTxFee = nDebit - wtx.tx->GetValueOut();
         if (nTxFee > 0) {
@@ -391,7 +410,7 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
         }
     }
 
-    if (gold_rush_control_label.isEmpty() && !quantum_wallet_transfer) {
+    if (gold_rush_control_label.isEmpty() && gold_rush_claim_label.isEmpty() && !quantum_wallet_transfer) {
         strHTML += "<b>" + tr("Net amount") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, nNet, true) + "<br>";
     }
 

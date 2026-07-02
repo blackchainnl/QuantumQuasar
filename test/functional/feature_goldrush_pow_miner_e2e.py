@@ -7,7 +7,7 @@
 Manual sendshadowpowclaim coverage proves the consensus value path. This test
 drives the in-process miner itself: a small non-whitelisted fee UTXO authenticates
 the QQSPROOF, a separate staker includes it in a PoS block, and the resulting
-synthetic quantum payout becomes spendable only during the migration window.
+synthetic quantum payout must move to a fresh quantum address before ordinary use.
 """
 
 from decimal import Decimal

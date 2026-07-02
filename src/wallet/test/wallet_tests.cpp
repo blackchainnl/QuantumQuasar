@@ -418,6 +418,8 @@ BOOST_FIXTURE_TEST_CASE(goldrush_shadow_payouts_sync_on_connect_disconnect_and_r
         BOOST_CHECK_EQUAL(CachedTxGetImmatureCredit(wallet, *wtx, ISMINE_SPENDABLE), 580 * COIN);
         BOOST_CHECK_EQUAL(CachedTxGetAvailableCredit(wallet, *wtx, ISMINE_SPENDABLE), 0);
         BOOST_CHECK_EQUAL(GetBalance(wallet).m_mine_immature, 580 * COIN);
+        BOOST_CHECK_EQUAL(wtx->mapValue.at("comment"), "PoS - Quantum Stake");
+        BOOST_CHECK_EQUAL(wtx->mapValue.at("to"), EncodeDestination(quantum_dest));
     }
 
     {
@@ -464,6 +466,8 @@ BOOST_FIXTURE_TEST_CASE(goldrush_shadow_payouts_sync_on_connect_disconnect_and_r
         BOOST_CHECK(wtx->state<TxStateConfirmed>() != nullptr);
         BOOST_CHECK_EQUAL(CachedTxGetImmatureCredit(rescan_wallet, *wtx, ISMINE_SPENDABLE), 580 * COIN);
         BOOST_CHECK_EQUAL(GetBalance(rescan_wallet).m_mine_immature, 580 * COIN);
+        BOOST_CHECK_EQUAL(wtx->mapValue.at("comment"), "PoS - Quantum Stake");
+        BOOST_CHECK_EQUAL(wtx->mapValue.at("to"), EncodeDestination(quantum_dest));
     }
 
     {

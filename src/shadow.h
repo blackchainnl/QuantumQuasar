@@ -52,6 +52,13 @@ struct ShadowSyntheticPayoutCoin {
     int64_t time{0};
 };
 
+struct ShadowSyntheticPayoutTransaction {
+    CTransactionRef tx;
+    CScript target;
+    CAmount amount{0};
+    bool proof_of_work{false};
+};
+
 // Gold Rush schedule heights. Defaults are the mainnet values. The dedicated
 // testnet schedule branch may override them on testnet/regtest only via
 // -shadowwhitelistheight / -shadowgoldrushstartheight / -shadowgoldrushblocks so
@@ -177,6 +184,8 @@ bool IsShadowMarkerScript(const CScript& script);
 
 /** Build wallet-indexable synthetic payout transactions for applied claim markers in one block. */
 std::vector<CTransactionRef> GetAppliedShadowClaimPayoutTransactions(const CCoinsViewCache& view, int height, const uint256& block_hash, int64_t block_time);
+/** Build wallet-indexable synthetic payout transactions plus claim metadata for UI/wallet annotations. */
+std::vector<ShadowSyntheticPayoutTransaction> GetAppliedShadowClaimPayoutTransactionRecords(const CCoinsViewCache& view, int height, const uint256& block_hash, int64_t block_time);
 
 /** Build indexable synthetic payout coins for applied claim markers in one block. */
 std::vector<ShadowSyntheticPayoutCoin> GetAppliedShadowClaimPayoutCoins(const CCoinsViewCache& view, int height, const uint256& block_hash, int64_t block_time);

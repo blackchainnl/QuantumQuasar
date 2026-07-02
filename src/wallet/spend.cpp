@@ -400,7 +400,7 @@ util::Result<PreSelectedInputs> FetchSelectedInputs(const CWallet& wallet, const
             IsQuantumMigrationScript(txout.scriptPubKey)) {
             const CWalletTx* wallet_tx = wallet.GetWalletTx(outpoint.hash);
             if (wallet_tx && wallet_tx->IsCoinBase()) {
-                return util::Error{strprintf(_("Pre-selected input %s is a Gold Rush reward output. Use Move Gold Rush rewards during the migration window instead."), outpoint.ToString())};
+                return util::Error{strprintf(_("Pre-selected input %s is a Gold Rush reward output. Move it to a fresh quantum address before using it for ordinary sends or staking."), outpoint.ToString())};
             }
         }
 

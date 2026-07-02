@@ -45,6 +45,7 @@
 #include <wallet/wallet.h>
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -343,6 +344,8 @@ struct LocalOperatorBondCandidate
     COutPoint outpoint;
 };
 
+util::Result<WalletQuantumActionTx> CreateGoldRushColdStakeMigration(CWallet& wallet);
+
 OperatorBondOutputs ScanOperatorBondOutputs(
     const CWallet& wallet,
     const CScript& bonded_script,
@@ -468,6 +471,48 @@ std::vector<LocalOperatorBondCandidate> FindWalletOperatorBondCandidates(const C
         }
     }
     return candidates;
+}
+
+std::map<uint256, std::vector<node::QuantumPoolClaim>> FindWalletQuantumPoolClaims(const CWallet& wallet)
+{
+    std::map<uint256, std::vector<node::QuantumPoolClaim>> claims_by_operator;
+
+    LOCK(wallet.cs_wallet);
+    CoinFilterParams filter;
+    filter.only_spendable = false;
+    filter.skip_locked = false;
+    filter.include_immature_coinbase = false;
+    const std::vector<COutput> coins = AvailableCoinsListUnspent(wallet, nullptr, filter).All();
+
+    for (const COutput& out : coins) {
+        if (out.txout.nValue <= 0) continue;
+
+        int witness_version{0};
+        std::vector<unsigned char> witness_program;
+        if (!out.txout.scriptPubKey.IsWitnessProgram(witness_version, witness_program) ||
+            !IsQuantumColdStakeWitnessProgram(witness_version, witness_program)) {
+            continue;
+        }
+
+        const auto info = wallet.GetQuantumColdStakeDelegationInfo(witness_program);
+        if (!info) continue;
+
+        node::QuantumPoolClaim claim;
+        claim.outpoint = out.outpoint;
+        claim.staker_pubkey_hash = info->staker_pubkey_hash;
+        claim.owner_pubkey_hash = info->owner_pubkey_hash;
+
+        if (const auto tier = GetQuantumStakeTierProgram(out.txout.scriptPubKey); tier && tier->tiered && tier->cold_stake) {
+            claim.tiered = true;
+            claim.state = tier->state;
+            claim.unbonding_blocks = tier->unbonding_blocks;
+            claim.unlock_height = tier->unlock_height;
+        }
+
+        claims_by_operator[claim.staker_pubkey_hash].push_back(std::move(claim));
+    }
+
+    return claims_by_operator;
 }
 
 bool FindTieredStakeRecord(const OperatorBondOutputs& outputs, const COutPoint& outpoint, OperatorBondOutputs::Record& record)
@@ -738,6 +783,7 @@ util::Result<WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
 
     CTransactionRef tx;
     CAmount fee{0};
+    bool use_goldrush_migration{false};
     {
         LOCK2(::cs_main, wallet.cs_wallet);
         bilingual_str spend_error;
@@ -750,41 +796,75 @@ util::Result<WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
             return util::Error{_("Error: Wallet must hold the owner key before funding a cold-stake delegation")};
         }
 
-        auto change_dest = wallet.GetNewQuantumChangeDestination();
-        if (!change_dest) return util::Error{util::ErrorString(change_dest)};
-
-        std::vector<CRecipient> recipients{{dest, amount, /*fSubtractFeeFromAmount=*/false}};
         CCoinControl coin_control;
         coin_control.m_input_family = CCoinControl::InputFamily::QUANTUM_MIGRATION;
         coin_control.m_allow_other_inputs = false;
-        coin_control.destChange = *change_dest;
 
         const CCoinsViewCache& view = wallet.chain().chainman().ActiveChainstate().CoinsTip();
         const ColdStakeFundingInputs funding = SelectColdStakeFundingInputs(wallet, view, coin_control);
         if (funding.eligible_inputs == 0) {
-            return util::Error{funding.goldrush_reward_inputs > 0
-                ? _("Error: Cold-stake funding cannot use Gold Rush reward outputs during Gold Rush. Move those rewards to a new quantum wallet during the migration window before delegating them.")
-                : _("Error: No spendable direct quantum outputs are available to fund this cold-stake delegation.")};
+            if (funding.goldrush_reward_inputs > 0) {
+                use_goldrush_migration = true;
+            } else {
+                return util::Error{_("Error: No spendable direct quantum outputs are available to fund this cold-stake delegation.")};
+            }
         }
-        if (funding.eligible_amount <= amount) {
-            bilingual_str error = strprintf(
-                _("Error: Insufficient direct quantum balance to fund this delegation and its fee. Available direct quantum balance: %s. Gold Rush reward balance not eligible for delegation yet: %s."),
-                FormatMoney(funding.eligible_amount),
-                FormatMoney(funding.goldrush_reward_amount));
-            return util::Error{error};
+        if (!use_goldrush_migration && funding.eligible_amount <= amount) {
+            if (funding.goldrush_reward_inputs > 0) {
+                use_goldrush_migration = true;
+            } else {
+                bilingual_str error = strprintf(
+                    _("Error: Insufficient direct quantum balance to fund this delegation and its fee. Available direct quantum balance: %s."),
+                    FormatMoney(funding.eligible_amount));
+                return util::Error{error};
+            }
         }
+        if (!use_goldrush_migration) {
+            auto change_dest = wallet.GetNewQuantumChangeDestination();
+            if (!change_dest) return util::Error{util::ErrorString(change_dest)};
 
-        int change_pos = RANDOM_CHANGE_POSITION;
-        auto res = CreateTransaction(wallet, recipients, change_pos, coin_control, /*sign=*/true);
-        if (!res) {
-            bilingual_str error = strprintf(
-                _("Error: Unable to fund cold-stake delegation from direct quantum outputs. %s Gold Rush reward balance not eligible for delegation yet: %s."),
-                util::ErrorString(res).original,
-                FormatMoney(funding.goldrush_reward_amount));
-            return util::Error{error};
+            std::vector<CRecipient> recipients{{dest, amount, /*fSubtractFeeFromAmount=*/false}};
+            coin_control.destChange = *change_dest;
+            int change_pos = RANDOM_CHANGE_POSITION;
+            auto res = CreateTransaction(wallet, recipients, change_pos, coin_control, /*sign=*/true);
+            if (!res) {
+                bilingual_str error = strprintf(
+                    _("Error: Unable to fund cold-stake delegation from direct quantum outputs. %s"),
+                    util::ErrorString(res).original);
+                return util::Error{error};
+            }
+            tx = res->tx;
+            fee = res->fee;
         }
-        tx = res->tx;
-        fee = res->fee;
+    }
+
+    if (use_goldrush_migration) {
+        auto migration = CreateGoldRushColdStakeMigration(wallet);
+        if (!migration) return util::Error{util::ErrorString(migration)};
+
+        auto delegation = FundColdStakeDelegationAddress(wallet, address, amount);
+        if (!delegation) {
+            WalletQuantumOperatorBondTx result;
+            result.address = address;
+            result.amount = migration->amount;
+            result.fee = migration->fee;
+            result.created_migration = true;
+            result.completed_delegation = false;
+            result.migration_txid = migration->txid;
+            result.migration_address = migration->address;
+            result.migration_amount = migration->amount;
+            result.migration_fee = migration->fee;
+            result.warning = strprintf(
+                "Gold Rush rewards were moved to a fresh quantum address, but the cold-stake delegation was not broadcast yet: %s",
+                util::ErrorString(delegation).original);
+            return result;
+        }
+        delegation->created_migration = true;
+        delegation->migration_txid = migration->txid;
+        delegation->migration_address = migration->address;
+        delegation->migration_amount = migration->amount;
+        delegation->migration_fee = migration->fee;
+        return delegation;
     }
 
     mapValue_t map_value;
@@ -1091,9 +1171,17 @@ WalletDemurrageInfo GetWalletDemurrageInfo(CWallet& wallet)
     return info;
 }
 
-util::Result<WalletQuantumActionTx> CreateQuantumMigrationSweep(CWallet& wallet, bool goldrush_rewards_only)
+util::Result<WalletQuantumActionTx> CreateQuantumMigrationSweep(
+    CWallet& wallet,
+    bool goldrush_rewards_only,
+    bool allow_goldrush_epoch = false,
+    const std::string& destination_label = "",
+    const std::string& comment_override = "")
 {
-    auto destination_result = wallet.GetNewQuantumDestination(goldrush_rewards_only ? "goldrush-remigration-gui" : "migration-gui");
+    const std::string label = !destination_label.empty()
+        ? destination_label
+        : (goldrush_rewards_only ? "goldrush-remigration-gui" : "migration-gui");
+    auto destination_result = wallet.GetNewQuantumDestination(label);
     if (!destination_result) return util::Error{util::ErrorString(destination_result)};
     const CTxDestination destination = *destination_result;
     const CScript destination_script = GetScriptForDestination(destination);
@@ -1115,9 +1203,15 @@ util::Result<WalletQuantumActionTx> CreateQuantumMigrationSweep(CWallet& wallet,
         const Consensus::Params& consensus = Params().GetConsensus();
         const CBlockIndex* tip = wallet.chain().getTip();
         const int64_t mtp = tip ? tip->GetMedianTimePast() : 0;
+        const int next_height = tip ? tip->nHeight + 1 : 0;
         if (goldrush_rewards_only) {
-            if (!consensus.IsQuantumMigrationWindow(mtp)) {
-                return util::Error{_("Gold Rush reward migration is only allowed after Gold Rush ends and before the final quantum lockout deadline.")};
+            const bool can_move_reward_outputs = consensus.IsQuantumMigrationWindow(mtp) ||
+                (allow_goldrush_epoch && !consensus.IsQuantumFinalLockout(mtp) &&
+                 IsQuantumWitnessSpendActive(consensus, mtp, next_height));
+            if (!can_move_reward_outputs) {
+                return util::Error{allow_goldrush_epoch
+                    ? _("Gold Rush reward migration is only allowed after quantum reward spends are active and before the final quantum lockout deadline.")
+                    : _("Gold Rush reward migration is only allowed while quantum reward spends are active and before the final quantum lockout deadline.")};
             }
         } else if (consensus.IsQuantumFinalLockout(mtp)) {
                 return util::Error{_("The migration deadline has passed; legacy coins are no longer spendable and cannot be migrated.")};
@@ -1169,7 +1263,9 @@ util::Result<WalletQuantumActionTx> CreateQuantumMigrationSweep(CWallet& wallet,
                 ? _("Gold Rush reward migration would strand funds: selected value is below the dust threshold after fees.")
                 : _("Migration would strand funds: swept value is below the dust threshold after fees.")};
         }
-        comment = goldrush_rewards_only
+        comment = !comment_override.empty()
+            ? comment_override
+            : goldrush_rewards_only
             ? "Blackcoin Gold Rush reward remigration"
             : "Blackcoin quantum migration";
     }
@@ -1188,6 +1284,16 @@ util::Result<WalletQuantumActionTx> CreateQuantumMigrationSweep(CWallet& wallet,
     result.selected_amount = eligible_amount;
     result.warning = "A new ML-DSA quantum address was created. Back up this wallet before relying on the moved funds.";
     return result;
+}
+
+util::Result<WalletQuantumActionTx> CreateGoldRushColdStakeMigration(CWallet& wallet)
+{
+    return CreateQuantumMigrationSweep(
+        wallet,
+        /*goldrush_rewards_only=*/true,
+        /*allow_goldrush_epoch=*/true,
+        "goldrush-coldstake-migration-gui",
+        "Blackcoin Gold Rush reward migration before cold-stake delegation");
 }
 
 util::Result<WalletQuantumActionTx> CreateWalletDemurrageAttestation(CWallet& wallet, const std::string& address)
@@ -1863,6 +1969,8 @@ public:
 
         const std::vector<LocalOperatorBondCandidate> local_operator_bonds =
             FindWalletOperatorBondCandidates(*m_wallet);
+        const std::map<uint256, std::vector<node::QuantumPoolClaim>> local_claims =
+            FindWalletQuantumPoolClaims(*m_wallet);
 
         TRY_LOCK(::cs_main, main_lock);
         if (!main_lock) {
@@ -1875,14 +1983,19 @@ public:
         result.total_coldstake = node::ComputeQuantumColdStakeTotal(view);
         result.cap_bps = node::QUANTUM_POOL_CAP_BPS;
 
+        for (const auto& [staker_hash, claims] : local_claims) {
+            node::UpsertQuantumPoolClaims(staker_hash, claims);
+        }
+
         for (const LocalOperatorBondCandidate& candidate : local_operator_bonds) {
             if (!node::VerifyQuantumPoolOperatorCommitment(view, candidate.staking_pubkey, candidate.outpoint)) {
                 continue;
             }
+            const uint256 staker_hash = node::QuantumPoolHashPubKey(candidate.staking_pubkey);
             node::UpsertQuantumPoolOperator(
-                node::QuantumPoolHashPubKey(candidate.staking_pubkey),
+                staker_hash,
                 candidate.staking_pubkey,
-                {},
+                node::GetQuantumPoolClaims(staker_hash),
                 /*operator_commitment_verified=*/true,
                 candidate.outpoint);
         }
@@ -2042,7 +2155,7 @@ public:
         status.seconds_until_deadline = secs;
         status.blocks_until_deadline_est = secs / std::max<int64_t>(1, consensus.nTargetSpacing);
         status.deadline_passed = passed;
-        status.goldrush_remigration_active = consensus.IsQuantumMigrationWindow(mtp);
+        status.goldrush_remigration_active = !passed && quantum_active;
         status.quantum_spends_active = quantum_active;
 
         const CCoinsViewCache& view = chainman.ActiveChainstate().CoinsTip();
@@ -2078,10 +2191,10 @@ public:
             status.advice = "Deadline passed. Remaining Gold Rush reward outputs are permanently unspendable.";
         } else if (passed) {
             status.advice = "Deadline passed. Remaining legacy coins are permanently unspendable.";
-        } else if (status.goldrush_reward_outputs_needing_move > 0 && consensus.IsQuantumMigrationWindow(mtp)) {
-            status.advice = "Move Gold Rush reward outputs to a fresh quantum address before the deadline.";
+        } else if (status.goldrush_reward_outputs_needing_move > 0 && status.goldrush_remigration_active) {
+            status.advice = "Move Gold Rush reward outputs to a fresh quantum address before staking, delegation, or final lockout.";
         } else if (status.goldrush_reward_outputs_needing_move > 0) {
-            status.advice = "Gold Rush reward outputs can be moved after Gold Rush ends and before the deadline.";
+            status.advice = "Gold Rush reward outputs become ordinary quantum funds after they are moved to a fresh quantum address.";
         } else if (status.eligible_legacy_inputs == 0) {
             status.advice = "No legacy coins remain to migrate.";
         } else if (!scheduled) {
@@ -2097,7 +2210,7 @@ public:
     }
     util::Result<WalletQuantumActionTx> migrateGoldRushRewards() override
     {
-        return CreateQuantumMigrationSweep(*m_wallet, /*goldrush_rewards_only=*/true);
+        return CreateQuantumMigrationSweep(*m_wallet, /*goldrush_rewards_only=*/true, /*allow_goldrush_epoch=*/true);
     }
     std::vector<WalletRGBAssetInfo> listRGBAssets(bool include_spent = false) override
     {

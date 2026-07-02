@@ -204,16 +204,49 @@ static bool IsQuantumProtectedSpendAllowedOutput(const CTransaction& tx, unsigne
     return IsQuantumProtectedScript(txout.scriptPubKey) || IsEUTXOScript(txout.scriptPubKey);
 }
 
-static std::vector<CTransactionRef> GetWalletShadowPayoutTransactions(CWallet& wallet, const interfaces::BlockInfo& block)
+static std::vector<ShadowSyntheticPayoutTransaction> GetWalletShadowPayoutTransactions(CWallet& wallet, const interfaces::BlockInfo& block)
 {
     AssertLockNotHeld(wallet.cs_wallet);
     if (!block.data) return {};
     LOCK(cs_main);
-    return GetAppliedShadowClaimPayoutTransactions(
+    return GetAppliedShadowClaimPayoutTransactionRecords(
         wallet.chain().getCoinsTip(),
         block.height,
         block.hash,
         block.data->GetBlockTime());
+}
+
+static void AnnotateWalletShadowPayout(CWallet& wallet, const ShadowSyntheticPayoutTransaction& payout, WalletBatch& batch)
+{
+    AssertLockHeld(wallet.cs_wallet);
+    if (!payout.tx) return;
+
+    const uint256 txid = payout.tx->GetHash();
+    auto it = wallet.mapWallet.find(txid);
+    if (it == wallet.mapWallet.end()) return;
+
+    CWalletTx& wtx = it->second;
+    CTxDestination dest;
+    const std::string address = ExtractDestination(payout.target, dest) ? EncodeDestination(dest) : "";
+    const std::string comment = payout.proof_of_work ? "PoW - Quantum Claim" : "PoS - Quantum Stake";
+
+    bool changed{false};
+    auto set_value = [&](const std::string& key, const std::string& value) {
+        auto current = wtx.mapValue.find(key);
+        if (current == wtx.mapValue.end() || current->second != value) {
+            wtx.mapValue[key] = value;
+            changed = true;
+        }
+    };
+
+    set_value("comment", comment);
+    if (!address.empty()) set_value("to", address);
+
+    if (changed) {
+        batch.WriteTx(wtx);
+        wtx.MarkDirty();
+        wallet.NotifyTransactionChanged(txid, CT_UPDATED);
+    }
 }
 
 static bool IsValidQuantumColdStakeSelector(const std::vector<unsigned char>& selector)
@@ -1683,7 +1716,7 @@ void CWallet::blockConnected(ChainstateRole role, const interfaces::BlockInfo& b
         return;
     }
     assert(block.data);
-    const std::vector<CTransactionRef> shadow_payout_txs = GetWalletShadowPayoutTransactions(*this, block);
+    const std::vector<ShadowSyntheticPayoutTransaction> shadow_payout_txs = GetWalletShadowPayoutTransactions(*this, block);
     LOCK(cs_wallet);
 
     m_last_block_processed_height = block.height;
@@ -1699,9 +1732,12 @@ void CWallet::blockConnected(ChainstateRole role, const interfaces::BlockInfo& b
         transactionRemovedFromMempool(block.data->vtx[index], MemPoolRemovalReason::BLOCK);
     }
     for (size_t index = 0; index < shadow_payout_txs.size(); ++index) {
-        SyncTransaction(shadow_payout_txs[index], TxStateConfirmed{block.hash, block.height, static_cast<int>(block.data->vtx.size() + index)});
+        SyncTransaction(shadow_payout_txs[index].tx, TxStateConfirmed{block.hash, block.height, static_cast<int>(block.data->vtx.size() + index)});
     }
     WalletBatch batch(GetDatabase());
+    for (const ShadowSyntheticPayoutTransaction& payout : shadow_payout_txs) {
+        AnnotateWalletShadowPayout(*this, payout, batch);
+    }
     for (const CTransactionRef& ptx : block.data->vtx) {
         RecordQuantumRedelegationWins(*ptx, block.height, batch);
     }
@@ -2162,10 +2198,10 @@ CWallet::ScanResult CWallet::ScanForWalletTransactions(const uint256& start_bloc
             chain().findBlock(block_hash, FoundBlock().data(block));
 
             if (!block.IsNull()) {
-                std::vector<CTransactionRef> shadow_payout_txs;
+                std::vector<ShadowSyntheticPayoutTransaction> shadow_payout_txs;
                 {
                     LOCK(cs_main);
-                    shadow_payout_txs = GetAppliedShadowClaimPayoutTransactions(chain().getCoinsTip(), block_height, block_hash, block.GetBlockTime());
+                    shadow_payout_txs = GetAppliedShadowClaimPayoutTransactionRecords(chain().getCoinsTip(), block_height, block_hash, block.GetBlockTime());
                 }
                 LOCK(cs_wallet);
                 if (!block_still_active) {
@@ -2179,12 +2215,17 @@ CWallet::ScanResult CWallet::ScanForWalletTransactions(const uint256& start_bloc
                     SyncTransaction(block.vtx[posInBlock], TxStateConfirmed{block_hash, block_height, static_cast<int>(posInBlock)}, fUpdate, /*rescanning_old_block=*/true);
                 }
                 for (size_t pos = 0; pos < shadow_payout_txs.size(); ++pos) {
-                    SyncTransaction(shadow_payout_txs[pos], TxStateConfirmed{block_hash, block_height, static_cast<int>(block.vtx.size() + pos)}, fUpdate, /*rescanning_old_block=*/true);
+                    SyncTransaction(shadow_payout_txs[pos].tx, TxStateConfirmed{block_hash, block_height, static_cast<int>(block.vtx.size() + pos)}, fUpdate, /*rescanning_old_block=*/true);
                 }
-                if (fUpdate) {
+                if (!shadow_payout_txs.empty() || fUpdate) {
                     WalletBatch batch(GetDatabase());
-                    for (const CTransactionRef& ptx : block.vtx) {
-                        RecordQuantumRedelegationWins(*ptx, block_height, batch);
+                    for (const ShadowSyntheticPayoutTransaction& payout : shadow_payout_txs) {
+                        AnnotateWalletShadowPayout(*this, payout, batch);
+                    }
+                    if (fUpdate) {
+                        for (const CTransactionRef& ptx : block.vtx) {
+                            RecordQuantumRedelegationWins(*ptx, block_height, batch);
+                        }
                     }
                 }
                 // scan succeeded, record block as most recent successfully scanned
@@ -3554,7 +3595,21 @@ bool CWallet::LoadQuantumColdStakeDelegation(const std::vector<unsigned char>& w
         return false;
     }
     const std::vector<unsigned char> expected = QuantumColdStakeProgramForKeyHashes(record.staker_pubkey_hash, record.owner_pubkey_hash);
-    if (expected != witness_program) {
+    bool matches_record = expected == witness_program;
+    if (!matches_record) {
+        QuantumStakeTierProgram tier;
+        if (DecodeQuantumStakeTierProgram(QUANTUM_COLDSTAKE_WITNESS_VERSION, witness_program, tier) &&
+            tier.cold_stake) {
+            const std::vector<unsigned char> expected_tiered = QuantumTieredColdStakeProgramForKeyHashes(
+                record.staker_pubkey_hash,
+                record.owner_pubkey_hash,
+                tier.state,
+                tier.unbonding_blocks,
+                tier.unlock_height);
+            matches_record = expected_tiered == witness_program;
+        }
+    }
+    if (!matches_record) {
         return false;
     }
     const auto existing = m_quantum_coldstake_delegations.find(witness_program);

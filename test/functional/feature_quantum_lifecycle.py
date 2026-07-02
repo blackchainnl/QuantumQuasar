@@ -5,10 +5,10 @@
 """Drive one node through the Blackcoin 24-month lifecycle.
 
 This test exercises the live MTP phase boundaries instead of booting separate
-phase-pinned nodes. It proves Gold Rush payouts are locked until migration,
-must move to a fresh quantum address during migration, and expire after final
-lockout if left unmigrated. It also proves legacy inputs are disabled after the
-deadline.
+phase-pinned nodes. It proves Gold Rush payouts must move to a fresh quantum
+address before use, can move once quantum reward spends are active, and expire
+after final lockout if left unmigrated. It also proves legacy inputs are
+disabled after the deadline.
 """
 
 from decimal import Decimal
@@ -62,6 +62,8 @@ class QuantumLifecycleTest(BitcoinTestFramework):
         return [
             {"txid": utxo["txid"], "vout": utxo["vout"]}
             for utxo in wallet.listunspent(1, 9999999)
+            if utxo.get("spendable", True)
+            and utxo.get("confirmations", 0) > COINBASE_MATURITY
         ]
 
     def _find_next_kernel_time(self, wallet):
@@ -192,21 +194,27 @@ class QuantumLifecycleTest(BitcoinTestFramework):
         self.log.info("Creating mature legacy staking, claim, and lockout-test coins")
         node.get_wallet_rpc(self.default_wallet_name).staking(False)
         node.createwallet(wallet_name="quantum_lifecycle")
+        node.createwallet(wallet_name="quantum_lifecycle_staker_b")
         wallet = node.get_wallet_rpc("quantum_lifecycle")
+        staker_b = node.get_wallet_rpc("quantum_lifecycle_staker_b")
         wallet.staking(False)
+        staker_b.staking(False)
 
         staking_address = wallet.getnewaddress("", "legacy")
+        staking_address_b = staker_b.getnewaddress("", "legacy")
         claim_address_a = wallet.getnewaddress("", "legacy")
         claim_address_b = wallet.getnewaddress("", "legacy")
         legacy_lockout_address = wallet.getnewaddress("", "legacy")
 
         self.generatetoaddress(node, 1, staking_address, sync_fun=self.no_op)
+        self.generatetoaddress(node, 1, staking_address_b, sync_fun=self.no_op)
         self.generatetoaddress(node, 1, claim_address_a, sync_fun=self.no_op)
         self.generatetoaddress(node, 1, claim_address_b, sync_fun=self.no_op)
         self.generatetoaddress(node, 1, legacy_lockout_address, sync_fun=self.no_op)
         self.generatetoaddress(node, COINBASE_MATURITY + 2, staking_address, sync_fun=self.no_op)
+        self.generatetoaddress(node, COINBASE_MATURITY + 2, staking_address_b, sync_fun=self.no_op)
         self._sync_mocktime_to_tip()
-        self._assert_phase_status(wallet, "gold_rush", quantum_spends_active=False, remigration_active=False, deadline_passed=False)
+        self._assert_phase_status(wallet, "gold_rush", quantum_spends_active=True, remigration_active=True, deadline_passed=False)
 
         legacy_lockout_utxo = wallet.listunspent(1, 9999999, [legacy_lockout_address])[0]
         claim_b_funding_utxo = wallet.listunspent(1, 9999999, [claim_address_b])[0]
@@ -223,7 +231,7 @@ class QuantumLifecycleTest(BitcoinTestFramework):
         payout_address_b = wallet.getnewquantumaddress()["address"]
         wallet.lockunspent(True, [{"txid": claim_b_funding_utxo["txid"], "vout": claim_b_funding_utxo["vout"]}])
         claim_b = wallet.sendshadowpowclaim(claim_address_b, payout_address_b, 500000)
-        self._mine_pos_block_with_claim(wallet, claim_b["txid"])
+        self._mine_pos_block_with_claim(staker_b, claim_b["txid"])
         payout_utxo_b = self._wait_for_quantum_utxo(wallet, payout_address_b)
         self._assert_goldrush_marker_exists(payout_utxo_b)
 
@@ -232,53 +240,43 @@ class QuantumLifecycleTest(BitcoinTestFramework):
         self._sync_mocktime_to_tip()
         payout_utxo_a = self._wait_for_quantum_utxo(wallet, payout_address_a, min_conf=COINBASE_MATURITY + 1)
         payout_utxo_b = self._wait_for_quantum_utxo(wallet, payout_address_b, min_conf=COINBASE_MATURITY + 1)
-        self._assert_phase_status(wallet, "gold_rush", quantum_spends_active=False, remigration_active=False, deadline_passed=False)
+        self._assert_phase_status(wallet, "gold_rush", quantum_spends_active=True, remigration_active=True, deadline_passed=False)
         assert_equal(wallet.getmigrationstatus()["goldrush_reward_outputs_needing_move"], 2)
 
-        self.log.info("Gold Rush payout spends are rejected before the migration window")
+        self.log.info("Gold Rush payout spends can move to a fresh quantum address during Gold Rush")
         migration_destination_a = wallet.getnewquantumaddress()["address"]
-        premature_raw, _ = self._build_quantum_spend(wallet, payout_utxo_a, migration_destination_a)
-        premature_accept = node.testmempoolaccept([premature_raw])[0]
-        assert_equal(premature_accept["allowed"], False)
-        assert_equal(premature_accept["reject-reason"], "goldrush-remigration-premature")
-        self._assert_generateblock_rejects(premature_raw, node.get_deterministic_priv_key().address, "goldrush-remigration-premature")
+        _, same_goldrush_signed = self._build_quantum_spend(wallet, payout_utxo_a, payout_address_a)
+        assert_equal(same_goldrush_signed["complete"], True)
+        same_goldrush_accept = node.testmempoolaccept([same_goldrush_signed["hex"]])[0]
+        assert_equal(same_goldrush_accept["allowed"], False)
+        assert_equal(same_goldrush_accept["reject-reason"], "goldrush-remigration-same-address")
+        self._assert_generateblock_rejects(same_goldrush_signed["hex"], node.get_deterministic_priv_key().address, "goldrush-remigration-same-address")
+
+        valid_raw, valid_signed = self._build_quantum_spend(wallet, payout_utxo_a, migration_destination_a)
+        assert_equal(valid_signed["complete"], True)
+        valid_accept = node.testmempoolaccept([valid_signed["hex"]])[0]
+        if not valid_accept["allowed"]:
+            raise AssertionError(f"Gold Rush reward move rejected: {valid_accept}")
+        spend_txid = node.sendrawtransaction(valid_signed["hex"])
+        spend_block_hash = self.generatetoaddress(node, 1, node.get_deterministic_priv_key().address, sync_fun=self.no_op)[0]
+        assert spend_txid in node.getblock(spend_block_hash)["tx"]
+        assert node.gettxout(payout_utxo_a["txid"], payout_utxo_a["vout"], False) is None
+        assert node.gettxout(payout_utxo_b["txid"], payout_utxo_b["vout"], False) is not None
+        assert_equal(wallet.getmigrationstatus()["goldrush_reward_outputs_needing_move"], 1)
 
         self.log.info("Crossing the Gold Rush end boundary into the migration window")
         migration_mining_address = wallet.getnewquantumaddress()["address"]
         self._mine_until_phase("migration", GOLD_RUSH_END_TIME + 16, migration_mining_address)
         migration_tip = node.getbestblockhash()
         self._assert_phase_status(wallet, "migration", quantum_spends_active=True, remigration_active=True, deadline_passed=False)
-        _, reorg_premature_signed = self._build_quantum_spend(wallet, payout_utxo_a, migration_destination_a)
-        assert_equal(reorg_premature_signed["complete"], True)
-
-        self.log.info("Reorging below Gold Rush end restores Gold Rush spend rules")
-        node.invalidateblock(migration_tip)
-        self._assert_phase_status(wallet, "gold_rush", quantum_spends_active=False, remigration_active=False, deadline_passed=False)
-        reorg_premature_accept = node.testmempoolaccept([reorg_premature_signed["hex"]])[0]
-        assert_equal(reorg_premature_accept["allowed"], False)
-        assert_equal(reorg_premature_accept["reject-reason"], "goldrush-remigration-premature")
-        self._reconsider_tip(migration_tip)
-        self._assert_phase_status(wallet, "migration", quantum_spends_active=True, remigration_active=True, deadline_passed=False)
 
         self.log.info("Gold Rush payouts must move to a different quantum address during migration")
-        _, same_signed = self._build_quantum_spend(wallet, payout_utxo_a, payout_address_a)
+        _, same_signed = self._build_quantum_spend(wallet, payout_utxo_b, payout_address_b)
         assert_equal(same_signed["complete"], True)
         same_accept = node.testmempoolaccept([same_signed["hex"]])[0]
         assert_equal(same_accept["allowed"], False)
         assert_equal(same_accept["reject-reason"], "goldrush-remigration-same-address")
         self._assert_generateblock_rejects(same_signed["hex"], migration_mining_address, "goldrush-remigration-same-address")
-
-        valid_raw, valid_signed = self._build_quantum_spend(wallet, payout_utxo_a, migration_destination_a)
-        assert_equal(valid_signed["complete"], True)
-        valid_accept = node.testmempoolaccept([valid_signed["hex"]])[0]
-        if not valid_accept["allowed"]:
-            raise AssertionError(f"migration spend rejected: {valid_accept}")
-        spend_txid = node.sendrawtransaction(valid_signed["hex"])
-        spend_block_hash = self.generatetoaddress(node, 1, migration_mining_address, sync_fun=self.no_op)[0]
-        assert spend_txid in node.getblock(spend_block_hash)["tx"]
-        assert node.gettxout(payout_utxo_a["txid"], payout_utxo_a["vout"], False) is None
-        assert node.gettxout(payout_utxo_b["txid"], payout_utxo_b["vout"], False) is not None
-        assert_equal(wallet.getmigrationstatus()["goldrush_reward_outputs_needing_move"], 1)
 
         self.log.info("Crossing the migration deadline into final lockout")
         final_mining_address = wallet.getnewquantumaddress()["address"]

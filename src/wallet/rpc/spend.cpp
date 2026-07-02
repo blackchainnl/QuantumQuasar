@@ -1933,7 +1933,7 @@ RPCHelpMan migrategoldrushrewards()
 {
     return RPCHelpMan{"migrategoldrushrewards",
         "\nMove wallet-owned Gold Rush reward outputs to a fresh Blackcoin ML-DSA\n"
-        "migration address after Gold Rush ends and before the final lockout deadline.\n",
+        "migration address after quantum reward spends are active and before the final lockout deadline.\n",
         {
             {"options", RPCArg::Type::OBJ_NAMED_PARAMS, RPCArg::Optional::OMITTED, "",
                 {
@@ -1983,10 +1983,16 @@ RPCHelpMan migrategoldrushrewards()
 
         const Consensus::Params& consensus = Params().GetConsensus();
         int64_t mtp = 0;
-        if (const CBlockIndex* tip = pwallet->chain().getTip()) mtp = tip->GetMedianTimePast();
-        if (!consensus.IsQuantumMigrationWindow(mtp)) {
+        int next_height = 0;
+        if (const CBlockIndex* tip = pwallet->chain().getTip()) {
+            mtp = tip->GetMedianTimePast();
+            next_height = tip->nHeight + 1;
+        }
+        const bool goldrush_move_active = !consensus.IsQuantumFinalLockout(mtp) &&
+            IsQuantumWitnessSpendActive(consensus, mtp, next_height);
+        if (!goldrush_move_active) {
             throw JSONRPCError(RPC_WALLET_ERROR,
-                "Gold Rush reward migration is only allowed after Gold Rush ends and before the final quantum lockout deadline.");
+                "Gold Rush reward migration is only allowed after quantum reward spends are active and before the final quantum lockout deadline.");
         }
         const std::string phase = QQPhaseName(consensus.GetQuantumQuasarPhase(mtp));
 
@@ -3667,13 +3673,14 @@ RPCHelpMan getmigrationstatus()
         r.pushKV("staked_quantum_amount", ValueFromAmount(staked_quantum_amt));
         r.pushKV("goldrush_reward_outputs_needing_move", (int)goldrush_reward_n);
         r.pushKV("goldrush_reward_amount_needing_move", ValueFromAmount(goldrush_reward_amt));
-        r.pushKV("goldrush_remigration_active", c.IsQuantumMigrationWindow(mtp));
+        const bool goldrush_move_active = !passed && quantum_active;
+        r.pushKV("goldrush_remigration_active", goldrush_move_active);
         r.pushKV("quantum_spends_active", quantum_active);
         std::string advice;
         if (passed && goldrush_reward_n > 0) advice = "Deadline passed. Remaining Gold Rush reward outputs are permanently unspendable.";
         else if (passed)         advice = "Deadline passed. Remaining legacy coins are permanently unspendable.";
-        else if (goldrush_reward_n > 0 && c.IsQuantumMigrationWindow(mtp)) advice = "Run migrategoldrushrewards before the deadline to move Gold Rush reward outputs to a fresh quantum address.";
-        else if (goldrush_reward_n > 0) advice = "Gold Rush reward outputs can be spent to quantum addresses during Gold Rush, and can also be swept with migrategoldrushrewards after Gold Rush ends and before the deadline.";
+        else if (goldrush_reward_n > 0 && goldrush_move_active) advice = "Run migrategoldrushrewards before staking, delegation, or final lockout to move Gold Rush reward outputs to a fresh quantum address.";
+        else if (goldrush_reward_n > 0) advice = "Gold Rush reward outputs become ordinary quantum funds after they are moved to a fresh quantum address.";
         else if (legacy_n == 0)  advice = "No legacy coins remain to migrate.";
         else if (!scheduled)     advice = "No deadline scheduled yet, but you can migrate now with migratetoquantum.";
         else                     advice = "Run migratetoquantum before the deadline to move legacy coins into a quantum address.";
