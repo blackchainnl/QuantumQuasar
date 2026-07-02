@@ -56,6 +56,8 @@ bool IsQuantumOutput(const CTxOut& txout)
 bool IsQuantumWalletTransferTx(const interfaces::WalletTx& wtx)
 {
     if (wtx.is_coinbase || wtx.is_coinstake || !GoldRushWalletControlLabel(wtx).isEmpty()) return false;
+    if (wtx.txout_is_mine.size() < wtx.tx->vout.size()) return false;
+    if (wtx.txout_is_change.size() < wtx.tx->vout.size()) return false;
 
     bool any_from_me{false};
     bool all_from_me{true};
@@ -448,7 +450,11 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
                 strHTML += "<b>" + tr("Credit") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, wallet.getCredit(txout, ISMINE_ALL)) + "<br>";
 
         strHTML += "<br><b>" + tr("Transaction") + ":</b><br>";
-        strHTML += GUIUtil::HtmlEscape(wtx.tx->ToString(), true);
+        if (quantum_wallet_transfer) {
+            strHTML += tr("Raw debug rendering is suppressed for quantum transactions because ML-DSA witnesses are very large.") + "<br>";
+        } else {
+            strHTML += GUIUtil::HtmlEscape(wtx.tx->ToString(), true);
+        }
 
         strHTML += "<br><b>" + tr("Inputs") + ":</b>";
         strHTML += "<ul>";

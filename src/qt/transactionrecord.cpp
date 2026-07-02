@@ -44,6 +44,8 @@ bool IsQuantumOutput(const CTxOut& txout)
 bool IsQuantumWalletTransferTx(const interfaces::WalletTx& wtx)
 {
     if (wtx.is_coinbase || wtx.is_coinstake || IsGoldRushWalletControlTx(wtx.value_map)) return false;
+    if (wtx.txout_is_mine.size() < wtx.tx->vout.size()) return false;
+    if (wtx.txout_is_change.size() < wtx.tx->vout.size()) return false;
 
     bool any_from_me{false};
     bool all_from_me{true};
@@ -68,6 +70,8 @@ bool IsQuantumWalletTransferTx(const interfaces::WalletTx& wtx)
 
 CAmount QuantumWalletTransferAmount(const interfaces::WalletTx& wtx)
 {
+    if (wtx.txout_is_change.size() < wtx.tx->vout.size()) return 0;
+
     CAmount amount{0};
     for (size_t i = 0; i < wtx.tx->vout.size(); ++i) {
         const CTxOut& txout = wtx.tx->vout[i];
