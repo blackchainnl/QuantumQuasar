@@ -32,8 +32,8 @@ std::string GoldRushWalletControlLabel(const std::map<std::string, std::string>&
 {
     const auto it = map_value.find("comment");
     if (it == map_value.end()) return {};
-    if (it->second.find("signal") != std::string::npos) return "Quantum PoS Claim";
-    if (it->second.find("PoW claim") != std::string::npos || it->second.find("shadow PoW") != std::string::npos) return "Quantum PoW Claim";
+    if (it->second.find("signal") != std::string::npos) return "PoS Claim";
+    if (it->second.find("PoW claim") != std::string::npos || it->second.find("shadow PoW") != std::string::npos) return "PoW Claim";
     return "Quantum Claim";
 }
 

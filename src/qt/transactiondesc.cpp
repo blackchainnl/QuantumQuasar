@@ -40,10 +40,10 @@ QString GoldRushWalletControlLabel(const interfaces::WalletTx& wtx)
 {
     const auto it = wtx.value_map.find("comment");
     if (it == wtx.value_map.end()) return {};
-    if (it->second == "Blackcoin shadow signal") return QObject::tr("Quantum PoS Claim");
+    if (it->second == "Blackcoin shadow signal") return QObject::tr("PoS Claim");
     if (it->second == "Quantum Quasar built-in shadow PoW claim" ||
         it->second == "Blackcoin shadow PoW claim") {
-        return QObject::tr("Quantum PoW Claim");
+        return QObject::tr("PoW Claim");
     }
     return {};
 }

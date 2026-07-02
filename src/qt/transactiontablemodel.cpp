@@ -363,7 +363,16 @@ QString ShortClaimDestination(const QString& address)
 
 bool IsQuantumClaimControlLabel(const std::string& address)
 {
-    return address == "Quantum PoW Claim" || address == "Quantum PoS Claim";
+    return address == "PoW Claim" || address == "PoS Claim" ||
+           address == "Quantum PoW Claim" || address == "Quantum PoS Claim" ||
+           address == "Gold Rush PoW claim" || address == "Gold Rush signal";
+}
+
+QString QuantumClaimControlType(const std::string& address)
+{
+    if (address.find("PoW") != std::string::npos) return QObject::tr("PoW Claim");
+    if (address.find("PoS") != std::string::npos || address.find("signal") != std::string::npos) return QObject::tr("PoS Claim");
+    return QObject::tr("Quantum Claim");
 }
 } // namespace
 
@@ -424,7 +433,7 @@ QString TransactionTableModel::formatTxType(const TransactionRecord *wtx) const
     case TransactionRecord::GoldRushPowClaim:
         return formatGoldRushClaimType(wtx, tr("Quantum PoW Reward"));
     case TransactionRecord::Other:
-        if (IsQuantumClaimControlLabel(wtx->address)) return QString::fromStdString(wtx->address);
+        if (IsQuantumClaimControlLabel(wtx->address)) return QuantumClaimControlType(wtx->address);
         return tr("Other");
     default:
         return QString();
