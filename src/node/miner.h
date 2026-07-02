@@ -165,6 +165,7 @@ private:
     CAmount nFees;
     CTxMemPool::setEntries inBlock;
     bool m_shadow_proof_selected{false};
+    bool m_building_pos_template{false};
 
     // Chain context for the block
     int nHeight;

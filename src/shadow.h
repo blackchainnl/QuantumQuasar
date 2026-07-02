@@ -98,6 +98,8 @@ void UndoLegacyWhitelistSnapshot(CCoinsViewCache& view, const CBlockIndex* pinde
 
 /** Check if a script is in the deterministic height-5,920,000 whitelist. */
 bool IsWhitelisted(const CCoinsViewCache& view, const CScript& scriptPubKey);
+/** Convert legacy P2PK stake scripts to their P2PKH identity for whitelist/signal matching. */
+CScript CanonicalizeLegacyStakeScript(const CScript& scriptPubKey);
 
 /** Deterministic per-block Gold Rush shadow reward schedule (exposed for tests/cap checks). */
 CAmount ShadowBaseReward(int height);
@@ -158,6 +160,7 @@ bool GetShadowPowDirectPayouts(const CCoinsViewCache& view, const CBlock& block,
 
 /** Mempool policy helpers for next-block-only QQSPROOF claims. */
 bool TransactionHasShadowProof(const CTransaction& tx);
+bool TransactionHasShadowSignal(const CTransaction& tx);
 bool CheckShadowPowClaimForMempool(const CTransaction& tx, const CBlockIndex* pindexPrev, const CCoinsViewCache& view, bool gold_rush_active, std::string& reject_reason);
 
 /** Obsolete direct-emission helper retained for stale test-build marker cleanup. */

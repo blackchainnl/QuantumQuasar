@@ -64,16 +64,19 @@ namespace node {
 
 static bool IsShadowProofTx(const CTransaction& tx)
 {
-    const std::vector<unsigned char>& prefix = GetShadowPrefix();
-    for (const CTxOut& txout : tx.vout) {
-        CScript::const_iterator pc = txout.scriptPubKey.begin();
-        opcodetype opcode;
-        std::vector<unsigned char> data;
-        if (!txout.scriptPubKey.GetOp(pc, opcode, data) || opcode != OP_RETURN) continue;
-        if (!txout.scriptPubKey.GetOp(pc, opcode, data) || pc != txout.scriptPubKey.end()) continue;
-        if (data.size() >= prefix.size() && std::equal(prefix.begin(), prefix.end(), data.begin())) return true;
-    }
-    return false;
+    return TransactionHasShadowProof(tx);
+}
+
+static bool IsShadowControlTx(const CTransaction& tx)
+{
+    return TransactionHasShadowProof(tx) || TransactionHasShadowSignal(tx);
+}
+
+static bool IsPreMigrationQuantumSpendScript(const CScript& script_pub_key)
+{
+    return IsQuantumMigrationScript(script_pub_key) ||
+           IsQuantumColdStakeScript(script_pub_key) ||
+           IsEUTXOScript(script_pub_key);
 }
 
 int64_t UpdateTime(CBlock* pblock, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev)
@@ -175,6 +178,7 @@ void BlockAssembler::resetBlock()
     nBlockTx = 0;
     nFees = 0;
     m_shadow_proof_selected = false;
+    m_building_pos_template = false;
 }
 
 std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& scriptPubKeyIn, CWallet* pwallet, bool* pfPoSCancel, int64_t* pFees, CTxDestination destination)
@@ -199,6 +203,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     CBlockIndex* pindexPrev = m_chainstate.m_chain.Tip();
     assert(pindexPrev != nullptr);
     nHeight = pindexPrev->nHeight + 1;
+    m_building_pos_template = pwallet != nullptr;
 
     pblock->nVersion = m_chainstate.m_chainman.m_versionbitscache.ComputeBlockVersion(pindexPrev, chainparams.GetConsensus());
     // -regtest only: allow overriding block.nVersion with
@@ -366,6 +371,9 @@ bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& packa
     CBlockIndex* tip{Assert(m_chainstate.m_chain.Tip())};
     const CCoinsViewMemPool view_mempool{&m_chainstate.CoinsTip(), *Assert(m_mempool)};
     std::set<COutPoint> spent_outpoints;
+    const bool defer_pre_migration_quantum_spends =
+        m_building_pos_template &&
+        !chainparams.GetConsensus().IsQuantumSpendEnforcementActive(tip->GetMedianTimePast());
 
     for (CTxMemPool::txiter selected : inBlock) {
         for (const CTxIn& txin : selected->GetTx().vin) {
@@ -392,6 +400,17 @@ bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& packa
         }
         if (!fIncludeWitness && tx.HasWitness()) {
             return false;
+        }
+        if (defer_pre_migration_quantum_spends && !IsShadowControlTx(tx)) {
+            for (const CTxIn& txin : tx.vin) {
+                Coin coin;
+                if (!view_mempool.GetCoin(txin.prevout, coin) || coin.IsSpent()) {
+                    return false;
+                }
+                if (IsPreMigrationQuantumSpendScript(coin.out.scriptPubKey)) {
+                    return false;
+                }
+            }
         }
         // peercoin: timestamp limit
         if (tx.nTime > GetAdjustedTimeSeconds() || (nTime && tx.nTime > nTime)) {

@@ -151,6 +151,19 @@ uint256 TaggedHash(const std::string& tag, const valtype& payload)
     return ss.GetHash();
 }
 
+CScript CanonicalLegacyStakeScript(const CScript& script)
+{
+    if ((script.size() == CPubKey::COMPRESSED_SIZE + 2 && script[0] == CPubKey::COMPRESSED_SIZE && script.back() == OP_CHECKSIG) ||
+        (script.size() == CPubKey::SIZE + 2 && script[0] == CPubKey::SIZE && script.back() == OP_CHECKSIG)) {
+        const valtype pubkey_bytes(script.begin() + 1, script.end() - 1);
+        const CPubKey pubkey(pubkey_bytes);
+        if (pubkey.IsValid()) {
+            return GetScriptForDestination(PKHash(pubkey));
+        }
+    }
+    return script;
+}
+
 COutPoint WhitelistOutpoint(const CScript& script)
 {
     return COutPoint{TaggedHash("Quantum Quasar Legacy Whitelist", {script.begin(), script.end()}), 0};
@@ -160,6 +173,15 @@ COutPoint PoolOutpoint()
 {
     return COutPoint{TaggedHash("Quantum Quasar Shadow Pool", {}), 0};
 }
+
+} // namespace
+
+CScript CanonicalizeLegacyStakeScript(const CScript& scriptPubKey)
+{
+    return CanonicalLegacyStakeScript(scriptPubKey);
+}
+
+namespace {
 
 COutPoint ClaimOutpoint(int height, const uint256& block_hash, uint32_t n)
 {
@@ -712,15 +734,17 @@ std::optional<CScript> GetCurrentSolverScript(const CCoinsViewCache& view, const
     if (!block.IsProofOfStake() || block.vtx.size() < 2 || !block.vtx[1]->IsCoinStake()) return std::nullopt;
     const CScript* stake_input_script = GetInputScript(blockundo, 1, 0);
     if (stake_input_script && IsQuantumColdStakeScript(*stake_input_script)) return std::nullopt;
-    if (!stake_input_script || !IsWhitelisted(view, *stake_input_script)) return std::nullopt;
-    return *stake_input_script;
+    if (!stake_input_script) return std::nullopt;
+    const CScript solver_script = CanonicalLegacyStakeScript(*stake_input_script);
+    if (!IsWhitelisted(view, solver_script)) return std::nullopt;
+    return solver_script;
 }
 
 bool TxSpendsFromScript(const CTransaction& tx, size_t tx_index, const CBlockUndo* blockundo, const CScript& script)
 {
     for (size_t input_index = 0; input_index < tx.vin.size(); ++input_index) {
         const CScript* input_script = GetInputScript(blockundo, tx_index, input_index);
-        if (input_script && *input_script == script) return true;
+        if (input_script && CanonicalLegacyStakeScript(*input_script) == script) return true;
     }
     return false;
 }
@@ -1365,6 +1389,14 @@ bool TransactionHasShadowProof(const CTransaction& tx)
     return false;
 }
 
+bool TransactionHasShadowSignal(const CTransaction& tx)
+{
+    for (const CTxOut& out : tx.vout) {
+        if (ExtractSignalPayload(out.scriptPubKey)) return true;
+    }
+    return false;
+}
+
 bool CheckShadowPowClaimForMempool(const CTransaction& tx, const CBlockIndex* pindexPrev, const CCoinsViewCache& view, bool gold_rush_active, std::string& reject_reason)
 {
     if (!TransactionHasShadowProof(tx)) return true;
@@ -1442,12 +1474,13 @@ std::set<CScript> BuildLegacyWhitelist(CCoinsView& view)
         Coin coin;
         if (cursor->GetKey(outpoint) && cursor->GetValue(coin) && !coin.IsSpent()) {
             if (coin.out.nValue > 0 && !coin.out.scriptPubKey.IsUnspendable()) {
-                CAmount& balance = balances[coin.out.scriptPubKey];
+                const CScript script = CanonicalLegacyStakeScript(coin.out.scriptPubKey);
+                CAmount& balance = balances[script];
                 if (balance < SHADOW_WHITELIST_MIN_BALANCE) {
                     const CAmount needed = SHADOW_WHITELIST_MIN_BALANCE - balance;
                     balance = coin.out.nValue >= needed ? SHADOW_WHITELIST_MIN_BALANCE : balance + coin.out.nValue;
                     if (balance >= SHADOW_WHITELIST_MIN_BALANCE) {
-                        whitelist.insert(coin.out.scriptPubKey);
+                        whitelist.insert(script);
                     }
                 }
             }
@@ -1516,7 +1549,7 @@ void UndoLegacyWhitelistSnapshot(CCoinsViewCache& view, const CBlockIndex* pinde
 
 bool IsWhitelisted(const CCoinsViewCache& view, const CScript& scriptPubKey)
 {
-    return view.HaveCoin(WhitelistOutpoint(scriptPubKey));
+    return view.HaveCoin(WhitelistOutpoint(CanonicalLegacyStakeScript(scriptPubKey)));
 }
 
 bool BuildShadowSignalData(const CScript& target, uint32_t solve_height, const uint256& solve_hash, std::vector<unsigned char>& data_out)

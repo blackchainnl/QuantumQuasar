@@ -87,6 +87,54 @@ struct AutoRedelegationSource
     int last_win_height{0};
 };
 
+bool IsGoldRushStakeHeight(const CBlockIndex* tip)
+{
+    if (!tip) return false;
+    const int next_height = tip->nHeight + 1;
+    return next_height >= SHADOW_REWARD_START_HEIGHT && next_height <= SHADOW_REWARD_END_HEIGHT;
+}
+
+std::set<CScript> WhitelistedGoldRushStakeScripts(
+    const CCoinsViewCache& view,
+    const std::set<std::pair<const CWalletTx*, unsigned int>>& coins)
+{
+    std::set<CScript> scripts;
+    for (const auto& coin : coins) {
+        if (!coin.first || !coin.first->tx || coin.second >= coin.first->tx->vout.size()) continue;
+        const CScript script = CanonicalizeLegacyStakeScript(coin.first->tx->vout[coin.second].scriptPubKey);
+        if (IsWhitelisted(view, script)) {
+            scripts.insert(script);
+        }
+    }
+    return scripts;
+}
+
+void RestrictToGoldRushStakeScripts(
+    const std::set<CScript>& allowed_scripts,
+    std::set<std::pair<const CWalletTx*, unsigned int>>& coins,
+    CAmount& value_in)
+{
+    if (allowed_scripts.empty()) return;
+
+    value_in = 0;
+    for (auto it = coins.begin(); it != coins.end();) {
+        const CWalletTx* wtx = it->first;
+        const unsigned int n = it->second;
+        if (!wtx || !wtx->tx || n >= wtx->tx->vout.size()) {
+            it = coins.erase(it);
+            continue;
+        }
+        const CTxOut& txout = wtx->tx->vout[n];
+        const CScript script = CanonicalizeLegacyStakeScript(txout.scriptPubKey);
+        if (!allowed_scripts.count(script)) {
+            it = coins.erase(it);
+            continue;
+        }
+        value_in += txout.nValue;
+        ++it;
+    }
+}
+
 bool HasUnderCapRedelegationAlternative(const CCoinsViewCache& view, const uint256& source_staker_hash, const uint256& target_staker_hash, CAmount delegation_amount)
 {
     std::vector<QuantumRedelegationCandidate> candidates;
@@ -1503,6 +1551,12 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
     std::vector<CTransactionRef> vwtxPrev;
     CAmount nValueIn = 0;
     CAmount nAllowedBalance = nBalance - wallet.m_reserve_balance;
+    const int64_t stake_mtp = pindexPrev->GetMedianTimePast();
+    const Consensus::Params& consensus = Params().GetConsensus();
+    const bool quantum_stake_rules_active = consensus.IsQuantumStakeRulesActive(stake_mtp);
+    const bool new_network_stake_only = consensus.IsNewNetworkStakeOnly(stake_mtp);
+    const bool final_quantum_lockout = consensus.IsQuantumFinalLockout(stake_mtp);
+    const bool stake_reward_split_active = consensus.IsStakeRewardSplitActive(pindexPrev->nHeight + 1);
 
     // Select coins with suitable depth
     if (!SelectCoinsForStaking(wallet, nAllowedBalance, setCoins, nValueIn))
@@ -1510,6 +1564,22 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
 
     if (setCoins.empty())
         return false;
+
+    if (IsGoldRushStakeHeight(pindexPrev) && !final_quantum_lockout) {
+        const std::set<CScript> whitelisted_scripts = WhitelistedGoldRushStakeScripts(wallet.chain().getCoinsTip(), setCoins);
+        if (!whitelisted_scripts.empty()) {
+            const size_t original_size = setCoins.size();
+            RestrictToGoldRushStakeScripts(whitelisted_scripts, setCoins, nValueIn);
+            if (setCoins.empty()) {
+                return false;
+            }
+            if (setCoins.size() != original_size) {
+                LogPrint(BCLog::COINSTAKE,
+                         "CreateCoinStake : restricted Gold Rush staking to %u whitelisted scripts (%u/%u UTXOs eligible)\n",
+                         whitelisted_scripts.size(), setCoins.size(), original_size);
+            }
+        }
+    }
 
     std::set<COutPoint> selected_tx_inputs;
     for (const CTransactionRef& tx : selected_txs) {
@@ -1526,12 +1596,6 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
     bool fQuantumKernel = false;
     bool fQuantumColdStakeKernel = false;
     CScript operatorRewardScript;
-    const int64_t stake_mtp = pindexPrev->GetMedianTimePast();
-    const Consensus::Params& consensus = Params().GetConsensus();
-    const bool quantum_stake_rules_active = consensus.IsQuantumStakeRulesActive(stake_mtp);
-    const bool new_network_stake_only = consensus.IsNewNetworkStakeOnly(stake_mtp);
-    const bool final_quantum_lockout = consensus.IsQuantumFinalLockout(stake_mtp);
-    const bool stake_reward_split_active = consensus.IsStakeRewardSplitActive(pindexPrev->nHeight + 1);
 
     for (const std::pair<const CWalletTx*, unsigned int> &pcoin : setCoins)
     {

@@ -14,6 +14,7 @@
 #include <shadow.h>
 #include <uint256.h>
 #include <undo.h>
+#include <util/strencodings.h>
 
 #include <map>
 #include <set>
@@ -250,6 +251,63 @@ BOOST_AUTO_TEST_CASE(legacy_whitelist_uses_aggregate_script_balance)
     BOOST_CHECK(!whitelist.count(split_below_threshold));
     BOOST_CHECK(!whitelist.count(single_below_threshold));
     BOOST_CHECK(!whitelist.count(unspendable));
+}
+
+BOOST_AUTO_TEST_CASE(legacy_whitelist_canonicalizes_p2pk_stake_outputs)
+{
+    CCoinsView base;
+    CCoinsViewCache view{&base, true};
+
+    const CPubKey pubkey{ParseHex("033d79776a0fbf7204f8c584c3e9acdc1b130473012d0c402f2145784c94e2d5b3")};
+    const CScript p2pk = CScript{} << ToByteVector(pubkey) << OP_CHECKSIG;
+    const CScript p2pkh = GetScriptForDestination(PKHash(pubkey));
+    const CScript quantum_payout = QuantumScript(0x61);
+
+    AddCoinForScript(view, COutPoint{uint256::ONE, 0}, 6'000 * COIN, p2pkh);
+    AddCoinForScript(view, COutPoint{uint256::ONE, 1}, 4'000 * COIN, p2pk);
+
+    const std::set<CScript> whitelist = BuildLegacyWhitelist(view);
+    BOOST_REQUIRE_EQUAL(whitelist.size(), 1U);
+    BOOST_CHECK(whitelist.count(p2pkh));
+    BOOST_CHECK(!whitelist.count(p2pk));
+
+    uint256 whitelist_hash;
+    CBlockIndex whitelist_index;
+    InitIndex(whitelist_index, SHADOW_WHITELIST_HEIGHT, nullptr, whitelist_hash);
+    ApplyLegacyWhitelistSnapshot(view, &whitelist_index);
+    BOOST_CHECK(IsWhitelisted(view, p2pkh));
+    BOOST_CHECK(IsWhitelisted(view, p2pk));
+
+    uint256 first_hash;
+    CBlockIndex first_index;
+    InitIndex(first_index, SHADOW_REWARD_START_HEIGHT, &whitelist_index, first_hash);
+    CBlock first_block;
+    first_block.vtx.push_back(MakeCoinbaseTx(CScript{} << OP_2));
+    first_block.vtx.push_back(MakeCoinstakeTx(p2pk));
+    CBlockUndo first_undo = MakeUndoWithInputScripts(first_block, {{1, p2pk}});
+    BOOST_REQUIRE(ApplyShadowBlock(view, first_block, &first_index, &first_undo));
+    const auto recent_activity = GetRecentShadowSolverActivityForScript(view, &first_index, p2pkh);
+    BOOST_REQUIRE(recent_activity);
+    BOOST_CHECK_EQUAL(recent_activity->height, static_cast<uint32_t>(first_index.nHeight));
+
+    std::vector<unsigned char> signal;
+    BOOST_REQUIRE(BuildShadowSignalData(p2pkh, quantum_payout, first_index.nHeight, first_index.GetBlockHash(), signal));
+
+    uint256 reward_hash;
+    CBlockIndex reward_index;
+    InitIndex(reward_index, SHADOW_REWARD_START_HEIGHT + 1, &first_index, reward_hash);
+    CBlock reward_block;
+    reward_block.vtx.push_back(MakeCoinbaseTx(CScript{} << OP_2));
+    reward_block.vtx.push_back(MakeCoinstakeTx(p2pk));
+    reward_block.vtx.push_back(MakeSignalTx(p2pkh, signal));
+    CBlockUndo reward_undo = MakeUndoWithInputScripts(reward_block, {{1, p2pk}, {2, p2pk}});
+
+    std::map<CScript, CAmount> direct_payouts;
+    CAmount direct_total{0};
+    BOOST_REQUIRE(GetShadowPosDirectPayouts(view, reward_block, &reward_index, &reward_undo, direct_payouts, direct_total));
+    BOOST_CHECK_EQUAL(direct_total, 580 * COIN);
+    BOOST_REQUIRE_EQUAL(direct_payouts.size(), 1U);
+    BOOST_CHECK_EQUAL(direct_payouts[quantum_payout], 580 * COIN);
 }
 
 BOOST_AUTO_TEST_CASE(legacy_whitelist_snapshot_undo_removes_markers)
