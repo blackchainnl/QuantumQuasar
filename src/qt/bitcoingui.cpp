@@ -1396,6 +1396,13 @@ void BitcoinGUI::fitToScreen()
     if (!available.isValid()) return;
 
     QRect target = geometry();
+    constexpr int preferred_min_width = 1040;
+    constexpr int preferred_min_height = 700;
+    const int min_width = std::min(preferred_min_width, available.width());
+    const int min_height = std::min(preferred_min_height, available.height());
+    target.setWidth(std::clamp(target.width(), min_width, available.width()));
+    target.setHeight(std::clamp(target.height(), min_height, available.height()));
+
     if (target.width() > available.width()) {
         target.setWidth(available.width());
     }
