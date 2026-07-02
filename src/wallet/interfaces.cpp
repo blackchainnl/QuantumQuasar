@@ -148,6 +148,10 @@ struct ColdStakeDelegationOutputs
 {
     CAmount amount{0};
     int outputs{0};
+    CAmount confirmed_amount{0};
+    int confirmed_outputs{0};
+    CAmount unconfirmed_amount{0};
+    int unconfirmed_outputs{0};
     CAmount spendable_amount{0};
     int spendable_outputs{0};
     std::vector<COutPoint> spendable_outpoints;
@@ -207,6 +211,13 @@ ColdStakeDelegationOutputs ScanColdStakeDelegationOutputs(
         if (out.txout.nValue <= 0 || out.txout.scriptPubKey != delegation_script) continue;
         outputs.amount += out.txout.nValue;
         ++outputs.outputs;
+        if (out.depth > 0) {
+            outputs.confirmed_amount += out.txout.nValue;
+            ++outputs.confirmed_outputs;
+        } else {
+            outputs.unconfirmed_amount += out.txout.nValue;
+            ++outputs.unconfirmed_outputs;
+        }
         if (out.spendable) {
             outputs.spendable_amount += out.txout.nValue;
             ++outputs.spendable_outputs;
@@ -236,6 +247,10 @@ WalletQuantumColdStakeBalanceInfo MakeWalletColdStakeBalanceInfo(const CWallet& 
         /*spendable_only=*/false);
     result.amount = outputs.amount;
     result.outputs = outputs.outputs;
+    result.confirmed_amount = outputs.confirmed_amount;
+    result.confirmed_outputs = outputs.confirmed_outputs;
+    result.unconfirmed_amount = outputs.unconfirmed_amount;
+    result.unconfirmed_outputs = outputs.unconfirmed_outputs;
     result.spendable_amount = outputs.spendable_amount;
     result.spendable_outputs = outputs.spendable_outputs;
     return result;
@@ -1212,8 +1227,8 @@ util::Result<WalletQuantumActionTx> CreateQuantumMigrationSweep(
                  IsQuantumWitnessSpendActive(consensus, mtp, next_height));
             if (!can_move_reward_outputs) {
                 return util::Error{allow_goldrush_epoch
-                    ? _("Gold Rush reward migration is only allowed after quantum reward spends are active and before the final quantum lockout deadline.")
-                    : _("Gold Rush reward migration is only allowed while quantum reward spends are active and before the final quantum lockout deadline.")};
+                    ? _("Gold Rush reward migration is only allowed once quantum reward spends are active and before the final quantum lockout deadline.")
+                    : _("Gold Rush reward migration is only allowed during the migration window and before the final quantum lockout deadline.")};
             }
         } else if (consensus.IsQuantumFinalLockout(mtp)) {
                 return util::Error{_("The migration deadline has passed; legacy coins are no longer spendable and cannot be migrated.")};

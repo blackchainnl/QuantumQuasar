@@ -115,6 +115,7 @@ private:
     QLabel* m_stake_weight{nullptr};
     QLabel* m_goldrush_badge{nullptr};
     QLabel* m_pos_goldrush_status{nullptr};
+    QLabel* m_staking_summary{nullptr};
     QCheckBox* m_donation_enable{nullptr};
     QSpinBox* m_donation_percent{nullptr};
     QLabel* m_donation_status{nullptr};
@@ -181,6 +182,7 @@ private:
     QPushButton* m_operator_registry_use{nullptr};
     QLabel* m_operator_registry_status{nullptr};
     QLabel* m_coldstake_quantum_available{nullptr};
+    QLabel* m_coldstake_summary{nullptr};
     QLabel* m_coldstake_selection_summary{nullptr};
     QComboBox* m_coldstake_lock_period{nullptr};
     QComboBox* m_coldstake_operator_selector{nullptr};

@@ -1933,7 +1933,7 @@ RPCHelpMan migrategoldrushrewards()
 {
     return RPCHelpMan{"migrategoldrushrewards",
         "\nMove wallet-owned Gold Rush reward outputs to a fresh Blackcoin ML-DSA\n"
-        "migration address after quantum reward spends are active and before the final lockout deadline.\n",
+        "migration address once quantum reward spends are active, including during Gold Rush, and before the final lockout deadline.\n",
         {
             {"options", RPCArg::Type::OBJ_NAMED_PARAMS, RPCArg::Optional::OMITTED, "",
                 {
@@ -1992,7 +1992,7 @@ RPCHelpMan migrategoldrushrewards()
             IsQuantumWitnessSpendActive(consensus, mtp, next_height);
         if (!goldrush_move_active) {
             throw JSONRPCError(RPC_WALLET_ERROR,
-                "Gold Rush reward migration is only allowed after quantum reward spends are active and before the final quantum lockout deadline.");
+                "Gold Rush reward migration is only allowed once quantum reward spends are active and before the final quantum lockout deadline.");
         }
         const std::string phase = QQPhaseName(consensus.GetQuantumQuasarPhase(mtp));
 

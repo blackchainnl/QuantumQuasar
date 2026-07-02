@@ -279,6 +279,11 @@ void StakingMiningPage::setupUi()
         edit->setMinimumWidth(0);
         edit->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     };
+    auto configureInfoPanel = [](QLabel* label) {
+        label->setWordWrap(true);
+        label->setTextFormat(Qt::RichText);
+        label->setStyleSheet(QStringLiteral("QLabel { background: #f5f7fb; border: 1px solid #d8dee9; border-radius: 6px; padding: 8px; }"));
+    };
 
     // ---- Staking section ----
     auto* stakingBox = new QGroupBox(tr("Staking"), this);
@@ -308,6 +313,9 @@ void StakingMiningPage::setupUi()
     m_pos_goldrush_status = new QLabel(tr("PoS Gold Rush jackpot: unknown"), stakingBox);
     m_pos_goldrush_status->setObjectName(QStringLiteral("posGoldrushStatus"));
     m_pos_goldrush_status->setWordWrap(true);
+    m_staking_summary = new QLabel(tr("Wallet staking summary will appear after the wallet is loaded."), stakingBox);
+    m_staking_summary->setObjectName(QStringLiteral("stakingSummary"));
+    configureInfoPanel(m_staking_summary);
 
     m_donation_enable = new QCheckBox(tr("Donate a share of staking rewards"), stakingBox);
     m_donation_enable->setObjectName(QStringLiteral("stakingDonationEnable"));
@@ -336,10 +344,11 @@ void StakingMiningPage::setupUi()
     sgrid->addWidget(m_stake_weight, 5, 1);
     sgrid->addWidget(m_goldrush_badge, 6, 0, 1, 2);
     sgrid->addWidget(m_pos_goldrush_status, 7, 0, 1, 2);
-    sgrid->addWidget(m_donation_enable, 8, 0, 1, 2);
-    sgrid->addWidget(new QLabel(tr("Donation:"), stakingBox), 9, 0);
-    sgrid->addWidget(m_donation_percent, 9, 1);
-    sgrid->addWidget(m_donation_status, 10, 0, 1, 2);
+    sgrid->addWidget(m_staking_summary, 8, 0, 1, 2);
+    sgrid->addWidget(m_donation_enable, 9, 0, 1, 2);
+    sgrid->addWidget(new QLabel(tr("Donation:"), stakingBox), 10, 0);
+    sgrid->addWidget(m_donation_percent, 10, 1);
+    sgrid->addWidget(m_donation_status, 11, 0, 1, 2);
     outer->addWidget(stakingBox);
 
     // ---- Gold Rush Proof-of-Work section ----
@@ -421,12 +430,16 @@ void StakingMiningPage::setupUi()
     auto* operatorGrid = new QGridLayout(operatorTab);
     auto* delegateTab = new QWidget(coldstakeTabs);
     auto* delegateGrid = new QGridLayout(delegateTab);
-    coldstakeTabs->addTab(selfStakeTab, tr("Stake my coins"));
-    coldstakeTabs->addTab(operatorTab, tr("Operate"));
-    coldstakeTabs->addTab(delegateTab, tr("Delegate"));
+    m_coldstake_summary = new QLabel(tr("Cold-staking summary will appear after the wallet is loaded."), coldstakeBox);
+    m_coldstake_summary->setObjectName(QStringLiteral("coldstakeSummary"));
+    configureInfoPanel(m_coldstake_summary);
+    coldstakeOuter->addWidget(m_coldstake_summary);
+    coldstakeTabs->addTab(selfStakeTab, tr("1. Stake my coins"));
+    coldstakeTabs->addTab(operatorTab, tr("2. Run a Node"));
+    coldstakeTabs->addTab(delegateTab, tr("3. Delegate coins"));
     coldstakeOuter->addWidget(coldstakeTabs);
 
-    auto* selfStakeHeading = new QLabel(tr("<b>Stake your own quantum coins</b>"), coldstakeBox);
+    auto* selfStakeHeading = new QLabel(tr("<b>Stake your own quantum coins</b><br>Keep the keys in this wallet and choose a lock period for staking weight."), coldstakeBox);
     selfStakeHeading->setTextFormat(Qt::RichText);
     m_selfstake_lock_period = new QComboBox(coldstakeBox);
     m_selfstake_lock_period->setObjectName(QStringLiteral("selfStakeLockPeriod"));
@@ -468,7 +481,7 @@ void StakingMiningPage::setupUi()
     m_selfstake_status->setObjectName(QStringLiteral("selfStakeStatus"));
     m_selfstake_status->setWordWrap(true);
 
-    auto* operatorHeading = new QLabel(tr("<b>Operate a cold-staking node</b>"), coldstakeBox);
+    auto* operatorHeading = new QLabel(tr("<b>Operate a cold-staking node</b><br>Create a fixed 30-day operator bond, keep this wallet online, and let delegators select you from the verified registry."), coldstakeBox);
     operatorHeading->setTextFormat(Qt::RichText);
     m_operator_address = new QLineEdit(coldstakeBox);
     m_operator_address->setObjectName(QStringLiteral("coldstakeOperatorAddress"));
@@ -527,7 +540,7 @@ void StakingMiningPage::setupUi()
     m_operator_registry_status->setObjectName(QStringLiteral("coldstakeOperatorRegistryStatus"));
     m_operator_registry_status->setWordWrap(true);
 
-    auto* delegateHeading = new QLabel(tr("<b>Delegate coins to an operator</b>"), coldstakeBox);
+    auto* delegateHeading = new QLabel(tr("<b>Delegate coins to an operator</b><br>Select a verified operator, create a wallet-backed delegation address, then fund it. This wallet keeps the owner-spend key."), coldstakeBox);
     delegateHeading->setTextFormat(Qt::RichText);
     m_coldstake_quantum_available = new QLabel(QStringLiteral("-"), coldstakeBox);
     m_coldstake_quantum_available->setObjectName(QStringLiteral("coldstakeQuantumAvailable"));
@@ -1558,7 +1571,9 @@ void StakingMiningPage::refreshOperatorRegistry()
         const QString label = !op.staking_pubkey.empty()
             ? shortenHex(op.staking_pubkey)
             : shortenHex(op.staking_pubkey_hash);
-        const QString bond = op.operator_commitment_verified ? tr("ready") : tr("missing bond");
+        const QString bond = op.operator_commitment_verified
+            ? (op.verified_value > 0 ? tr("ready") : tr("ready; no delegations yet"))
+            : tr("missing bond");
         const QString cap = op.over_cap ? tr("over 20%") : tr("ok");
 
         auto* operator_item = new QTableWidgetItem(label);
@@ -1740,6 +1755,29 @@ void StakingMiningPage::updateStatus()
     pos_goldrush_text += tr("   |   This wallet: %1.").arg(wallet_signal_text);
     m_pos_goldrush_status->setText(pos_goldrush_text);
 
+    QString unlock_mode;
+    if (encryption_status == WalletModel::Unencrypted) {
+        unlock_mode = tr("unencrypted wallet");
+    } else if (normal_unlocked) {
+        unlock_mode = tr("normal unlock: quantum actions available");
+    } else if (w.getWalletUnlockStakingOnly()) {
+        unlock_mode = tr("legacy staking-only unlock: Gold Rush signals and quantum actions blocked");
+    } else {
+        unlock_mode = tr("locked");
+    }
+    m_staking_summary->setText(tr(
+        "<b>Wallet mining snapshot</b><br>"
+        "Legacy spendable: %1 &nbsp;|&nbsp; Quantum spendable: %2<br>"
+        "PoS: %3; next active-signal split %4 &nbsp;|&nbsp; PoW: %5; next claim %6<br>"
+        "Unlock mode: %7")
+        .arg(formatBLK(balances.legacy_balance))
+        .arg(formatBLK(balances.quantum_balance))
+        .arg(wallet_signal_text)
+        .arg(formatBLK(info.pos_estimated_payout_per_signaler))
+        .arg(info.enabled ? tr("running") : tr("off"))
+        .arg(formatBLK(info.next_claim_payout))
+        .arg(unlock_mode));
+
     if (m_pow_apply_pending) {
         m_pow_status->setText(m_pow_pending_enabled ? tr("Starting Gold Rush PoW mining...") : tr("Stopping Gold Rush PoW mining..."));
     } else if (m_pow_settings_dirty && info.enabled) {
@@ -1766,6 +1804,10 @@ void StakingMiningPage::updateStatus()
 
     // Quantum migration and advanced wallet tables are relatively expensive, so refresh
     // them on the slower full-refresh cadence instead of every status tick.
+    CAmount direct_delegation_balance{0};
+    CAmount goldrush_reward_amount_needing_move{0};
+    CAmount staked_quantum_amount{0};
+    unsigned int goldrush_reward_outputs_needing_move{0};
     const interfaces::WalletMigrationStatus migration = w.getMigrationStatus();
     if (migration.available) {
         m_migration_phase->setText(QString::fromStdString(migration.phase));
@@ -1781,7 +1823,10 @@ void StakingMiningPage::updateStatus()
         m_migration_goldrush_amount->setText(tr("%1 across %2 outputs")
             .arg(formatBLK(migration.goldrush_reward_amount_needing_move))
             .arg(QString::number(migration.goldrush_reward_outputs_needing_move)));
-        const CAmount direct_delegation_balance = migration.direct_quantum_amount;
+        direct_delegation_balance = migration.direct_quantum_amount;
+        goldrush_reward_amount_needing_move = migration.goldrush_reward_amount_needing_move;
+        goldrush_reward_outputs_needing_move = migration.goldrush_reward_outputs_needing_move;
+        staked_quantum_amount = migration.staked_quantum_amount;
         m_coldstake_fund_available = direct_delegation_balance > 0;
         const QString staked_note = migration.staked_quantum_amount > 0
             ? tr(" %1 is already bonded or delegated for staking.")
@@ -2082,47 +2127,90 @@ void StakingMiningPage::updateStatus()
     }
     CAmount wallet_delegated_amount{0};
     int wallet_delegated_outputs{0};
+    CAmount wallet_pending_delegated_amount{0};
+    int wallet_pending_delegated_outputs{0};
     CAmount selected_operator_delegated_amount{0};
     int selected_operator_delegation_count{0};
+    CAmount selected_operator_pending_amount{0};
+    int selected_operator_pending_count{0};
     const QString selected_operator_hash = selectedColdStakeOperatorHash();
     for (const interfaces::WalletQuantumColdStakeInfo& info : coldstake_delegations) {
         const interfaces::WalletQuantumColdStakeBalanceInfo balance =
             w.getQuantumColdStakeBalanceInfo(info.address);
-        wallet_delegated_amount += balance.amount;
-        wallet_delegated_outputs += balance.outputs;
+        wallet_delegated_amount += balance.confirmed_amount;
+        wallet_delegated_outputs += balance.confirmed_outputs;
+        wallet_pending_delegated_amount += balance.unconfirmed_amount;
+        wallet_pending_delegated_outputs += balance.unconfirmed_outputs;
         if (!selected_operator_hash.isEmpty() &&
             QString::fromStdString(info.staking_pubkey_hash) == selected_operator_hash) {
-            selected_operator_delegated_amount += balance.amount;
-            if (balance.outputs > 0) ++selected_operator_delegation_count;
+            selected_operator_delegated_amount += balance.confirmed_amount;
+            selected_operator_delegation_count += balance.confirmed_outputs;
+            selected_operator_pending_amount += balance.unconfirmed_amount;
+            selected_operator_pending_count += balance.unconfirmed_outputs;
         }
     }
     const QString selected_operator_label = selectedColdStakeOperatorPubKey().isEmpty()
         ? tr("none")
         : shortenHex(selectedColdStakeOperatorPubKey().toStdString());
     m_coldstake_selection_summary->setText(selected_operator_hash.isEmpty()
-        ? tr("Selected operator: %1. Your delegations: %2 across %3 output(s).")
+        ? tr("Selected operator: %1. Your confirmed delegations: %2 across %3 output(s). Pending: %4 across %5 output(s).")
               .arg(selected_operator_label)
               .arg(formatBLK(wallet_delegated_amount))
               .arg(wallet_delegated_outputs)
-        : tr("Selected operator: %1. Your delegations: %2 across %3 output(s); %4 to this operator across %5 delegation(s).")
+              .arg(formatBLK(wallet_pending_delegated_amount))
+              .arg(wallet_pending_delegated_outputs)
+        : tr("Selected operator: %1. Your confirmed delegations: %2 across %3 output(s); %4 confirmed to this operator across %5 output(s). Pending to this operator: %6 across %7 output(s).")
               .arg(selected_operator_label)
               .arg(formatBLK(wallet_delegated_amount))
               .arg(wallet_delegated_outputs)
               .arg(formatBLK(selected_operator_delegated_amount))
-              .arg(selected_operator_delegation_count));
+              .arg(selected_operator_delegation_count)
+              .arg(formatBLK(selected_operator_pending_amount))
+              .arg(selected_operator_pending_count));
+
+    const QString operator_state = local_bonded_operator
+        ? tr("this wallet is an active operator")
+        : (m_operator_address->text().isEmpty()
+            ? tr("no local operator selected")
+            : tr("operator key selected; fund or wait for confirmations"));
+    const QString goldrush_move_note = goldrush_reward_outputs_needing_move > 0
+        ? tr("%1 Gold Rush reward output(s), %2, must first move to a fresh quantum address.")
+              .arg(goldrush_reward_outputs_needing_move)
+              .arg(formatBLK(goldrush_reward_amount_needing_move))
+        : tr("no unmoved Gold Rush reward outputs");
+    m_coldstake_summary->setText(tr(
+        "<b>Cold-staking snapshot</b><br>"
+        "Available for delegation: %1 direct quantum &nbsp;|&nbsp; Already bonded/delegated: %2<br>"
+        "Operator: %3 &nbsp;|&nbsp; Confirmed delegated by this wallet: %4 across %5 output(s); pending %6 across %7 output(s)<br>"
+        "%8")
+        .arg(formatBLK(direct_delegation_balance))
+        .arg(formatBLK(staked_quantum_amount))
+        .arg(operator_state)
+        .arg(formatBLK(wallet_delegated_amount))
+        .arg(wallet_delegated_outputs)
+        .arg(formatBLK(wallet_pending_delegated_amount))
+        .arg(wallet_pending_delegated_outputs)
+        .arg(goldrush_move_note));
+
     if (!m_coldstake_address->text().isEmpty()) {
         const interfaces::WalletQuantumColdStakeBalanceInfo delegation_info =
             w.getQuantumColdStakeBalanceInfo(m_coldstake_address->text().toStdString());
         if (delegation_info.valid_delegation_address) {
-            if (delegation_info.spendable_outputs > 0) {
+            if (delegation_info.confirmed_outputs > 0) {
                 m_coldstake_withdraw_available = true;
-                m_coldstake_status->setText(tr("Delegation active: %1 spendable across %2 output(s). The selected operator can stake these coins; this wallet keeps the owner key.")
-                    .arg(formatBLK(delegation_info.spendable_amount))
-                    .arg(delegation_info.spendable_outputs));
+                const QString pending = delegation_info.unconfirmed_outputs > 0
+                    ? tr(" Pending confirmation: %1 across %2 output(s).")
+                          .arg(formatBLK(delegation_info.unconfirmed_amount))
+                          .arg(delegation_info.unconfirmed_outputs)
+                    : QString();
+                m_coldstake_status->setText(tr("Delegation active: %1 confirmed across %2 output(s). The selected operator can stake confirmed coins; this wallet keeps the owner key.%3")
+                    .arg(formatBLK(delegation_info.confirmed_amount))
+                    .arg(delegation_info.confirmed_outputs)
+                    .arg(pending));
             } else if (delegation_info.outputs > 0) {
-                m_coldstake_status->setText(tr("Delegation funding is visible but not spendable yet: %1 across %2 output(s). Wait for confirmation before staking or withdrawing.")
-                    .arg(formatBLK(delegation_info.amount))
-                    .arg(delegation_info.outputs));
+                m_coldstake_status->setText(tr("Delegation funding is pending confirmation: %1 across %2 output(s). It will count toward the operator pool after it confirms.")
+                    .arg(formatBLK(delegation_info.unconfirmed_amount))
+                    .arg(delegation_info.unconfirmed_outputs));
             } else {
                 m_coldstake_status->setText(tr("Delegation address ready. Enter an amount and click Delegate coins to move spendable quantum coins under this operator."));
             }
@@ -2168,6 +2256,7 @@ void StakingMiningPage::resetStatusForNoWallet()
     m_stake_weight->setText(QStringLiteral("-"));
     m_goldrush_badge->setText(tr("Gold Rush: no wallet loaded"));
     m_pos_goldrush_status->setText(tr("PoS Gold Rush jackpot: no wallet loaded"));
+    m_staking_summary->setText(tr("Load a wallet to view staking, Gold Rush, and unlock status."));
 
     m_donation_enable->setChecked(false);
     m_donation_status->setText(tr("Load a wallet to configure staking reward donations."));
@@ -2238,6 +2327,7 @@ void StakingMiningPage::resetStatusForNoWallet()
     if (m_coldstake_fund_amount) m_coldstake_fund_amount->setValue(COIN);
     m_coldstake_last_action_status.clear();
     m_coldstake_address->clear();
+    m_coldstake_summary->setText(tr("Load a wallet to view quantum staking and cold-staking status."));
     m_coldstake_selection_summary->setText(QStringLiteral("-"));
     m_coldstake_status->setText(QStringLiteral("-"));
 

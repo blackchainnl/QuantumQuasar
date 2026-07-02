@@ -617,6 +617,10 @@ struct WalletQuantumColdStakeBalanceInfo
     bool valid_delegation_address{false};
     CAmount amount{0};
     int outputs{0};
+    CAmount confirmed_amount{0};
+    int confirmed_outputs{0};
+    CAmount unconfirmed_amount{0};
+    int unconfirmed_outputs{0};
     CAmount spendable_amount{0};
     int spendable_outputs{0};
     int current_height{0};
