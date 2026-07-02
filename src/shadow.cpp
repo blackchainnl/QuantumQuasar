@@ -64,6 +64,14 @@ bool IsDirectQuantumMigrationScript(const CScript& script)
     return tier && !tier->tiered && !tier->cold_stake;
 }
 
+bool IsLegacyShadowTargetScript(const CScript& script)
+{
+    return !script.IsUnspendable() &&
+           !IsQuantumMigrationScript(script) &&
+           !IsQuantumColdStakeScript(script) &&
+           !IsEUTXOScript(script);
+}
+
 enum class ShadowProofMode : unsigned char {
     POW = 0,
     POS = 1,
@@ -739,8 +747,8 @@ std::optional<CScript> GetCurrentSolverScript(const CCoinsViewCache& view, const
 {
     if (!block.IsProofOfStake() || block.vtx.size() < 2 || !block.vtx[1]->IsCoinStake()) return std::nullopt;
     const CScript* stake_input_script = GetInputScript(blockundo, 1, 0);
-    if (stake_input_script && IsQuantumColdStakeScript(*stake_input_script)) return std::nullopt;
     if (!stake_input_script) return std::nullopt;
+    if (!IsLegacyShadowTargetScript(*stake_input_script)) return std::nullopt;
     const CScript solver_script = CanonicalLegacyStakeScript(*stake_input_script);
     if (!IsWhitelisted(view, solver_script)) return std::nullopt;
     return solver_script;
@@ -750,7 +758,7 @@ bool TxSpendsFromScript(const CTransaction& tx, size_t tx_index, const CBlockUnd
 {
     for (size_t input_index = 0; input_index < tx.vin.size(); ++input_index) {
         const CScript* input_script = GetInputScript(blockundo, tx_index, input_index);
-        if (input_script && CanonicalLegacyStakeScript(*input_script) == script) return true;
+        if (input_script && IsLegacyShadowTargetScript(*input_script) && CanonicalLegacyStakeScript(*input_script) == script) return true;
     }
     return false;
 }
@@ -789,7 +797,7 @@ std::map<CScript, CScript> FindValidShadowSignalsInBlock(const CCoinsViewCache& 
             ShadowSignal signal;
             if (!DecodeSignalPayload(*payload, signal)) continue;
             if (!signal.quantum_linked) continue;
-            if (IsQuantumColdStakeScript(signal.target)) continue;
+            if (!IsLegacyShadowTargetScript(signal.target)) continue;
             if (!IsWhitelisted(view, signal.target)) continue;
             if (!TxSpendsFromScript(tx, tx_index, blockundo, signal.target)) continue;
 
@@ -1493,7 +1501,7 @@ std::set<CScript> BuildLegacyWhitelist(CCoinsView& view)
         COutPoint outpoint;
         Coin coin;
         if (cursor->GetKey(outpoint) && cursor->GetValue(coin) && !coin.IsSpent()) {
-            if (coin.out.nValue > 0 && !coin.out.scriptPubKey.IsUnspendable()) {
+            if (coin.out.nValue > 0 && IsLegacyShadowTargetScript(coin.out.scriptPubKey)) {
                 const CScript script = CanonicalLegacyStakeScript(coin.out.scriptPubKey);
                 CAmount& balance = balances[script];
                 if (balance < SHADOW_WHITELIST_MIN_BALANCE) {

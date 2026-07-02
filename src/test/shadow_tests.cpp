@@ -244,6 +244,10 @@ BOOST_AUTO_TEST_CASE(legacy_whitelist_uses_aggregate_script_balance)
     const CScript split_below_threshold = CScript{} << OP_2;
     const CScript single_below_threshold = CScript{} << OP_3;
     const CScript unspendable = CScript{} << OP_RETURN << std::vector<unsigned char>{1};
+    const CScript direct_quantum = QuantumScript(0x31);
+    const CScript tiered_quantum = TieredQuantumMigrationScript();
+    const CScript cold_stake = QuantumColdStakeScript(0x32);
+    const CScript eutxo = GetScriptForEUTXO({0x33}, CScript{} << OP_TRUE);
 
     AddCoinForScript(view, COutPoint{uint256::ONE, 0}, 6'000 * COIN, split_eligible);
     AddCoinForScript(view, COutPoint{uint256::ONE, 1}, 5'000 * COIN, split_eligible);
@@ -251,6 +255,10 @@ BOOST_AUTO_TEST_CASE(legacy_whitelist_uses_aggregate_script_balance)
     AddCoinForScript(view, COutPoint{uint256::ONE, 3}, 4'999 * COIN, split_below_threshold);
     AddCoinForScript(view, COutPoint{uint256{2}, 0}, 9'999 * COIN, single_below_threshold);
     AddCoinForScript(view, COutPoint{uint256{2}, 1}, 20'000 * COIN, unspendable);
+    AddCoinForScript(view, COutPoint{uint256{3}, 0}, 10'000 * COIN, direct_quantum);
+    AddCoinForScript(view, COutPoint{uint256{3}, 1}, 10'000 * COIN, tiered_quantum);
+    AddCoinForScript(view, COutPoint{uint256{3}, 2}, 10'000 * COIN, cold_stake);
+    AddCoinForScript(view, COutPoint{uint256{3}, 3}, 10'000 * COIN, eutxo);
 
     const std::set<CScript> whitelist = BuildLegacyWhitelist(view);
     BOOST_CHECK_EQUAL(whitelist.size(), 1U);
@@ -258,6 +266,10 @@ BOOST_AUTO_TEST_CASE(legacy_whitelist_uses_aggregate_script_balance)
     BOOST_CHECK(!whitelist.count(split_below_threshold));
     BOOST_CHECK(!whitelist.count(single_below_threshold));
     BOOST_CHECK(!whitelist.count(unspendable));
+    BOOST_CHECK(!whitelist.count(direct_quantum));
+    BOOST_CHECK(!whitelist.count(tiered_quantum));
+    BOOST_CHECK(!whitelist.count(cold_stake));
+    BOOST_CHECK(!whitelist.count(eutxo));
 }
 
 BOOST_AUTO_TEST_CASE(legacy_whitelist_canonicalizes_p2pk_stake_outputs)
@@ -663,7 +675,7 @@ BOOST_AUTO_TEST_CASE(pos_shadow_excludes_quantum_coldstake_solver)
     CBlockIndex whitelist_index;
     InitIndex(whitelist_index, SHADOW_WHITELIST_HEIGHT, nullptr, whitelist_hash);
     ApplyLegacyWhitelistSnapshot(view, &whitelist_index);
-    BOOST_CHECK(IsWhitelisted(view, cold_target));
+    BOOST_CHECK(!IsWhitelisted(view, cold_target));
 
     std::vector<unsigned char> signal;
     BOOST_REQUIRE(BuildShadowSignalData(cold_target, quantum_payout, 0, uint256{}, signal));
