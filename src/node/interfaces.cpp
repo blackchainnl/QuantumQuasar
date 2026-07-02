@@ -849,7 +849,7 @@ public:
         if (gArgs.GetBoolArg("-powmining", false)) {
             bilingual_str pow_error;
             const int pow_threads = (int)gArgs.GetIntArg("-powminingthreads", 1);
-            const int pow_cpu = (int)gArgs.GetIntArg("-powminingcpu", 10);
+            const int pow_cpu = (int)gArgs.GetIntArg("-powminingcpu", 1);
             if (!wallet.SetPowMining(true, pow_threads, pow_cpu, pow_error)) {
                 wallet.WalletLogPrintf("Gold Rush PoW mining not auto-started: %s\n", pow_error.original);
             }
@@ -876,8 +876,8 @@ public:
 
     NodeContext* context() override { return &m_node; }
     ArgsManager& args() { return *Assert(m_node.args); }
-    ChainstateManager& chainman() { return *Assert(m_node.chainman); }
-    const CTxMemPool& mempool() { return *Assert(m_node.mempool); }
+    ChainstateManager& chainman() override { return *Assert(m_node.chainman); }
+    const CTxMemPool& mempool() override { return *Assert(m_node.mempool); }
     NodeContext& m_node;
 };
 } // namespace

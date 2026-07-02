@@ -98,7 +98,7 @@ void WalletInit::AddWalletOptions(ArgsManager& argsman) const
     argsman.AddArg("-staketimio=<n>", strprintf("Proof of stake timeout. (default: %u)", node::DEFAULT_STAKETIMIO), ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
     argsman.AddArg("-powmining=<true/false>", "Auto-start the built-in (in-process) Gold Rush Proof-of-Work miner at startup. Requires an unlocked wallet with private keys (default: false)", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
     argsman.AddArg("-powminingthreads=<n>", "Worker threads (CPU cores) for the built-in Gold Rush PoW miner (default: 1)", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
-    argsman.AddArg("-powminingcpu=<n>", "Per-core CPU utilization target (1-100) for the built-in Gold Rush PoW miner (default: 10)", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
+    argsman.AddArg("-powminingcpu=<n>", "Per-core CPU utilization target (1-100) for the built-in Gold Rush PoW miner (default: 1)", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
 
     argsman.AddArg("-minstakingamount=<amt>", strprintf("Minimum input value to be used for staking (default: %u)", wallet::DEFAULT_MIN_STAKING_AMOUNT), ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
     argsman.AddArg("-reservebalance=<amt>", strprintf("Reserved balance not used for staking (default: %u)", wallet::DEFAULT_RESERVE_BALANCE), ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
@@ -147,7 +147,7 @@ bool WalletInit::ParameterInteraction() const
         }
     }
     if (pow_mining_enabled || gArgs.IsArgSet("-powminingcpu")) {
-        const int64_t pow_cpu = gArgs.GetIntArg("-powminingcpu", 10);
+        const int64_t pow_cpu = gArgs.GetIntArg("-powminingcpu", 1);
         if (pow_cpu < 1 || pow_cpu > 100) {
             return InitError(Untranslated("-powminingcpu must be between 1 and 100."));
         }
