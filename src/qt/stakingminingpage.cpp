@@ -15,11 +15,14 @@
 #include <addresstype.h>
 #include <interfaces/wallet.h>
 #include <key_io.h>
+#include <primitives/transaction.h>
+#include <uint256.h>
 #include <wallet/wallet.h>
 
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <optional>
 #include <thread>
 
 #include <QApplication>
@@ -40,6 +43,7 @@
 #include <QSizePolicy>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTimer>
@@ -107,6 +111,43 @@ QString addressSelectorLabel(const std::string& label, const std::string& addres
     return text;
 }
 
+QString outputSelectorKey(const std::string& txid, uint32_t vout)
+{
+    return QString::fromStdString(txid) + QStringLiteral(":") + QString::number(vout);
+}
+
+QString outputSelectorLabel(const interfaces::WalletQuantumStakeOutputInfo& output)
+{
+    QString state = QString::fromStdString(output.state);
+    if (!state.isEmpty()) state[0] = state[0].toUpper();
+
+    QString text = QObject::tr("%1  |  %2  |  %3")
+        .arg(state.isEmpty() ? QObject::tr("Unknown") : state)
+        .arg(formatBLK(output.amount))
+        .arg(shortenHex(output.txid + ":" + std::to_string(output.vout)));
+    if (output.unlock_height > 0) {
+        text += QObject::tr("  |  unlock %1").arg(output.unlock_height);
+    }
+    if (output.depth <= 0) {
+        text += QObject::tr("  |  unconfirmed");
+    }
+    return text;
+}
+
+std::optional<COutPoint> outpointFromSelectorData(const QVariant& data)
+{
+    const QString key = data.toString();
+    if (key.isEmpty()) return std::nullopt;
+
+    const QStringList parts = key.split(QStringLiteral(":"));
+    if (parts.size() != 2 || parts[0].isEmpty()) return std::nullopt;
+
+    bool ok{false};
+    const uint vout = parts[1].toUInt(&ok);
+    if (!ok) return std::nullopt;
+    return COutPoint(uint256S(parts[0].toStdString()), vout);
+}
+
 bool stakingAddressTier(const QString& address, QuantumStakeTierProgram& tier)
 {
     const CTxDestination dest = DecodeDestination(address.toStdString());
@@ -160,6 +201,11 @@ StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget
         const QString address = m_selfstake_selector->itemData(index).toString();
         if (address.isEmpty()) return;
         m_selfstake_address->setText(address);
+        m_selfstake_last_action_status.clear();
+        updateStatus();
+    });
+    connect(m_selfstake_output_selector, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        if (m_updating || !m_selfstake_output_selector) return;
         m_selfstake_last_action_status.clear();
         updateStatus();
     });
@@ -368,6 +414,12 @@ void StakingMiningPage::setupUi()
     m_selfstake_new->setObjectName(QStringLiteral("newSelfStakeAddress"));
     m_selfstake_copy = new QPushButton(tr("Copy"), coldstakeBox);
     m_selfstake_copy->setObjectName(QStringLiteral("selfStakeCopy"));
+    m_selfstake_output_selector = new QComboBox(coldstakeBox);
+    m_selfstake_output_selector->setObjectName(QStringLiteral("selfStakeOutputSelector"));
+    m_selfstake_output_selector->setEditable(false);
+    m_selfstake_output_selector->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_selfstake_output_selector->setToolTip(tr("Select a specific previously-funded staking output to unbond or withdraw. Leave on All to act on every eligible output for this staking address."));
+    m_selfstake_output_selector->addItem(tr("No staking outputs"), QString());
     m_selfstake_fund_amount = new BitcoinAmountField(coldstakeBox);
     m_selfstake_fund_amount->setObjectName(QStringLiteral("selfStakeFundAmount"));
     m_selfstake_fund_amount->SetMinValue(CENT);
@@ -485,6 +537,8 @@ void StakingMiningPage::setupUi()
     cgrid->addWidget(new QLabel(tr("Staking address:"), coldstakeBox), r, 0);
     cgrid->addWidget(m_selfstake_address, r, 1, 1, 2);
     cgrid->addWidget(m_selfstake_copy, r++, 3);
+    cgrid->addWidget(new QLabel(tr("Staked output:"), coldstakeBox), r, 0);
+    cgrid->addWidget(m_selfstake_output_selector, r++, 1, 1, 3);
     cgrid->addWidget(new QLabel(tr("Fund amount:"), coldstakeBox), r, 0);
     cgrid->addWidget(m_selfstake_fund_amount, r, 1);
     cgrid->addWidget(m_selfstake_fund, r, 2);
@@ -888,10 +942,18 @@ void StakingMiningPage::onWithdrawSelfStakeAddress()
         m_selfstake_status->setText(tr("Create a quantum staking address first."));
         return;
     }
+    const std::optional<COutPoint> selected_outpoint = outpointFromSelectorData(m_selfstake_output_selector->currentData());
 
     const interfaces::WalletQuantumOperatorBondInfo info =
         m_wallet_model->wallet().getQuantumStakeAddressBondInfo(m_selfstake_address->text().toStdString());
-    if (info.valid_operator_address && info.bonded_outputs > 0) {
+    if (selected_outpoint) {
+        const int rc = QMessageBox::question(
+            this,
+            tr("Stop selected quantum stake"),
+            tr("This will act only on the selected staking output:\n%1\n\nIf it is bonded, unbonding starts. If it is already mature, it withdraws to a fresh quantum address. Continue?")
+                .arg(m_selfstake_output_selector->currentText()));
+        if (rc != QMessageBox::Yes) return;
+    } else if (info.valid_operator_address && info.bonded_outputs > 0) {
         const int rc = QMessageBox::question(
             this,
             tr("Stop quantum staking"),
@@ -903,7 +965,9 @@ void StakingMiningPage::onWithdrawSelfStakeAddress()
     WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
     if (!ctx.isValid()) return;
 
-    auto result = m_wallet_model->wallet().withdrawQuantumStakeAddress(m_selfstake_address->text().toStdString());
+    auto result = selected_outpoint
+        ? m_wallet_model->wallet().withdrawQuantumStakeOutput(m_selfstake_address->text().toStdString(), *selected_outpoint)
+        : m_wallet_model->wallet().withdrawQuantumStakeAddress(m_selfstake_address->text().toStdString());
     if (!result) {
         const QString msg = QString::fromStdString(util::ErrorString(result).original);
         m_selfstake_status->setText(msg);
@@ -1272,6 +1336,7 @@ void StakingMiningPage::updateStatus()
     m_coldstake_count->setText(QString::number(static_cast<int>(coldstake_delegations.size())));
 
     const QString previous_selfstake = m_selfstake_address->text();
+    const QString previous_selfstake_output = m_selfstake_output_selector->currentData().toString();
     const QString previous_operator = m_operator_address->text();
     const QString previous_coldstake = m_coldstake_address->text();
     int saved_selfstake_count{0};
@@ -1354,6 +1419,28 @@ void StakingMiningPage::updateStatus()
             m_selfstake_status->setText(tr("Tiered staking address ready with %1 bonded blocks.").arg(selfstake_it->unbonding_blocks));
         }
     }
+
+    std::vector<interfaces::WalletQuantumStakeOutputInfo> selfstake_outputs;
+    if (!m_selfstake_address->text().isEmpty()) {
+        selfstake_outputs = w.listQuantumStakeOutputs(m_selfstake_address->text().toStdString());
+    }
+    {
+        QSignalBlocker output_blocker(m_selfstake_output_selector);
+        m_selfstake_output_selector->clear();
+        if (selfstake_outputs.empty()) {
+            m_selfstake_output_selector->addItem(tr("No staking outputs for this address"), QString());
+        } else {
+            m_selfstake_output_selector->addItem(tr("All active / withdrawable outputs"), QString());
+            for (const interfaces::WalletQuantumStakeOutputInfo& output : selfstake_outputs) {
+                m_selfstake_output_selector->addItem(outputSelectorLabel(output), outputSelectorKey(output.txid, output.vout));
+            }
+            if (!previous_selfstake_output.isEmpty()) {
+                const int selected = m_selfstake_output_selector->findData(previous_selfstake_output);
+                if (selected >= 0) m_selfstake_output_selector->setCurrentIndex(selected);
+            }
+        }
+    }
+
     if (!m_selfstake_address->text().isEmpty()) {
         const uint16_t lock_blocks = stakingAddressLockBlocks(m_selfstake_address->text());
         const interfaces::WalletQuantumOperatorBondInfo stake_info =
@@ -1484,6 +1571,11 @@ void StakingMiningPage::resetStatusForNoWallet()
         m_selfstake_selector->clear();
         m_selfstake_selector->addItem(tr("Load a wallet to select a staking address"), QString());
     }
+    {
+        QSignalBlocker output_selector_blocker(m_selfstake_output_selector);
+        m_selfstake_output_selector->clear();
+        m_selfstake_output_selector->addItem(tr("Load a wallet to select staking outputs"), QString());
+    }
     if (m_selfstake_fund_amount) m_selfstake_fund_amount->setValue(COIN);
     m_selfstake_last_action_status.clear();
     m_selfstake_status->setText(QStringLiteral("-"));
@@ -1549,6 +1641,7 @@ void StakingMiningPage::refreshControlsEnabled()
     m_selfstake_selector->setEnabled(has_wallet && m_selfstake_selector->count() > 1);
     m_selfstake_new->setEnabled(can_create_quantum);
     m_selfstake_copy->setEnabled(m_selfstake_address && !m_selfstake_address->text().isEmpty());
+    m_selfstake_output_selector->setEnabled(has_wallet && m_selfstake_output_selector->count() > 1);
     const bool has_selfstake_address = m_selfstake_address && !m_selfstake_address->text().isEmpty();
     m_selfstake_fund_amount->setEnabled(can_create_quantum && has_selfstake_address);
     m_selfstake_fund->setEnabled(can_create_quantum && has_selfstake_address);

@@ -134,6 +134,7 @@ private:
     QLineEdit* m_selfstake_address{nullptr};
     QPushButton* m_selfstake_new{nullptr};
     QPushButton* m_selfstake_copy{nullptr};
+    QComboBox* m_selfstake_output_selector{nullptr};
     BitcoinAmountField* m_selfstake_fund_amount{nullptr};
     QPushButton* m_selfstake_fund{nullptr};
     QPushButton* m_selfstake_withdraw{nullptr};

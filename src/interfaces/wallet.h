@@ -59,6 +59,7 @@ struct WalletQuantumAddressInfo;
 struct WalletQuantumColdStakeInfo;
 struct WalletQuantumOperatorBondInfo;
 struct WalletQuantumOperatorBondTx;
+struct WalletQuantumStakeOutputInfo;
 struct WalletQuantumPoolInfo;
 struct WalletQuantumPoolOperatorInfo;
 struct WalletMigrationStatus;
@@ -327,11 +328,17 @@ public:
     //! Return wallet-owned tiered self-staking address status.
     virtual WalletQuantumOperatorBondInfo getQuantumStakeAddressBondInfo(const std::string& stake_address) = 0;
 
+    //! List wallet-owned staking UTXOs for a tiered self-staking address.
+    virtual std::vector<WalletQuantumStakeOutputInfo> listQuantumStakeOutputs(const std::string& stake_address) = 0;
+
     //! Fund this wallet's tiered self-staking address from spendable wallet funds.
     virtual util::Result<WalletQuantumOperatorBondTx> fundQuantumStakeAddress(const std::string& stake_address, CAmount amount) = 0;
 
     //! Stop self-staking: start unbonding if bonded, or complete withdrawal if already mature.
     virtual util::Result<WalletQuantumOperatorBondTx> withdrawQuantumStakeAddress(const std::string& stake_address) = 0;
+
+    //! Stop or withdraw one selected self-staking UTXO.
+    virtual util::Result<WalletQuantumOperatorBondTx> withdrawQuantumStakeOutput(const std::string& stake_address, const COutPoint& outpoint) = 0;
 
     //! Create a Quantum Cold-Stake deposit address using a hex ML-DSA staking public key.
     virtual util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label, uint16_t unbonding_blocks) = 0;
@@ -591,6 +598,19 @@ struct WalletQuantumOperatorBondInfo
     int withdrawable_outputs{0};
     uint32_t next_unlock_height{0};
     int current_height{0};
+};
+
+//! Wallet-owned tiered quantum staking UTXO.
+struct WalletQuantumStakeOutputInfo
+{
+    std::string txid;
+    uint32_t vout{0};
+    std::string address;
+    CAmount amount{0};
+    int depth{0};
+    std::string state; //!< bonded, unbonding, or withdrawable
+    uint32_t unlock_height{0};
+    bool spendable{false};
 };
 
 //! Result from a wallet-created operator bond transaction.
