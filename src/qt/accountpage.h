@@ -33,6 +33,7 @@ public:
 
 private Q_SLOTS:
     void refresh();
+    void scheduleRefresh();
     void copySelectedAddress();
     void copySelectedOutpoint();
     void exportCsv();
@@ -68,6 +69,7 @@ private:
     QPushButton* m_guide{nullptr};
     QTreeWidget* m_tree{nullptr};
     QTimer* m_timer{nullptr};
+    QTimer* m_filter_timer{nullptr};
 
     void setupUi();
     bool rowMatchesFilter(const QString& family, const QString& address, const QString& label) const;

@@ -96,12 +96,16 @@ QString addressNote(const QString& family)
 
 AccountPage::AccountPage(const PlatformStyle* platformStyle, QWidget* parent)
     : QWidget(parent),
-      m_timer(new QTimer(this))
+      m_timer(new QTimer(this)),
+      m_filter_timer(new QTimer(this))
 {
     Q_UNUSED(platformStyle);
     setupUi();
     connect(m_timer, &QTimer::timeout, this, &AccountPage::refresh);
     m_timer->setInterval(12000);
+    m_filter_timer->setSingleShot(true);
+    m_filter_timer->setInterval(250);
+    connect(m_filter_timer, &QTimer::timeout, this, &AccountPage::refresh);
 }
 
 void AccountPage::setupUi()
@@ -186,8 +190,8 @@ void AccountPage::setupUi()
     connect(m_copy_address, &QPushButton::clicked, this, &AccountPage::copySelectedAddress);
     connect(m_copy_outpoint, &QPushButton::clicked, this, &AccountPage::copySelectedOutpoint);
     connect(m_export, &QPushButton::clicked, this, &AccountPage::exportCsv);
-    connect(m_family_filter, qOverload<int>(&QComboBox::currentIndexChanged), this, &AccountPage::refresh);
-    connect(m_search, &QLineEdit::textChanged, this, &AccountPage::refresh);
+    connect(m_family_filter, qOverload<int>(&QComboBox::currentIndexChanged), this, &AccountPage::scheduleRefresh);
+    connect(m_search, &QLineEdit::textChanged, this, &AccountPage::scheduleRefresh);
 }
 
 void AccountPage::setWalletModel(WalletModel* walletModel)
@@ -229,6 +233,12 @@ bool AccountPage::rowMatchesFilter(const QString& family, const QString& address
            label.contains(needle, Qt::CaseInsensitive);
 }
 
+void AccountPage::scheduleRefresh()
+{
+    if (!m_filter_timer) return;
+    m_filter_timer->start();
+}
+
 void AccountPage::refresh()
 {
     if (m_privacy) {
@@ -265,7 +275,7 @@ void AccountPage::refresh()
         .arg(formatBLK(balances.immature_balance)));
     m_legacy_card->setText(tr("<b>Legacy spend path</b><br>%1<br>Use for current-chain fees, legacy sends, and legacy staking.")
         .arg(formatBLK(balances.legacy_balance)));
-    m_quantum_card->setText(tr("<b>Quantum spend path</b><br>%1<br>Use for migration, Gold Rush rewards, and quantum staking workflows.")
+    m_quantum_card->setText(tr("<b>Quantum-controlled balance</b><br>%1<br>Includes wallet-owned quantum outputs; bonded, delegated, or Gold Rush outputs may need a guided move before ordinary spending.")
         .arg(formatBLK(balances.quantum_balance)));
     if (migration.available) {
         m_attention_card->setText(tr("<b>Attention</b><br>Legacy to migrate: %1<br>Gold Rush rewards to move: %2<br>Staked/delegated quantum: %3")

@@ -106,6 +106,7 @@ private:
     QString m_selfstake_last_action_status;
     QString m_operator_last_action_status;
     QString m_coldstake_last_action_status;
+    QString m_coldstake_address_staker_hash;
 
     // Staking section
     QCheckBox* m_staking_enable{nullptr};

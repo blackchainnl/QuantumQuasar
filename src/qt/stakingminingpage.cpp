@@ -270,6 +270,7 @@ StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget
         if (address.isEmpty()) return;
         m_coldstake_last_action_status.clear();
         m_coldstake_address->setText(address);
+        m_coldstake_address_staker_hash = m_coldstake_existing_selector->itemData(index, Qt::UserRole + 1).toString();
         updateStatus();
     });
     connect(m_coldstake_new, &QPushButton::clicked, this, &StakingMiningPage::onCreateColdStakeAddress);
@@ -1831,6 +1832,7 @@ void StakingMiningPage::onCreateColdStakeAddress()
         return;
     }
     m_coldstake_address->setText(QString::fromStdString(result->address));
+    m_coldstake_address_staker_hash = QString::fromStdString(result->staking_pubkey_hash);
     m_coldstake_last_action_status = result->has_staker_key
         ? tr("Cold-stake address created with %1 bonded blocks. This wallet can stake and owner-spend this delegation. Back up this wallet before funding it.").arg(result->unbonding_blocks)
         : tr("Cold-stake address created with %1 bonded blocks. This wallet holds the owner key. Back up this wallet before funding it.").arg(result->unbonding_blocks);
@@ -1854,6 +1856,22 @@ void StakingMiningPage::onFundColdStakeAddress()
         m_coldstake_status->setText(tr("Create or select a delegation address first."));
         return;
     }
+    const QString selected_operator_pubkey = selectedColdStakeOperatorPubKey();
+    const QString selected_operator_hash = selectedColdStakeOperatorHash();
+    if (selected_operator_pubkey.isEmpty()) {
+        const QString msg = tr("Select a verified cold-staking node before delegating coins. Saved delegation addresses can be inspected or withdrawn, but new funding must be tied to an explicitly selected node.");
+        m_coldstake_status->setText(msg);
+        QMessageBox::warning(this, tr("Delegate coins"), msg);
+        return;
+    }
+    if (!selected_operator_hash.isEmpty() &&
+        !m_coldstake_address_staker_hash.isEmpty() &&
+        m_coldstake_address_staker_hash != selected_operator_hash) {
+        const QString msg = tr("The selected delegation address belongs to a different cold-staking node. Create a new delegation address for the selected node, or select the node that matches this saved address.");
+        m_coldstake_status->setText(msg);
+        QMessageBox::warning(this, tr("Delegate coins"), msg);
+        return;
+    }
     if (!m_coldstake_fund_amount->validate()) {
         m_coldstake_status->setText(tr("Enter a valid delegation amount."));
         return;
@@ -1871,7 +1889,7 @@ void StakingMiningPage::onFundColdStakeAddress()
                "If unmoved Gold Rush reward outputs must be used, the wallet will first move them to a fresh quantum address when quantum spending is active. Continue?")
                 .arg(m_coldstake_address->text())
                 .arg(formatBLK(amount))
-                .arg(selectedColdStakeOperatorPubKey().isEmpty() ? tr("not selected") : shortenHex(selectedColdStakeOperatorPubKey().toStdString())))) {
+                .arg(shortenHex(selected_operator_pubkey.toStdString())))) {
         return;
     }
 
@@ -2168,7 +2186,7 @@ void StakingMiningPage::updateStatus()
     }
     m_staking_summary->setText(tr(
         "<b>Wallet mining snapshot</b><br>"
-        "Legacy spendable: %1 &nbsp;|&nbsp; Quantum spendable: %2<br>"
+        "Legacy spendable: %1 &nbsp;|&nbsp; Quantum-controlled: %2<br>"
         "PoS: %3; next active-signal split %4 &nbsp;|&nbsp; PoW: %5; next claim %6<br>"
         "Unlock mode: %7")
         .arg(formatBLK(balances.legacy_balance))
@@ -2182,7 +2200,7 @@ void StakingMiningPage::updateStatus()
     m_dashboard_wallet->setText(tr(
         "<b>Wallet</b><br>"
         "Legacy: %1<br>"
-        "Quantum: %2<br>"
+        "Quantum-controlled: %2<br>"
         "Unlock: %3")
         .arg(formatBLK(balances.legacy_balance))
         .arg(formatBLK(balances.quantum_balance))
@@ -2433,17 +2451,21 @@ void StakingMiningPage::updateStatus()
         m_coldstake_existing_selector->addItem(tr("Select saved delegation address"), QString());
         for (const interfaces::WalletQuantumColdStakeInfo& info : coldstake_delegations) {
             m_coldstake_existing_selector->addItem(addressSelectorLabel(info.label, info.address, info.unbonding_blocks), QString::fromStdString(info.address));
+            m_coldstake_existing_selector->setItemData(m_coldstake_existing_selector->count() - 1, QString::fromStdString(info.staking_pubkey_hash), Qt::UserRole + 1);
             ++saved_coldstake_count;
         }
         if (saved_coldstake_count == 0) {
             m_coldstake_existing_selector->clear();
             m_coldstake_existing_selector->addItem(tr("No saved delegation addresses"), QString());
+            if (m_coldstake_address->text().isEmpty()) {
+                m_coldstake_address_staker_hash.clear();
+            }
         } else if (!previous_coldstake.isEmpty()) {
             const int selected = m_coldstake_existing_selector->findData(previous_coldstake);
-            if (selected >= 0) m_coldstake_existing_selector->setCurrentIndex(selected);
-        } else {
-            m_coldstake_existing_selector->setCurrentIndex(m_coldstake_existing_selector->count() - 1);
-            m_coldstake_address->setText(m_coldstake_existing_selector->currentData().toString());
+            if (selected >= 0) {
+                m_coldstake_existing_selector->setCurrentIndex(selected);
+                m_coldstake_address_staker_hash = m_coldstake_existing_selector->itemData(selected, Qt::UserRole + 1).toString();
+            }
         }
     }
 
@@ -2567,9 +2589,6 @@ void StakingMiningPage::updateStatus()
     if (!m_operator_last_action_status.isEmpty() &&
         !m_operator_status->text().startsWith(m_operator_last_action_status)) {
         m_operator_status->setText(m_operator_last_action_status + QStringLiteral("\n") + m_operator_status->text());
-    }
-    if (m_coldstake_address->text().isEmpty() && !coldstake_delegations.empty()) {
-        m_coldstake_address->setText(QString::fromStdString(coldstake_delegations.back().address));
     }
     CAmount wallet_delegated_amount{0};
     int wallet_delegated_outputs{0};
@@ -2797,6 +2816,7 @@ void StakingMiningPage::resetStatusForNoWallet()
     if (m_coldstake_fund_amount) m_coldstake_fund_amount->setValue(COIN);
     m_coldstake_last_action_status.clear();
     m_coldstake_address->clear();
+    m_coldstake_address_staker_hash.clear();
     m_coldstake_summary->setText(tr("Load a wallet to view quantum staking and cold-staking status."));
     m_coldstake_selection_summary->setText(QStringLiteral("-"));
     m_coldstake_status->setText(QStringLiteral("-"));
@@ -2861,14 +2881,14 @@ void StakingMiningPage::refreshControlsEnabled()
         registry_selection_has_pubkey = operator_item && !operator_item->data(Qt::UserRole).toString().isEmpty();
     }
     m_operator_registry_use->setEnabled(has_wallet && registry_selection_has_pubkey);
-    m_coldstake_operator_selector->setEnabled(can_create_quantum && !selectedColdStakeOperatorPubKey().isEmpty());
+    m_coldstake_operator_selector->setEnabled(can_create_quantum && m_coldstake_operator_selector && m_coldstake_operator_selector->count() > 1);
     m_coldstake_existing_selector->setEnabled(has_wallet && m_coldstake_existing_selector->count() > 1);
     m_coldstake_lock_period->setEnabled(can_create_quantum);
     m_coldstake_new->setEnabled(can_create_quantum && !selectedColdStakeOperatorPubKey().isEmpty());
     m_coldstake_copy->setEnabled(m_coldstake_address && !m_coldstake_address->text().isEmpty());
     const bool has_coldstake_address = m_coldstake_address && !m_coldstake_address->text().isEmpty();
     m_coldstake_fund_amount->setEnabled(can_create_quantum && has_coldstake_address);
-    m_coldstake_fund->setEnabled(can_create_quantum && has_coldstake_address && m_coldstake_fund_available);
+    m_coldstake_fund->setEnabled(can_create_quantum && has_coldstake_address && !selectedColdStakeOperatorPubKey().isEmpty() && m_coldstake_fund_available);
     m_coldstake_withdraw->setEnabled(can_create_quantum && has_coldstake_address && m_coldstake_withdraw_available);
     m_donation_enable->setEnabled(has_wallet);
     m_donation_percent->setEnabled(has_wallet);
