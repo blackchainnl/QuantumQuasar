@@ -3,7 +3,6 @@
 #include <consensus/params.h>
 
 #include <algorithm>
-
 // Gold Rush schedule heights (mainnet defaults; regtest-overridable, see header).
 int SHADOW_WHITELIST_HEIGHT = 5920000;
 int SHADOW_REWARD_START_HEIGHT = 5950000;
