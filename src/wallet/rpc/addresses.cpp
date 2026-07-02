@@ -37,6 +37,15 @@ static UniValue QuantumKeyInfoToJSON(const QuantumKeyInfo& info)
     result.pushKV("timestamp", info.creation_time);
     result.pushKV("encrypted", info.encrypted);
     result.pushKV("stored_in_wallet", true);
+    QuantumStakeTierProgram tier;
+    if (DecodeQuantumStakeTierProgram(QUANTUM_MIGRATION_WITNESS_VERSION, info.witness_program, tier) && tier.tiered) {
+        result.pushKV("tiered", true);
+        result.pushKV("tier_state", tier.IsBonded() ? "bonded" : "unbonding");
+        result.pushKV("unbonding_blocks", tier.unbonding_blocks);
+        result.pushKV("unlock_height", tier.unlock_height);
+    } else {
+        result.pushKV("tiered", false);
+    }
     return result;
 }
 
@@ -216,9 +225,6 @@ RPCHelpMan getnewquantumstakeaddress()
     CHECK_NONFATAL(DecodeQuantumStakeTierProgram(QUANTUM_MIGRATION_WITNESS_VERSION, info->witness_program, tier) && tier.IsBonded());
 
     UniValue result = QuantumKeyInfoToJSON(*info);
-    result.pushKV("tier_state", "bonded");
-    result.pushKV("unbonding_blocks", tier.unbonding_blocks);
-    result.pushKV("unlock_height", tier.unlock_height);
     result.pushKV("warning", "This tiered staking address is wallet-backed. Back up the wallet after generating new quantum staking addresses.");
     return result;
 },

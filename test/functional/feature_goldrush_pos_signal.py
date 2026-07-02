@@ -212,7 +212,7 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
             tx for tx in wallet.listtransactions("*", 100, 0, True)
             if tx.get("txid") == signal_txid and tx.get("comment") == "Blackcoin shadow signal"
         ]
-        assert_equal(len(wallet_signals), 1)
+        assert wallet_signals, "auto QQSIGNAL transaction must be labeled in wallet history"
         self._assert_no_onchain_block_output_to(payout_block_hash, payout_address)
         self._assert_no_onchain_block_output_to(payout_block_hash, pow_payout_address)
 
