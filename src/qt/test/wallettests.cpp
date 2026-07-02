@@ -347,6 +347,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QPushButton* coldstake_operator_refresh = page.findChild<QPushButton*>("coldstakeOperatorRefresh");
     QPushButton* coldstake_operator_select = page.findChild<QPushButton*>("coldstakeOperatorSelect");
     QLabel* coldstake_operator_registry_status = page.findChild<QLabel*>("coldstakeOperatorRegistryStatus");
+    QLabel* coldstake_quantum_available = page.findChild<QLabel*>("coldstakeQuantumAvailable");
     QComboBox* coldstake_lock_period = page.findChild<QComboBox*>("coldstakeLockPeriod");
     QComboBox* coldstake_operator_selector = page.findChild<QComboBox*>("coldstakeOperatorSelector");
     QComboBox* coldstake_delegation_selector = page.findChild<QComboBox*>("coldstakeDelegationSelector");
@@ -406,6 +407,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(coldstake_operator_refresh);
     QVERIFY(coldstake_operator_select);
     QVERIFY(coldstake_operator_registry_status);
+    QVERIFY(coldstake_quantum_available);
     QVERIFY(coldstake_lock_period);
     QVERIFY(coldstake_operator_selector);
     QVERIFY(coldstake_delegation_selector);
@@ -433,6 +435,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(!migration_advice->text().isEmpty());
     QCOMPARE(quantum_address_count->text(), QString("0"));
     QCOMPARE(quantum_coldstake_count->text(), QString("0"));
+    QVERIFY(coldstake_quantum_available->text().contains(QString("BLK")));
     QVERIFY(!quantum_copy->isEnabled());
     QVERIFY(!quantum_pubkey_copy->isEnabled());
     QVERIFY(selfstake_new->isEnabled());

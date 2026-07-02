@@ -169,6 +169,7 @@ private:
     QPushButton* m_operator_registry_refresh{nullptr};
     QPushButton* m_operator_registry_use{nullptr};
     QLabel* m_operator_registry_status{nullptr};
+    QLabel* m_coldstake_quantum_available{nullptr};
     QComboBox* m_coldstake_lock_period{nullptr};
     QComboBox* m_coldstake_operator_selector{nullptr};
     QComboBox* m_coldstake_existing_selector{nullptr};

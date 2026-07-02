@@ -164,13 +164,31 @@ void RPCNestedTests::rpcNestedTests()
     RPCConsole::RPCExecuteCommandLine(m_node, result, "rpcNestedTest(   abc   ,   cba )");
     QVERIFY(result == "[\"abc\",\"cba\"]");
 
-    QVERIFY_EXCEPTION_THROWN(RPCConsole::RPCExecuteCommandLine(m_node, result, "getblockchaininfo() .\n"), std::runtime_error); //invalid syntax
-    QVERIFY_EXCEPTION_THROWN(RPCConsole::RPCExecuteCommandLine(m_node, result, "getblockchaininfo() getblockchaininfo()"), std::runtime_error); //invalid syntax
+    auto throws_runtime_error = [&](const std::string& command) {
+        bool threw{false};
+        try {
+            RPCConsole::RPCExecuteCommandLine(m_node, result, command);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        return threw;
+    };
+    QVERIFY(throws_runtime_error("getblockchaininfo() .\n")); //invalid syntax
+    QVERIFY(throws_runtime_error("getblockchaininfo() getblockchaininfo()")); //invalid syntax
     RPCConsole::RPCExecuteCommandLine(m_node, result, "getblockchaininfo("); //tolerate non closing brackets if we have no arguments
     RPCConsole::RPCExecuteCommandLine(m_node, result, "getblockchaininfo()()()"); //tolerate non command brackets
-    QVERIFY_EXCEPTION_THROWN(RPCConsole::RPCExecuteCommandLine(m_node, result, "getblockchaininfo(True)"), UniValue); //invalid argument
-    QVERIFY_EXCEPTION_THROWN(RPCConsole::RPCExecuteCommandLine(m_node, result, "a(getblockchaininfo(True))"), UniValue); //method not found
-    QVERIFY_EXCEPTION_THROWN(RPCConsole::RPCExecuteCommandLine(m_node, result, "rpcNestedTest abc,,abc"), std::runtime_error); //don't tolerate empty arguments when using ,
-    QVERIFY_EXCEPTION_THROWN(RPCConsole::RPCExecuteCommandLine(m_node, result, "rpcNestedTest(abc,,abc)"), std::runtime_error); //don't tolerate empty arguments when using ,
-    QVERIFY_EXCEPTION_THROWN(RPCConsole::RPCExecuteCommandLine(m_node, result, "rpcNestedTest(abc,,)"), std::runtime_error); //don't tolerate empty arguments when using ,
+    auto throws_rpc_error = [&](const std::string& command) {
+        bool threw{false};
+        try {
+            RPCConsole::RPCExecuteCommandLine(m_node, result, command);
+        } catch (const UniValue&) {
+            threw = true;
+        }
+        return threw;
+    };
+    QVERIFY(throws_rpc_error("getblockchaininfo(True)")); //invalid argument
+    QVERIFY(throws_rpc_error("a(getblockchaininfo(True))")); //method not found
+    QVERIFY(throws_runtime_error("rpcNestedTest abc,,abc")); //don't tolerate empty arguments when using ,
+    QVERIFY(throws_runtime_error("rpcNestedTest(abc,,abc)")); //don't tolerate empty arguments when using ,
+    QVERIFY(throws_runtime_error("rpcNestedTest(abc,,)")); //don't tolerate empty arguments when using ,
 }

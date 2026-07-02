@@ -513,6 +513,10 @@ void StakingMiningPage::setupUi()
 
     auto* delegateHeading = new QLabel(tr("<b>Delegate coins to an operator</b>"), coldstakeBox);
     delegateHeading->setTextFormat(Qt::RichText);
+    m_coldstake_quantum_available = new QLabel(QStringLiteral("-"), coldstakeBox);
+    m_coldstake_quantum_available->setObjectName(QStringLiteral("coldstakeQuantumAvailable"));
+    m_coldstake_quantum_available->setWordWrap(true);
+    m_coldstake_quantum_available->setToolTip(tr("Wallet-owned quantum balance currently visible for staking and delegation decisions."));
     m_coldstake_lock_period = new QComboBox(coldstakeBox);
     m_coldstake_lock_period->setObjectName(QStringLiteral("coldstakeLockPeriod"));
     populateStakeLockCombo(m_coldstake_lock_period);
@@ -584,6 +588,8 @@ void StakingMiningPage::setupUi()
     cgrid->addWidget(m_operator_registry, r++, 0, 1, 4);
     cgrid->addWidget(m_operator_registry_status, r++, 0, 1, 4);
     cgrid->addWidget(delegateHeading, r++, 0, 1, 4);
+    cgrid->addWidget(new QLabel(tr("Available quantum balance:"), coldstakeBox), r, 0);
+    cgrid->addWidget(m_coldstake_quantum_available, r++, 1, 1, 3);
     cgrid->addWidget(new QLabel(tr("Delegations:"), coldstakeBox), r, 0);
     cgrid->addWidget(m_coldstake_count, r++, 1);
     cgrid->addWidget(new QLabel(tr("Saved delegation:"), coldstakeBox), r, 0);
@@ -1442,8 +1448,10 @@ void StakingMiningPage::updateStatus()
 
     // Staking
     const bool staking = w.getEnabledStaking();
-    const bool normal_unlocked = m_wallet_model->getEncryptionStatus() == WalletModel::Unlocked &&
+    const WalletModel::EncryptionStatus encryption_status = m_wallet_model->getEncryptionStatus();
+    const bool normal_unlocked = encryption_status == WalletModel::Unlocked &&
                                  !w.getWalletUnlockStakingOnly();
+    const bool normal_signing_available = encryption_status == WalletModel::Unencrypted || normal_unlocked;
     m_staking_enable->setChecked(staking);
     m_unlock_staking_only->setChecked(w.getWalletUnlockStakingOnly());
     m_unlock_quantum_legacy_staking->setChecked(normal_unlocked);
@@ -1480,7 +1488,7 @@ void StakingMiningPage::updateStatus()
     const QString last_pos_payout = info.pos_last_payout_height > 0
         ? QString::number(info.pos_last_payout_height)
         : tr("none yet");
-    m_pos_goldrush_status->setText(info.epoch_active
+    QString pos_goldrush_text = info.epoch_active
         ? tr("PoS Gold Rush jackpot: %1 next qualified payout pool (%2 accrued)   |   Active signalers: %3   |   Estimated split: %4   |   Last PoS payout: %5")
               .arg(formatBLK(info.pos_next_payout_pool))
               .arg(formatBLK(info.pos_accrued_jackpot))
@@ -1488,7 +1496,11 @@ void StakingMiningPage::updateStatus()
               .arg(formatBLK(info.pos_estimated_payout_per_signaler))
               .arg(last_pos_payout)
         : tr("PoS Gold Rush jackpot: %1 accrued; Gold Rush is not active.")
-              .arg(formatBLK(info.pos_accrued_jackpot)));
+              .arg(formatBLK(info.pos_accrued_jackpot));
+    if (info.epoch_active && !normal_signing_available) {
+        pos_goldrush_text += tr("   |   Unlock Quantum and Legacy Staking to broadcast QQSIGNAL.");
+    }
+    m_pos_goldrush_status->setText(pos_goldrush_text);
 
     if (m_pow_apply_pending) {
         m_pow_status->setText(m_pow_pending_enabled ? tr("Starting Gold Rush PoW mining...") : tr("Stopping Gold Rush PoW mining..."));
@@ -1521,9 +1533,13 @@ void StakingMiningPage::updateStatus()
         m_migration_goldrush_amount->setText(tr("%1 across %2 outputs")
             .arg(formatBLK(migration.goldrush_reward_amount_needing_move))
             .arg(QString::number(migration.goldrush_reward_outputs_needing_move)));
+        m_coldstake_quantum_available->setText(tr("%1 across %2 outputs")
+            .arg(formatBLK(migration.migrated_quantum_amount))
+            .arg(QString::number(migration.migrated_quantum_outputs)));
         m_migration_advice->setText(QString::fromStdString(migration.advice));
     } else {
         m_migration_advice->setText(tr("Wallet is busy; migration status will refresh shortly."));
+        m_coldstake_quantum_available->setText(tr("Wallet is busy; quantum balance will refresh shortly."));
     }
 
     const interfaces::WalletDemurrageInfo demurrage = w.getDemurrageInfo();
@@ -1833,6 +1849,7 @@ void StakingMiningPage::resetStatusForNoWallet()
     m_migration_goldrush_amount->setText(QStringLiteral("-"));
     m_migration_advice->setText(tr("Load a wallet to view migration status."));
     m_migration_action_status->setText(QStringLiteral("-"));
+    m_coldstake_quantum_available->setText(QStringLiteral("-"));
     m_demurrage_status->setText(tr("Load a wallet to view demurrage status."));
     m_demurrage_amounts->setText(QStringLiteral("-"));
     m_demurrage_guards->setText(QStringLiteral("-"));

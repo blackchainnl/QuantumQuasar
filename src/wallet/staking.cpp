@@ -945,7 +945,12 @@ int MaybeAutoDemurrageAttest(CWallet& wallet)
 int MaybeAutoShadowSignal(CWallet& wallet)
 {
     if (!gArgs.GetBoolArg("-qqautoshadowsignal", true)) return 0;
-    if (!wallet.m_enabled_staking.load() || wallet.IsLocked() || wallet.m_wallet_unlock_staking_only || wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
+    if (!wallet.m_enabled_staking.load() || wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
+        return 0;
+    }
+    if (wallet.IsLocked() || wallet.m_wallet_unlock_staking_only) {
+        LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: normal wallet unlock required (locked=%d staking_only=%d)\n",
+                 wallet.IsLocked(), wallet.m_wallet_unlock_staking_only);
         return 0;
     }
 

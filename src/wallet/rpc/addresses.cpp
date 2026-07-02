@@ -195,6 +195,7 @@ RPCHelpMan getnewquantumstakeaddress()
                         {RPCResult::Type::NUM, "witness_version", "The witness version used for quantum migration"},
                         {RPCResult::Type::STR_HEX, "witness_program", "The 40-byte tiered staking witness program"},
                         {RPCResult::Type::STR_HEX, "public_key", "The ML-DSA-44 public key"},
+                        {RPCResult::Type::BOOL, "tiered", "Whether this address uses the tiered staking witness program"},
                         {RPCResult::Type::STR, "tier_state", "The tier state, currently 'bonded' for new staking addresses"},
                         {RPCResult::Type::NUM, "unbonding_blocks", "Bonded unbonding delay in blocks"},
                         {RPCResult::Type::NUM, "unlock_height", "Unlock height, always 0 for newly bonded addresses"},

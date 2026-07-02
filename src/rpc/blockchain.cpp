@@ -1991,10 +1991,6 @@ static RPCHelpMan submitquantumpoolclaim()
     const uint256 staker_hash = node::QuantumPoolHashPubKey(staking_pubkey);
 
     const UniValue& delegations = request.params[1].get_array();
-    if (delegations.empty()) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "delegations must not be empty");
-    }
-
     std::vector<node::QuantumPoolClaim> claims;
     claims.reserve(delegations.size());
     for (const UniValue& delegation : delegations.getValues()) {
@@ -2004,9 +2000,6 @@ static RPCHelpMan submitquantumpoolclaim()
     ChainstateManager& chainman = EnsureAnyChainman(request.context);
     LOCK(cs_main);
     const CCoinsViewCache& view = chainman.ActiveChainstate().CoinsTip();
-    const node::QuantumPoolShare share = node::ComputeQuantumPoolShare(view, staker_hash, claims);
-    const bool accepted = share.operator_share.invalid_claims == 0 && share.operator_share.verified_claims > 0;
-
     bool operator_commitment_verified{false};
     COutPoint operator_commitment_outpoint;
     const UniValue operator_commitment = request.params[2].isNull() ? UniValue(UniValue::VOBJ) : request.params[2].get_obj();
@@ -2019,6 +2012,14 @@ static RPCHelpMan submitquantumpoolclaim()
             operator_commitment["vout"].getInt<uint32_t>()};
         operator_commitment_verified = node::VerifyQuantumPoolOperatorCommitment(view, staking_pubkey, operator_commitment_outpoint);
     }
+
+    if (delegations.empty() && !operator_commitment_verified) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "delegations must not be empty unless a live operator_commitment is provided");
+    }
+
+    const node::QuantumPoolShare share = node::ComputeQuantumPoolShare(view, staker_hash, claims);
+    const bool accepted = share.operator_share.invalid_claims == 0 &&
+                          (share.operator_share.verified_claims > 0 || operator_commitment_verified);
 
     if (accepted) {
         node::UpsertQuantumPoolOperator(staker_hash, staking_pubkey, std::move(claims), operator_commitment_verified, operator_commitment_outpoint);

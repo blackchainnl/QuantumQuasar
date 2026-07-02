@@ -130,6 +130,29 @@ class QuantumPoolCapTest(BitcoinTestFramework):
         assert_equal(under["pool_cap_preflight"]["total_coldstake"], Decimal("500.00000000"))
         assert_equal(under["pool_cap_preflight"]["operator_value"], Decimal("0.00000000"))
 
+        self.log.info("Accepting a bonded operator with no delegators yet for bootstrap discovery")
+        operator_only = staker_c.getnewquantumstakeaddress("pool-c-operator", 40500)
+        operator_txid = funder.sendtoaddress(operator_only["address"], Decimal("1"))
+        self._generate(1, funder_address)
+        operator_utxo = self._one_utxo(staker_c, operator_only["address"], operator_txid)
+
+        bootstrap = node.submitquantumpoolclaim(
+            operator_only["public_key"],
+            [],
+            {
+                "txid": operator_utxo["txid"],
+                "vout": operator_utxo["vout"],
+            },
+        )
+        assert_equal(bootstrap["accepted"], True)
+        assert_equal(bootstrap["operator"]["verified_value"], Decimal("0E-8"))
+        assert_equal(bootstrap["operator"]["verified_claims"], 0)
+        assert_equal(bootstrap["operator"]["operator_commitment_verified"], True)
+
+        bootstrap_info = node.getquantumpoolinfo(operator_only["public_key"])
+        assert_equal(bootstrap_info["operator_count"], 1)
+        assert_equal(bootstrap_info["operators"][0]["operator_commitment_verified"], True)
+
 
 if __name__ == "__main__":
     QuantumPoolCapTest().main()

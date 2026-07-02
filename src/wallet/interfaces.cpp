@@ -200,6 +200,12 @@ struct OperatorBondOutputs
     std::vector<Record> records;
 };
 
+struct LocalOperatorBondCandidate
+{
+    std::vector<unsigned char> staking_pubkey;
+    COutPoint outpoint;
+};
+
 OperatorBondOutputs ScanOperatorBondOutputs(
     const CWallet& wallet,
     const CScript& bonded_script,
@@ -285,6 +291,45 @@ std::vector<WalletQuantumStakeOutputInfo> ListTieredStakeOutputs(
         result.push_back(std::move(info));
     }
     return result;
+}
+
+std::vector<LocalOperatorBondCandidate> FindWalletOperatorBondCandidates(const CWallet& wallet)
+{
+    struct OperatorAddress
+    {
+        std::string address;
+        std::vector<unsigned char> staking_pubkey;
+    };
+
+    std::vector<OperatorAddress> operator_addresses;
+    {
+        LOCK(wallet.cs_wallet);
+        const auto infos = wallet.ListQuantumKeyInfos();
+        operator_addresses.reserve(infos.size());
+        for (const QuantumKeyInfo& info : infos) {
+            const WalletQuantumAddressInfo address_info = MakeWalletQuantumAddressInfo(wallet, info);
+            if (address_info.label != "coldstake-operator" ||
+                !address_info.tiered ||
+                address_info.unbonding_blocks != OPERATOR_COMMITMENT_BLOCKS ||
+                info.public_key.size() != ML_DSA::PUBLICKEY_BYTES) {
+                continue;
+            }
+            operator_addresses.push_back({address_info.address, info.public_key});
+        }
+    }
+
+    std::vector<LocalOperatorBondCandidate> candidates;
+    for (const OperatorAddress& operator_address : operator_addresses) {
+        const std::vector<WalletQuantumStakeOutputInfo> outputs =
+            ListTieredStakeOutputs(wallet, operator_address.address, /*require_operator_lock=*/true);
+        for (const WalletQuantumStakeOutputInfo& output : outputs) {
+            if (output.state != "bonded" || output.amount <= 0) continue;
+            candidates.push_back({
+                operator_address.staking_pubkey,
+                COutPoint{uint256S(output.txid), output.vout}});
+        }
+    }
+    return candidates;
 }
 
 bool FindTieredStakeRecord(const OperatorBondOutputs& outputs, const COutPoint& outpoint, OperatorBondOutputs::Record& record)
@@ -1469,6 +1514,9 @@ public:
             return result;
         }
 
+        const std::vector<LocalOperatorBondCandidate> local_operator_bonds =
+            FindWalletOperatorBondCandidates(*m_wallet);
+
         TRY_LOCK(::cs_main, main_lock);
         if (!main_lock) {
             result.available = false;
@@ -1479,6 +1527,18 @@ public:
         const CCoinsViewCache& view = chainman.ActiveChainstate().CoinsTip();
         result.total_coldstake = node::ComputeQuantumColdStakeTotal(view);
         result.cap_bps = node::QUANTUM_POOL_CAP_BPS;
+
+        for (const LocalOperatorBondCandidate& candidate : local_operator_bonds) {
+            if (!node::VerifyQuantumPoolOperatorCommitment(view, candidate.staking_pubkey, candidate.outpoint)) {
+                continue;
+            }
+            node::UpsertQuantumPoolOperator(
+                node::QuantumPoolHashPubKey(candidate.staking_pubkey),
+                candidate.staking_pubkey,
+                {},
+                /*operator_commitment_verified=*/true,
+                candidate.outpoint);
+        }
 
         const std::vector<uint256> operators = node::ListQuantumPoolOperators();
         result.operators.reserve(operators.size());
