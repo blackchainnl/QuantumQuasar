@@ -1797,8 +1797,8 @@ RPCHelpMan migratetoquantum()
         {
             {"options", RPCArg::Type::OBJ_NAMED_PARAMS, RPCArg::Optional::OMITTED, "",
                 {
-                    {"dry_run", RPCArg::Type::BOOL, RPCArg::Default{false}, "Estimate only; do not sign or broadcast."},
-                    {"existing_address", RPCArg::Type::STR, RPCArg::Default{""}, "Migrate into this already-owned wallet-backed quantum address instead of generating a new one."},
+                    {"dry_run", RPCArg::Type::BOOL, RPCArg::Default{false}, "Estimate only; do not sign, broadcast, or create a new quantum key. Requires existing_address."},
+                    {"existing_address", RPCArg::Type::STR, RPCArg::Default{""}, "Migrate into this already-owned wallet-backed quantum address instead of generating a new one. Required for dry_run."},
                     {"label", RPCArg::Type::STR, RPCArg::Default{"migration"}, "Label for a newly generated migration address."},
                     {"fee_rate", RPCArg::Type::AMOUNT, RPCArg::DefaultHint{"wallet default"}, "Fee rate in " + CURRENCY_ATOM + "/vB."},
                     {"include_unsafe", RPCArg::Type::BOOL, RPCArg::Default{false}, "Include unconfirmed/unsafe legacy coins."},
@@ -1821,7 +1821,7 @@ RPCHelpMan migratetoquantum()
         }},
         RPCExamples{
             HelpExampleCli("migratetoquantum", "")
-          + HelpExampleCli("migratetoquantum", "'{\"dry_run\":true}'")
+          + HelpExampleCli("migratetoquantum", "'{\"dry_run\":true,\"existing_address\":\"<addr>\"}'")
           + HelpExampleRpc("migratetoquantum", "{\"existing_address\":\"<addr>\"}")
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
@@ -1834,6 +1834,9 @@ RPCHelpMan migratetoquantum()
         const bool include_unsafe = options.exists("include_unsafe") && options["include_unsafe"].get_bool();
         const std::string label = options.exists("label") ? options["label"].get_str() : "migration";
         const std::string existing = options.exists("existing_address") ? options["existing_address"].get_str() : "";
+        if (dry_run && existing.empty()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "dry_run requires existing_address so the estimate does not create wallet metadata");
+        }
 
         LOCK2(cs_main, pwallet->cs_wallet);
         EnsureWalletIsUnlocked(*pwallet);
@@ -1949,8 +1952,8 @@ RPCHelpMan migrategoldrushrewards()
         {
             {"options", RPCArg::Type::OBJ_NAMED_PARAMS, RPCArg::Optional::OMITTED, "",
                 {
-                    {"dry_run", RPCArg::Type::BOOL, RPCArg::Default{false}, "Estimate only; do not sign or broadcast."},
-                    {"existing_address", RPCArg::Type::STR, RPCArg::Default{""}, "Move into this already-owned wallet-backed quantum address instead of generating a fresh one."},
+                    {"dry_run", RPCArg::Type::BOOL, RPCArg::Default{false}, "Estimate only; do not sign, broadcast, or create a new quantum key. Requires existing_address."},
+                    {"existing_address", RPCArg::Type::STR, RPCArg::Default{""}, "Move into this already-owned wallet-backed quantum address instead of generating a fresh one. Required for dry_run."},
                     {"label", RPCArg::Type::STR, RPCArg::Default{"goldrush-remigration"}, "Label for a newly generated destination address."},
                     {"fee_rate", RPCArg::Type::AMOUNT, RPCArg::DefaultHint{"wallet default"}, "Fee rate in " + CURRENCY_ATOM + "/vB."},
                     {"include_unsafe", RPCArg::Type::BOOL, RPCArg::Default{false}, "Include unconfirmed/unsafe reward coins."},
@@ -1973,7 +1976,7 @@ RPCHelpMan migrategoldrushrewards()
         }},
         RPCExamples{
             HelpExampleCli("migrategoldrushrewards", "")
-          + HelpExampleCli("migrategoldrushrewards", "'{\"dry_run\":true}'")
+          + HelpExampleCli("migrategoldrushrewards", "'{\"dry_run\":true,\"existing_address\":\"<addr>\"}'")
           + HelpExampleRpc("migrategoldrushrewards", "{\"existing_address\":\"<addr>\"}")
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
@@ -1986,6 +1989,9 @@ RPCHelpMan migrategoldrushrewards()
         const bool include_unsafe = options.exists("include_unsafe") && options["include_unsafe"].get_bool();
         const std::string label = options.exists("label") ? options["label"].get_str() : "goldrush-remigration";
         const std::string existing = options.exists("existing_address") ? options["existing_address"].get_str() : "";
+        if (dry_run && existing.empty()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "dry_run requires existing_address so the estimate does not create wallet metadata");
+        }
 
         LOCK2(cs_main, pwallet->cs_wallet);
         EnsureWalletIsUnlocked(*pwallet);

@@ -548,12 +548,26 @@ class QuantumDemurrageTest(BitcoinTestFramework):
         assert_equal(auto_output["attestation_due"], False)
 
         self.log.info("Dry-run sweep realizes the same decayed output without touching locked coins")
-        sweep = wallet.sweepdemurragedecay({"source_address": quantum_address, "dry_run": True})
+        assert_raises_rpc_error(
+            -8,
+            "dry_run requires destination_address",
+            wallet.sweepdemurragedecay,
+            {"source_address": quantum_address, "dry_run": True},
+        )
+        dry_run_destination = wallet.getnewquantumaddress()["address"]
+        quantum_count_before = len(wallet.listquantumaddresses())
+        sweep = wallet.sweepdemurragedecay({
+            "source_address": quantum_address,
+            "destination_address": dry_run_destination,
+            "dry_run": True,
+        })
         assert_equal(sweep["dry_run"], True)
+        assert_equal(sweep["destination"], dry_run_destination)
         assert_equal(sweep["selected_inputs"], 1)
         assert_equal(sweep["skipped_locked_outputs"], 0)
         assert_greater_than(Decimal(sweep["burned_amount"]), Decimal("0"))
         assert_greater_than(Decimal(sweep["effective_amount"]), Decimal("0"))
+        assert_equal(len(wallet.listquantumaddresses()), quantum_count_before)
 
         self.log.info("Broadcast and mine the demurrage sweep through consensus")
         sweep_tx = wallet.sweepdemurragedecay({"source_address": quantum_address})

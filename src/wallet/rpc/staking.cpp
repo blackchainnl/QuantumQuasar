@@ -2186,9 +2186,9 @@ static RPCHelpMan sweepdemurragedecay()
         {
             {"options", RPCArg::Type::OBJ_NAMED_PARAMS, RPCArg::Optional::OMITTED, "",
                 {
-                    {"dry_run", RPCArg::Type::BOOL, RPCArg::Default{false}, "Build and return the transaction without committing it to the wallet."},
+                    {"dry_run", RPCArg::Type::BOOL, RPCArg::Default{false}, "Build and return the transaction without committing it to the wallet or creating wallet metadata. Requires destination_address."},
                     {"source_address", RPCArg::Type::STR, RPCArg::Default{""}, "Sweep only decaying UTXOs paying this wallet-backed quantum address."},
-                    {"destination_address", RPCArg::Type::STR, RPCArg::Default{""}, "Wallet-backed quantum address to receive the effective value; omitted generates a fresh address."},
+                    {"destination_address", RPCArg::Type::STR, RPCArg::Default{""}, "Wallet-backed quantum address to receive the effective value; omitted generates a fresh address for broadcast mode. Required for dry_run."},
                     {"label", RPCArg::Type::STR, RPCArg::Default{"demurrage-sweep"}, "Label for a freshly generated destination address."},
                     {"fee_rate", RPCArg::Type::AMOUNT, RPCArg::Optional::OMITTED, "Fee rate in sat/vB."},
                     {"include_unsafe", RPCArg::Type::BOOL, RPCArg::Default{false}, "Include unconfirmed or unsafe selected outputs."},
@@ -2216,7 +2216,7 @@ static RPCHelpMan sweepdemurragedecay()
         }},
         RPCExamples{
             HelpExampleCli("sweepdemurragedecay", "")
-          + HelpExampleCli("sweepdemurragedecay", "'{\"dry_run\":true}'")
+          + HelpExampleCli("sweepdemurragedecay", "'{\"dry_run\":true,\"destination_address\":\"<quantum_addr>\"}'")
           + HelpExampleRpc("sweepdemurragedecay", "{\"source_address\":\"<quantum_addr>\"}")
         },
     [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
@@ -2230,6 +2230,9 @@ static RPCHelpMan sweepdemurragedecay()
     const std::string source_address = options.exists("source_address") ? options["source_address"].get_str() : "";
     const std::string destination_address = options.exists("destination_address") ? options["destination_address"].get_str() : "";
     const std::string label = options.exists("label") ? options["label"].get_str() : "demurrage-sweep";
+    if (dry_run && destination_address.empty()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "dry_run requires destination_address so the estimate does not create wallet metadata");
+    }
 
     LOCK2(cs_main, pwallet->cs_wallet);
     EnsureWalletIsUnlocked(*pwallet);
