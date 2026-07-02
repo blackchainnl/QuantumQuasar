@@ -52,6 +52,12 @@ static CFeeRate FeeRateFromSatVbValue(const UniValue& value)
     return CFeeRate{AmountFromValue(value, /*decimals=*/3)};
 }
 
+static bool IsDirectQuantumMigrationScript(const CScript& script_pub_key)
+{
+    const auto tier = GetQuantumStakeTierProgram(script_pub_key);
+    return tier && !tier->tiered && !tier->cold_stake;
+}
+
 static RPCHelpMan getstakinginfo()
 {
     return RPCHelpMan{"getstakinginfo",
@@ -307,6 +313,9 @@ static RPCHelpMan sendshadowsignal()
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "quantum_address must be a Blackcoin migration address");
     }
     quantum_payout_script = GetScriptForDestination(quantum_dest);
+    if (!IsDirectQuantumMigrationScript(quantum_payout_script)) {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "quantum_address must be an ordinary quantum receive address, not a bonded staking or cold-stake address");
+    }
 
     {
         ChainstateManager& chainman = pwallet->chain().chainman();
@@ -504,6 +513,9 @@ static RPCHelpMan sendshadowpowclaim()
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "quantum_address must be a Blackcoin migration address");
     }
     const CScript quantum_payout_script = GetScriptForDestination(quantum_dest);
+    if (!IsDirectQuantumMigrationScript(quantum_payout_script)) {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "quantum_address must be an ordinary quantum receive address, not a bonded staking or cold-stake address");
+    }
 
     std::optional<std::vector<unsigned char>> supplied_proof;
     if (!request.params[4].isNull()) {
@@ -723,8 +735,12 @@ static RPCHelpMan getgoldrushinfo()
                         {RPCResult::Type::NUM, "pow_pool_amount", "PoW-side jackpot currently accrued in the pool before the next block reward is added, in satoshis."},
                         {RPCResult::Type::NUM, "claimed_amount", "Total Gold Rush amount already materialized to wallet-spendable quantum payout coins in satoshis."},
                         {RPCResult::Type::NUM, "recent_solver_participants", "Unique whitelisted solver scripts with a solve marker still inside the 14-day window."},
+                        {RPCResult::Type::NUM, "active_signalers", "Whitelisted recent solvers that have an unexpired QQSIGNAL marker and can receive the next qualified PoS split."},
                         {RPCResult::Type::NUM, "recent_count", "Recent solver/claim accounting count from the consensus pool."},
                         {RPCResult::Type::STR_AMOUNT, "estimated_pos_payout_per_recent_solver", "Estimated PoS payout if every recent solver signals in the next qualified payout block."},
+                        {RPCResult::Type::STR_AMOUNT, "next_pos_payout_pool", "PoS-side jackpot plus the next block's PoS-side Gold Rush reward, if the next height is inside the reward window."},
+                        {RPCResult::Type::NUM, "next_pos_payout_amount", "PoS-side jackpot plus the next block's PoS-side Gold Rush reward in satoshis."},
+                        {RPCResult::Type::STR_AMOUNT, "estimated_pos_payout_per_active_signaler", "Estimated next qualified PoS payout per active signaler."},
                         {RPCResult::Type::NUM, "pow_target_bits", "Current next-block Shadow PoW leading-zero target bits."},
                         {RPCResult::Type::NUM, "pos_claim_count", "Number of accepted PoS-side Shadow payouts recorded in pool state."},
                         {RPCResult::Type::NUM, "pow_claim_count", "Number of accepted PoW-side Shadow claims recorded in pool state."},
@@ -780,6 +796,7 @@ static RPCHelpMan getgoldrushinfo()
     int64_t mtp{0};
     bool active{false};
     bool wallet_recent_solve_qualified{false};
+    uint64_t active_signalers{0};
     {
         ChainstateManager& chainman = pwallet->chain().chainman();
         LOCK(cs_main);
@@ -796,6 +813,7 @@ static RPCHelpMan getgoldrushinfo()
         active = consensus.IsGoldRushEpoch(mtp);
         shadow_info = GetShadowGoldRushInfo(active_chainstate.CoinsTip(), tip);
         recent_solvers = GetRecentShadowSolverActivity(active_chainstate.CoinsTip(), tip);
+        active_signalers = GetActiveShadowSignalCount(active_chainstate.CoinsTip(), tip);
 
         for (const CScript& script : wallet_scripts) {
             const bool whitelisted = IsWhitelisted(active_chainstate.CoinsTip(), script);
@@ -827,9 +845,14 @@ static RPCHelpMan getgoldrushinfo()
     const bool next_reward_height_active = active &&
                                            next_height >= SHADOW_REWARD_START_HEIGHT &&
                                            next_height <= SHADOW_REWARD_END_HEIGHT;
-    const CAmount next_pow_payout = next_reward_height_active ? shadow_info.pow_amount + ShadowBaseReward(next_height) / 2 : shadow_info.pow_amount;
+    const CAmount next_reward = next_reward_height_active ? ShadowBaseReward(next_height) : 0;
+    const CAmount next_pow_reward = next_reward / 2;
+    const CAmount next_pos_reward = next_reward - next_pow_reward;
+    const CAmount next_pow_payout = next_reward_height_active ? shadow_info.pow_amount + next_pow_reward : shadow_info.pow_amount;
+    const CAmount next_pos_payout_pool = next_reward_height_active ? shadow_info.pos_amount + next_pos_reward : shadow_info.pos_amount;
     const size_t participants = recent_solvers.size();
     const CAmount estimated_pos_payout = participants > 0 ? shadow_info.pos_amount / static_cast<CAmount>(participants) : 0;
+    const CAmount estimated_active_pos_payout = active_signalers > 0 ? next_pos_payout_pool / static_cast<CAmount>(active_signalers) : 0;
 
     UniValue result(UniValue::VOBJ);
     result.pushKV("active", active);
@@ -843,8 +866,12 @@ static RPCHelpMan getgoldrushinfo()
     result.pushKV("pow_pool_amount", shadow_info.pow_amount);
     result.pushKV("claimed_amount", shadow_info.claimed_amount);
     result.pushKV("recent_solver_participants", static_cast<uint64_t>(participants));
+    result.pushKV("active_signalers", active_signalers);
     result.pushKV("recent_count", shadow_info.recent_count);
     result.pushKV("estimated_pos_payout_per_recent_solver", ValueFromAmount(estimated_pos_payout));
+    result.pushKV("next_pos_payout_pool", ValueFromAmount(next_pos_payout_pool));
+    result.pushKV("next_pos_payout_amount", next_pos_payout_pool);
+    result.pushKV("estimated_pos_payout_per_active_signaler", ValueFromAmount(estimated_active_pos_payout));
     result.pushKV("pow_target_bits", shadow_info.pow_target_bits);
     result.pushKV("pos_claim_count", shadow_info.pos_count);
     result.pushKV("pow_claim_count", shadow_info.pow_count);
@@ -1025,7 +1052,7 @@ static RPCHelpMan setpowmining()
         {
             {"enabled", RPCArg::Type::BOOL, RPCArg::Optional::NO, "true to start mining, false to stop."},
             {"threads", RPCArg::Type::NUM, RPCArg::Default{1}, "Worker threads (CPU cores) to use, 1..256."},
-            {"cpu_percent", RPCArg::Type::NUM, RPCArg::Default{10}, "Per-core CPU duty-cycle target, 1..100."},
+            {"cpu_percent", RPCArg::Type::NUM, RPCArg::Default{1}, "Per-core CPU duty-cycle target, 1..100."},
         },
         RPCResult{RPCResult::Type::OBJ, "", "", {
             {RPCResult::Type::BOOL, "enabled", "Whether in-process PoW mining is now enabled."},
@@ -1044,7 +1071,7 @@ static RPCHelpMan setpowmining()
 
     const bool enabled = request.params[0].get_bool();
     const int threads = request.params[1].isNull() ? 1 : request.params[1].getInt<int>();
-    const int cpu_percent = request.params[2].isNull() ? 10 : request.params[2].getInt<int>();
+    const int cpu_percent = request.params[2].isNull() ? 1 : request.params[2].getInt<int>();
 
     bilingual_str error;
     const bool ok = pwallet->SetPowMining(enabled, threads, cpu_percent, error);

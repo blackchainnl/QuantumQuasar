@@ -904,6 +904,12 @@ public:
                   size_t* n_signed = nullptr,
                   bool finalize = true) const;
 
+    //! Return wallet/script verification flags for the active chain tip.
+    unsigned int GetActiveScriptVerifyFlags() const;
+
+    //! Finalize and extract a wallet PSBT using the active chain's script verification flags.
+    bool FinalizeAndExtractPSBT(PartiallySignedTransaction& psbtx, CMutableTransaction& result) const;
+
     /**
      * Submit the transaction to the node's mempool and then relay to peers.
      * Should be called after CreateTransaction unless you want to abort
@@ -913,7 +919,7 @@ public:
      * @param[in] mapValue key-values to be set on the transaction.
      * @param[in] orderForm BIP 70 / BIP 21 order form details to be set on the transaction.
      */
-    void CommitTransaction(CTransactionRef tx, mapValue_t mapValue, std::vector<std::pair<std::string, std::string>> orderForm);
+    bool CommitTransaction(CTransactionRef tx, mapValue_t mapValue, std::vector<std::pair<std::string, std::string>> orderForm, std::string* broadcast_error = nullptr);
     bool CommitRGBTransaction(CTransactionRef tx, mapValue_t mapValue, std::vector<std::pair<std::string, std::string>> orderForm, const RGBTxCommitData& rgb_data, std::string& error);
 
     /** Pass this transaction to node for mempool insertion and relay to peers if flag set to true */
@@ -972,7 +978,7 @@ public:
     // GUI "Staking & Mining" tab / setpowmining RPC; the in-process Argon2id solver reads these.
     std::atomic<bool> m_pow_mining_enabled{false};
     std::atomic<int> m_pow_threads{1};         // CPU cores / worker threads
-    std::atomic<int> m_pow_cpu_percent{10};    // per-core CPU duty-cycle target, 1..100
+    std::atomic<int> m_pow_cpu_percent{1};     // per-core CPU duty-cycle target, 1..100
     std::atomic<double> m_pow_hashrate{0.0};   // aggregate Argon2id tries/s reported by the solver
     std::atomic<int64_t> m_pow_claims_submitted{0};
     std::atomic<bool> m_stop_pow_mining_thread{false};
@@ -1035,6 +1041,7 @@ public:
     util::Result<CTxDestination> GetNewQuantumChangeDestination();
     util::Result<CTxDestination> AddQuantumKey(const std::vector<unsigned char>& public_key, const CKeyingMaterial& private_key, const std::string& label, int64_t creation_time, bool record_as_receive = true);
     util::Result<CTxDestination> AddQuantumColdStakeDelegation(const std::vector<unsigned char>& staker_pubkey, const std::vector<unsigned char>& owner_pubkey, const std::string& label, int64_t creation_time, bool record_as_receive = true, uint16_t unbonding_blocks = 0, bool tiered = false);
+    util::Result<CTxDestination> AddQuantumColdStakeDelegationForKeyHashes(const uint256& staker_pubkey_hash, const uint256& owner_pubkey_hash, const std::string& label, int64_t creation_time, uint16_t unbonding_blocks, uint32_t unlock_height, unsigned char state, bool record_as_receive = true);
 
     bool LoadQuantumKey(const std::vector<unsigned char>& public_key, const CKeyingMaterial& private_key, int64_t creation_time) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     bool LoadCryptedQuantumKey(const std::vector<unsigned char>& public_key, const std::vector<unsigned char>& crypted_private_key, int64_t creation_time) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);

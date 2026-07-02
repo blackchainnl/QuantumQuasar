@@ -38,6 +38,12 @@ static CFeeRate FeeRateFromSatVbValue(const UniValue& value)
     return CFeeRate{AmountFromValue(value, /*decimals=*/3)};
 }
 
+static bool IsDirectQuantumMigrationScript(const CScript& script_pub_key)
+{
+    const auto tier = GetQuantumStakeTierProgram(script_pub_key);
+    return tier && !tier->tiered && !tier->cold_stake;
+}
+
 static void ParseRecipients(const UniValue& address_amounts, const UniValue& subtract_fee_outputs, std::vector<CRecipient>& recipients)
 {
     std::set<CTxDestination> destinations;
@@ -126,7 +132,7 @@ static UniValue FinishTransaction(const std::shared_ptr<CWallet> pwallet, const 
     }
 
     CMutableTransaction mtx;
-    complete = FinalizeAndExtractPSBT(psbtx, mtx);
+    complete = pwallet->FinalizeAndExtractPSBT(psbtx, mtx);
 
     UniValue result(UniValue::VOBJ);
 
@@ -1624,7 +1630,7 @@ RPCHelpMan walletprocesspsbt()
     if (complete) {
         CMutableTransaction mtx;
         // Returns true if complete, which we already think it is.
-        CHECK_NONFATAL(FinalizeAndExtractPSBT(psbtx, mtx));
+        CHECK_NONFATAL(wallet.FinalizeAndExtractPSBT(psbtx, mtx));
         DataStream ssTx_final;
         ssTx_final << TX_WITH_WITNESS(mtx);
         result.pushKV("hex", HexStr(ssTx_final));
@@ -3583,6 +3589,10 @@ RPCHelpMan getmigrationstatus()
             {RPCResult::Type::STR_AMOUNT, "eligible_legacy_amount", "total value of eligible legacy coins"},
             {RPCResult::Type::NUM, "migrated_quantum_outputs", "wallet-owned quantum UTXOs"},
             {RPCResult::Type::STR_AMOUNT, "migrated_quantum_amount", "total value already in quantum addresses"},
+            {RPCResult::Type::NUM, "direct_quantum_outputs", "wallet-owned ordinary quantum UTXOs ready for normal sends and delegation funding"},
+            {RPCResult::Type::STR_AMOUNT, "direct_quantum_amount", "ordinary quantum value ready for normal sends and delegation funding"},
+            {RPCResult::Type::NUM, "staked_quantum_outputs", "wallet-owned bonded or staking quantum UTXOs"},
+            {RPCResult::Type::STR_AMOUNT, "staked_quantum_amount", "bonded or staking quantum value"},
             {RPCResult::Type::NUM, "goldrush_reward_outputs_needing_move", "wallet-owned Gold Rush reward UTXOs that still need migration"},
             {RPCResult::Type::STR_AMOUNT, "goldrush_reward_amount_needing_move", "total Gold Rush reward value still needing migration"},
             {RPCResult::Type::BOOL, "goldrush_remigration_active", "whether Gold Rush reward migration is currently allowed"},
@@ -3610,19 +3620,26 @@ RPCHelpMan getmigrationstatus()
                                  ? (c.nQuantumMigrationDeadlineTime - mtp) : 0;
         const bool quantum_active = IsQuantumWitnessSpendActive(c, mtp, next_height);
 
-        CAmount legacy_amt = 0, quantum_amt = 0, goldrush_reward_amt = 0;
-        unsigned int legacy_n = 0, quantum_n = 0, goldrush_reward_n = 0;
+        CAmount legacy_amt = 0, quantum_amt = 0, direct_quantum_amt = 0, staked_quantum_amt = 0, goldrush_reward_amt = 0;
+        unsigned int legacy_n = 0, quantum_n = 0, direct_quantum_n = 0, staked_quantum_n = 0, goldrush_reward_n = 0;
         ChainstateManager& chainman = pwallet->chain().chainman();
         const CCoinsViewCache& view = chainman.ActiveChainstate().CoinsTip();
         for (const COutput& out : AvailableCoinsListUnspent(*pwallet).All()) {
             const CScript& spk = out.txout.scriptPubKey;
             if (IsQuantumMigrationScript(spk)) {
-                CTxDestination d; ExtractDestination(spk, d);
-                if (pwallet->GetQuantumKeyInfo(d).has_value()) { quantum_amt += out.txout.nValue; ++quantum_n; }
+                CTxDestination d;
+                const bool wallet_owned = ExtractDestination(spk, d) && pwallet->GetQuantumKeyInfo(d).has_value();
+                if (wallet_owned) { quantum_amt += out.txout.nValue; ++quantum_n; }
                 CScript marker_script;
                 if (IsGoldRushDirectPayoutOutput(view, out.outpoint, &marker_script) && marker_script == spk) {
                     goldrush_reward_amt += out.txout.nValue;
                     ++goldrush_reward_n;
+                } else if (wallet_owned && IsDirectQuantumMigrationScript(spk)) {
+                    direct_quantum_amt += out.txout.nValue;
+                    ++direct_quantum_n;
+                } else if (wallet_owned) {
+                    staked_quantum_amt += out.txout.nValue;
+                    ++staked_quantum_n;
                 }
             } else if (IsQuantumColdStakeScript(spk)) {
                 continue;
@@ -3644,6 +3661,10 @@ RPCHelpMan getmigrationstatus()
         r.pushKV("eligible_legacy_amount", ValueFromAmount(legacy_amt));
         r.pushKV("migrated_quantum_outputs", (int)quantum_n);
         r.pushKV("migrated_quantum_amount", ValueFromAmount(quantum_amt));
+        r.pushKV("direct_quantum_outputs", (int)direct_quantum_n);
+        r.pushKV("direct_quantum_amount", ValueFromAmount(direct_quantum_amt));
+        r.pushKV("staked_quantum_outputs", (int)staked_quantum_n);
+        r.pushKV("staked_quantum_amount", ValueFromAmount(staked_quantum_amt));
         r.pushKV("goldrush_reward_outputs_needing_move", (int)goldrush_reward_n);
         r.pushKV("goldrush_reward_amount_needing_move", ValueFromAmount(goldrush_reward_amt));
         r.pushKV("goldrush_remigration_active", c.IsQuantumMigrationWindow(mtp));

@@ -189,14 +189,22 @@ bool FindAutoShadowSignalCandidate(CWallet& wallet, AutoShadowSignalCandidate& c
     });
 
     const CChain& active_chain = wallet.chain().chainman().ActiveChain();
+    unsigned int whitelisted_outputs{0};
+    unsigned int recent_outputs{0};
+    unsigned int already_active_outputs{0};
     for (const COutput& output : outputs) {
         if (output.txout.nValue <= 0 || output.input_bytes < 0) continue;
         const CScript& target = output.txout.scriptPubKey;
         if (target.empty() || target.IsUnspendable()) continue;
         if (!IsWhitelisted(view, target)) continue;
-        if (active_signals.count(target)) continue;
+        ++whitelisted_outputs;
         const auto solver_it = recent_solvers.find(target);
         if (solver_it == recent_solvers.end()) continue;
+        ++recent_outputs;
+        if (active_signals.count(target)) {
+            ++already_active_outputs;
+            continue;
+        }
         const CBlockIndex* solved = active_chain[solver_it->second.height];
         if (!solved) continue;
 
@@ -206,8 +214,13 @@ bool FindAutoShadowSignalCandidate(CWallet& wallet, AutoShadowSignalCandidate& c
         LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: candidate found solve_height=%u\n", candidate.solve_height);
         return true;
     }
-    LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: no spendable whitelisted recent-solver output (recent=%u active=%u)\n",
-             recent_solvers.size(), active_signals.size());
+    if (already_active_outputs > 0) {
+        LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: wallet signal already active (wallet_active=%u recent_outputs=%u active_network=%u)\n",
+                 already_active_outputs, recent_outputs, active_signals.size());
+    } else {
+        LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: no eligible output needing a signal (wallet_whitelisted=%u wallet_recent=%u recent_network=%u active_network=%u)\n",
+                 whitelisted_outputs, recent_outputs, recent_solvers.size(), active_signals.size());
+    }
     return false;
 }
 
@@ -650,6 +663,15 @@ bool CreateQuantumColdStakeRedelegationTransaction(
             error = _("Wallet does not have the owner key for source_coldstake_address");
             return false;
         }
+        const int spend_height = wallet.GetLastBlockHeight() + 1;
+        if (source_info->tiered && source_info->unlock_height == 0) {
+            error = _("Bonded cold-stake funds must be unbonded before redelegating");
+            return false;
+        }
+        if (source_info->tiered && source_info->unlock_height > static_cast<uint32_t>(std::max(0, spend_height))) {
+            error = strprintf(_("Cold-stake funds are unbonding and cannot be redelegated until block %u"), source_info->unlock_height);
+            return false;
+        }
         source_staker_hash = source_info->staker_pubkey_hash;
 
         CoinFilterParams filter;
@@ -956,7 +978,16 @@ int MaybeAutoShadowSignal(CWallet& wallet)
 
     AutoShadowSignalCandidate candidate;
     {
-        LOCK2(::cs_main, wallet.cs_wallet);
+        TRY_LOCK(::cs_main, main_lock);
+        if (!main_lock) {
+            LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: skipped because chain lock is busy\n");
+            return 0;
+        }
+        TRY_LOCK(wallet.cs_wallet, wallet_lock);
+        if (!wallet_lock) {
+            LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: skipped because wallet lock is busy\n");
+            return 0;
+        }
         if (!FindAutoShadowSignalCandidate(wallet, candidate)) return 0;
     }
 
@@ -1450,10 +1481,6 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
     arith_uint256 bnTargetPerCoinDay;
     bnTargetPerCoinDay.SetCompact(nBits);
 
-    // Transaction index is required to get to block header
-    if (!g_txindex)
-        return error("CreateCoinStake : transaction index unavailable");
-
     LOCK2(cs_main, wallet.cs_wallet);
     txNew.vin.clear();
     txNew.vout.clear();
@@ -1515,10 +1542,9 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
             continue;
         }
 
-        uint256 blockHash;
-        CTransactionRef tx;
-        if (!g_txindex->FindTx(pcoin.first->GetHash(), blockHash, tx)) {
-            LogPrintf("couldnt retrieve tx %s\n", pcoin.first->GetHash().ToString());
+        CTransactionRef tx = pcoin.first->tx;
+        if (!tx) {
+            LogPrint(BCLog::COINSTAKE, "CreateCoinStake : wallet transaction unavailable for %s\n", pcoin.first->GetHash().ToString());
             continue;
         }
 
@@ -1672,10 +1698,9 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
     for (const std::pair<const CWalletTx*, unsigned int> &pcoin : setCoins)
     {
         if (selected_tx_inputs.count(COutPoint(pcoin.first->GetHash(), pcoin.second))) continue;
-        uint256 blockHash;
-        CTransactionRef tx;
-        if (!g_txindex->FindTx(pcoin.first->GetHash(), blockHash, tx)) {
-            LogPrintf("couldnt retrieve tx %s\n", pcoin.first->GetHash().ToString());
+        CTransactionRef tx = pcoin.first->tx;
+        if (!tx) {
+            LogPrint(BCLog::COINSTAKE, "CreateCoinStake : wallet transaction unavailable for %s\n", pcoin.first->GetHash().ToString());
             continue;
         }
 

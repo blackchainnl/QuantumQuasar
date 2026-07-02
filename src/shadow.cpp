@@ -1119,6 +1119,32 @@ std::map<CScript, ShadowSolverActivity> GetRecentShadowSolverActivity(const CCoi
     return activity;
 }
 
+std::optional<ShadowSolverActivity> GetRecentShadowSolverActivityForScript(const CCoinsViewCache& view, const CBlockIndex* pindex, const CScript& target)
+{
+    if (!pindex || target.empty() || target.IsUnspendable()) return std::nullopt;
+
+    const int tip_height = pindex->nHeight;
+    const int64_t tip_time = pindex->GetBlockTime();
+    for (const CBlockIndex* cursor = pindex;
+         cursor && cursor->nHeight <= tip_height && tip_height - cursor->nHeight <= SHADOW_SOLVER_ACTIVITY_WINDOW;
+         cursor = cursor->pprev) {
+        Coin coin;
+        if (!view.GetCoin(SolverOutpoint(target, cursor->nHeight, cursor->GetBlockHash()), coin) || coin.IsSpent()) continue;
+
+        valtype payload;
+        if (!ParseMarkerScript(coin.out.scriptPubKey, MARKER_SOLVER, &payload)) continue;
+        const CScript solver(payload.begin(), payload.end());
+        if (solver != target) continue;
+
+        const int coin_height = static_cast<int>(coin.nHeight);
+        const int64_t coin_time = static_cast<int64_t>(coin.nTime);
+        if (coin_height > tip_height || tip_height - coin_height > SHADOW_SOLVER_ACTIVITY_WINDOW) continue;
+        if (coin_time > tip_time || tip_time - coin_time > SHADOW_SOLVER_ACTIVITY_SECONDS) continue;
+        return ShadowSolverActivity{coin.nHeight, coin_time};
+    }
+    return std::nullopt;
+}
+
 bool HasRecentShadowSolverActivity(const CCoinsViewCache& view, const CBlockIndex* pindex, const CScript& target, uint32_t solve_height, const uint256& solve_hash)
 {
     return SignalReferencesRecentSolve(view, pindex, target, solve_height, solve_hash);

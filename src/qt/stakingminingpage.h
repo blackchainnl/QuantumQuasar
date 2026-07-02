@@ -81,6 +81,8 @@ private Q_SLOTS:
     void onUseRegistryOperatorForDelegation();
     void onCreateColdStakeAddress();
     void onCopyColdStakeAddress();
+    void onFundColdStakeAddress();
+    void onWithdrawColdStakeAddress();
     void updateStatus();
 
 private:
@@ -94,8 +96,15 @@ private:
     bool m_pow_settings_dirty{false};
     bool m_operator_registry_loaded{false};
     int m_operator_registry_refresh_seconds{0};
+    int m_status_refresh_tick{0};
+    bool m_force_full_refresh{true};
+    bool m_selfstake_withdraw_available{false};
+    bool m_operator_withdraw_available{false};
+    bool m_coldstake_fund_available{false};
+    bool m_coldstake_withdraw_available{false};
     QString m_selfstake_last_action_status;
     QString m_operator_last_action_status;
+    QString m_coldstake_last_action_status;
 
     // Staking section
     QCheckBox* m_staking_enable{nullptr};
@@ -178,6 +187,9 @@ private:
     QLineEdit* m_coldstake_address{nullptr};
     QPushButton* m_coldstake_new{nullptr};
     QPushButton* m_coldstake_copy{nullptr};
+    BitcoinAmountField* m_coldstake_fund_amount{nullptr};
+    QPushButton* m_coldstake_fund{nullptr};
+    QPushButton* m_coldstake_withdraw{nullptr};
     QLabel* m_coldstake_status{nullptr};
 
     void setupUi();

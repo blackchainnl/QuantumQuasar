@@ -33,6 +33,7 @@ public:
     enum class InputFamily {
         LEGACY,
         QUANTUM,
+        QUANTUM_MIGRATION,
     };
 
     //! Custom change destination, if not set an address is generated
@@ -60,6 +61,10 @@ public:
     int m_max_depth = DEFAULT_MAX_DEPTH;
     //! Restrict automatic and selected inputs to a wallet-family bucket.
     std::optional<InputFamily> m_input_family;
+    //! Exclude generated quantum credits from ordinary sends. Gold Rush reward
+    //! credits have a special migration-window spend path and should only be
+    //! consumed by that guided workflow.
+    bool m_exclude_generated_quantum_inputs = false;
     //! SigningProvider that has pubkeys and scripts to do spend size estimation for external inputs
     FlatSigningProvider m_external_provider;
 

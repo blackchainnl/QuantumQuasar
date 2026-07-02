@@ -593,8 +593,10 @@ uint256 WalletModel::getLastBlockProcessed() const
 
 CAmount WalletModel::getAvailableBalance(const CCoinControl* control)
 {
-    // No selected coins, return the cached balance
-    if (!control || !control->HasSelected()) {
+    // No selected coins and no source-family filter: return the cached aggregate balance.
+    // If the Send page selected "Legacy" or "Quantum" funds, ask the wallet for the
+    // family-filtered spendable balance even when inputs have not been hand-picked.
+    if (!control || (!control->HasSelected() && !control->m_input_family)) {
         const interfaces::WalletBalances& balances = getCachedBalance();
         CAmount available_balance = balances.balance;
         // if wallet private keys are disabled, this is a watch-only wallet

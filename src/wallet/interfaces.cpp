@@ -29,6 +29,7 @@
 #include <sync.h>
 #include <uint256.h>
 #include <util/check.h>
+#include <util/moneystr.h>
 #include <util/strencodings.h>
 #include <util/translation.h>
 #include <util/ui_change_type.h>
@@ -46,6 +47,7 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -67,6 +69,7 @@ using interfaces::WalletEUTXOStateInfo;
 using interfaces::WalletRGBAssetInfo;
 using interfaces::WalletRGBAssignmentInfo;
 using interfaces::WalletQuantumAddressInfo;
+using interfaces::WalletQuantumColdStakeBalanceInfo;
 using interfaces::WalletQuantumActionTx;
 using interfaces::WalletQuantumColdStakeInfo;
 using interfaces::WalletQuantumOperatorBondInfo;
@@ -93,6 +96,12 @@ std::string QuantumQuasarPhaseName(Consensus::QuantumQuasarPhase phase)
     case Consensus::QuantumQuasarPhase::FINAL_LOCKOUT: return "final_lockout";
     }
     return "unknown";
+}
+
+bool IsDirectQuantumMigrationScript(const CScript& script_pub_key)
+{
+    const auto tier = GetQuantumStakeTierProgram(script_pub_key);
+    return tier && !tier->tiered && !tier->cold_stake;
 }
 
 WalletQuantumAddressInfo MakeWalletQuantumAddressInfo(const CWallet& wallet, const QuantumKeyInfo& info)
@@ -132,8 +141,102 @@ WalletQuantumColdStakeInfo MakeWalletQuantumColdStakeInfo(const CWallet& wallet,
     return result;
 }
 
+struct ColdStakeDelegationOutputs
+{
+    CAmount amount{0};
+    int outputs{0};
+    CAmount spendable_amount{0};
+    int spendable_outputs{0};
+    std::vector<COutPoint> spendable_outpoints;
+};
+
+struct ColdStakeFundingInputs
+{
+    CAmount eligible_amount{0};
+    unsigned int eligible_inputs{0};
+    CAmount goldrush_reward_amount{0};
+    unsigned int goldrush_reward_inputs{0};
+};
+
 static constexpr uint16_t OPERATOR_COMMITMENT_BLOCKS = 40500;
 static constexpr int RANDOM_CHANGE_POSITION = -1;
+
+util::Result<QuantumColdStakeDelegationInfo> DecodeWalletColdStakeDelegationAddress(
+    const CWallet& wallet,
+    const std::string& address,
+    CTxDestination& dest) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
+{
+    std::string error_msg;
+    dest = DecodeDestination(address, error_msg);
+    if (!IsValidDestination(dest)) {
+        return util::Error{Untranslated(error_msg.empty() ? "Error: Invalid quantum cold-stake address" : error_msg)};
+    }
+
+    const auto* witness = std::get_if<WitnessUnknown>(&dest);
+    if (!witness || !IsQuantumColdStakeWitnessProgram(witness->GetWitnessVersion(), witness->GetWitnessProgram())) {
+        return util::Error{_("Error: Address must be a Quantum Cold-Stake delegation address")};
+    }
+
+    const auto info = wallet.GetQuantumColdStakeDelegationInfo(dest);
+    if (!info) {
+        return util::Error{_("Error: Cold-stake delegation address is not backed by this wallet")};
+    }
+    return *info;
+}
+
+ColdStakeDelegationOutputs ScanColdStakeDelegationOutputs(
+    const CWallet& wallet,
+    const CScript& delegation_script,
+    bool spendable_only) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
+{
+    ColdStakeDelegationOutputs outputs;
+
+    CoinFilterParams filter;
+    filter.only_spendable = spendable_only;
+    filter.skip_locked = spendable_only;
+    filter.include_immature_coinbase = false;
+
+    const std::vector<COutput> coins = spendable_only
+        ? AvailableCoins(wallet, nullptr, std::nullopt, filter).All()
+        : AvailableCoinsListUnspent(wallet, nullptr, filter).All();
+
+    for (const COutput& out : coins) {
+        if (out.txout.nValue <= 0 || out.txout.scriptPubKey != delegation_script) continue;
+        outputs.amount += out.txout.nValue;
+        ++outputs.outputs;
+        if (out.spendable) {
+            outputs.spendable_amount += out.txout.nValue;
+            ++outputs.spendable_outputs;
+            if (spendable_only) outputs.spendable_outpoints.push_back(out.outpoint);
+        }
+    }
+    return outputs;
+}
+
+WalletQuantumColdStakeBalanceInfo MakeWalletColdStakeBalanceInfo(const CWallet& wallet, const std::string& address)
+{
+    WalletQuantumColdStakeBalanceInfo result;
+    CTxDestination dest;
+    TRY_LOCK(wallet.cs_wallet, wallet_lock);
+    if (!wallet_lock) {
+        result.available = false;
+        return result;
+    }
+    const auto delegation = DecodeWalletColdStakeDelegationAddress(wallet, address, dest);
+    if (!delegation) return result;
+
+    result.valid_delegation_address = true;
+    result.current_height = wallet.GetLastBlockHeight();
+    const ColdStakeDelegationOutputs outputs = ScanColdStakeDelegationOutputs(
+        wallet,
+        GetScriptForDestination(dest),
+        /*spendable_only=*/false);
+    result.amount = outputs.amount;
+    result.outputs = outputs.outputs;
+    result.spendable_amount = outputs.spendable_amount;
+    result.spendable_outputs = outputs.spendable_outputs;
+    return result;
+}
 
 util::Result<QuantumStakeTierProgram> DecodeTieredStakeAddress(const std::string& address, CTxDestination& dest, bool require_operator_lock)
 {
@@ -174,6 +277,40 @@ bool CanCreateSignedSpend(const CWallet& wallet, bilingual_str& error)
         return false;
     }
     return true;
+}
+
+ColdStakeFundingInputs SelectColdStakeFundingInputs(
+    const CWallet& wallet,
+    const CCoinsViewCache& view,
+    CCoinControl& coin_control) EXCLUSIVE_LOCKS_REQUIRED(::cs_main, wallet.cs_wallet)
+{
+    ColdStakeFundingInputs summary;
+
+    CCoinControl scan_control;
+    scan_control.m_input_family = CCoinControl::InputFamily::QUANTUM_MIGRATION;
+    scan_control.m_exclude_generated_quantum_inputs = true;
+
+    CoinFilterParams filter;
+    filter.only_spendable = true;
+    filter.skip_locked = true;
+    filter.include_immature_coinbase = false;
+
+    for (const COutput& out : AvailableCoins(wallet, &scan_control, std::nullopt, filter).All()) {
+        if (out.txout.nValue <= 0 || !IsDirectQuantumMigrationScript(out.txout.scriptPubKey)) continue;
+
+        CScript marker_script;
+        if (IsGoldRushDirectPayoutOutput(view, out.outpoint, &marker_script) && marker_script == out.txout.scriptPubKey) {
+            summary.goldrush_reward_amount += out.txout.nValue;
+            ++summary.goldrush_reward_inputs;
+            continue;
+        }
+
+        coin_control.Select(out.outpoint);
+        summary.eligible_amount += out.txout.nValue;
+        ++summary.eligible_inputs;
+    }
+
+    return summary;
 }
 
 struct OperatorBondOutputs
@@ -264,7 +401,8 @@ std::vector<WalletQuantumStakeOutputInfo> ListTieredStakeOutputs(
     const auto tier = DecodeTieredStakeAddress(address, dest, require_operator_lock);
     if (!tier) return result;
 
-    LOCK(wallet.cs_wallet);
+    TRY_LOCK(wallet.cs_wallet, wallet_lock);
+    if (!wallet_lock) return result;
     const auto key_info = wallet.GetQuantumKeyInfo(dest);
     if (!key_info) return result;
 
@@ -378,7 +516,11 @@ WalletQuantumOperatorBondInfo MakeWalletTieredStakeBondInfo(const CWallet& walle
     const auto tier = DecodeTieredStakeAddress(address, dest, require_operator_lock);
     if (!tier) return result;
 
-    LOCK(wallet.cs_wallet);
+    TRY_LOCK(wallet.cs_wallet, wallet_lock);
+    if (!wallet_lock) {
+        result.available = false;
+        return result;
+    }
     const auto key_info = wallet.GetQuantumKeyInfo(dest);
     if (!key_info) return result;
 
@@ -523,6 +665,7 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
                 coin_control.Select(outpoint);
             }
             coin_control.m_allow_other_inputs = true;
+            coin_control.m_exclude_generated_quantum_inputs = true;
 
             auto change_dest = wallet.GetNewQuantumChangeDestination();
             if (!change_dest) return util::Error{util::ErrorString(change_dest)};
@@ -571,6 +714,176 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
 
     mapValue_t map_value;
     map_value["comment"] = std::move(comment);
+    wallet.CommitTransaction(tx, std::move(map_value), {});
+
+    WalletQuantumOperatorBondTx result;
+    result.txid = tx->GetHash().GetHex();
+    result.address = destination_address;
+    result.amount = amount;
+    result.fee = fee;
+    result.unlock_height = unlock_height;
+    result.started_unbonding = started_unbonding;
+    result.completed_withdrawal = completed_withdrawal;
+    return result;
+}
+
+util::Result<WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
+    CWallet& wallet,
+    const std::string& address,
+    CAmount amount)
+{
+    if (!MoneyRange(amount) || amount <= 0) {
+        return util::Error{_("Error: Delegation funding amount must be positive")};
+    }
+
+    CTransactionRef tx;
+    CAmount fee{0};
+    {
+        LOCK2(::cs_main, wallet.cs_wallet);
+        bilingual_str spend_error;
+        if (!CanCreateSignedSpend(wallet, spend_error)) return util::Error{spend_error};
+
+        CTxDestination dest;
+        const auto delegation = DecodeWalletColdStakeDelegationAddress(wallet, address, dest);
+        if (!delegation) return util::Error{util::ErrorString(delegation)};
+        if (!delegation->has_owner_key) {
+            return util::Error{_("Error: Wallet must hold the owner key before funding a cold-stake delegation")};
+        }
+
+        auto change_dest = wallet.GetNewQuantumChangeDestination();
+        if (!change_dest) return util::Error{util::ErrorString(change_dest)};
+
+        std::vector<CRecipient> recipients{{dest, amount, /*fSubtractFeeFromAmount=*/false}};
+        CCoinControl coin_control;
+        coin_control.m_input_family = CCoinControl::InputFamily::QUANTUM_MIGRATION;
+        coin_control.m_allow_other_inputs = false;
+        coin_control.destChange = *change_dest;
+
+        const CCoinsViewCache& view = wallet.chain().chainman().ActiveChainstate().CoinsTip();
+        const ColdStakeFundingInputs funding = SelectColdStakeFundingInputs(wallet, view, coin_control);
+        if (funding.eligible_inputs == 0) {
+            return util::Error{funding.goldrush_reward_inputs > 0
+                ? _("Error: Cold-stake funding cannot use Gold Rush reward outputs during Gold Rush. Move those rewards to a new quantum wallet during the migration window before delegating them.")
+                : _("Error: No spendable direct quantum outputs are available to fund this cold-stake delegation.")};
+        }
+        if (funding.eligible_amount <= amount) {
+            bilingual_str error = strprintf(
+                _("Error: Insufficient direct quantum balance to fund this delegation and its fee. Available direct quantum balance: %s. Gold Rush reward balance not eligible for delegation yet: %s."),
+                FormatMoney(funding.eligible_amount),
+                FormatMoney(funding.goldrush_reward_amount));
+            return util::Error{error};
+        }
+
+        int change_pos = RANDOM_CHANGE_POSITION;
+        auto res = CreateTransaction(wallet, recipients, change_pos, coin_control, /*sign=*/true);
+        if (!res) {
+            bilingual_str error = strprintf(
+                _("Error: Unable to fund cold-stake delegation from direct quantum outputs. %s Gold Rush reward balance not eligible for delegation yet: %s."),
+                util::ErrorString(res).original,
+                FormatMoney(funding.goldrush_reward_amount));
+            return util::Error{error};
+        }
+        tx = res->tx;
+        fee = res->fee;
+    }
+
+    mapValue_t map_value;
+    map_value["comment"] = "Blackcoin quantum cold-stake delegation funding";
+    wallet.CommitTransaction(tx, std::move(map_value), {});
+
+    WalletQuantumOperatorBondTx result;
+    result.txid = tx->GetHash().GetHex();
+    result.address = address;
+    result.amount = amount;
+    result.fee = fee;
+    return result;
+}
+
+util::Result<WalletQuantumOperatorBondTx> WithdrawColdStakeDelegationAddress(
+    CWallet& wallet,
+    const std::string& address)
+{
+    CTransactionRef tx;
+    CAmount amount{0};
+    CAmount fee{0};
+    uint32_t unlock_height{0};
+    std::string destination_address;
+    bool started_unbonding{false};
+    bool completed_withdrawal{false};
+    {
+        LOCK(wallet.cs_wallet);
+        bilingual_str spend_error;
+        if (!CanCreateSignedSpend(wallet, spend_error)) return util::Error{spend_error};
+
+        CTxDestination dest;
+        const auto delegation = DecodeWalletColdStakeDelegationAddress(wallet, address, dest);
+        if (!delegation) return util::Error{util::ErrorString(delegation)};
+        if (!delegation->has_owner_key) {
+            return util::Error{_("Error: Wallet does not hold the owner key for this cold-stake delegation")};
+        }
+
+        const ColdStakeDelegationOutputs outputs = ScanColdStakeDelegationOutputs(
+            wallet,
+            GetScriptForDestination(dest),
+            /*spendable_only=*/true);
+        if (outputs.spendable_outpoints.empty()) {
+            return util::Error{_("Error: No spendable cold-stake delegation funds found for this address")};
+        }
+
+        CCoinControl coin_control;
+        for (const COutPoint& outpoint : outputs.spendable_outpoints) {
+            coin_control.Select(outpoint);
+        }
+        int change_pos = RANDOM_CHANGE_POSITION;
+
+        amount = outputs.spendable_amount;
+        std::vector<CRecipient> recipients;
+        const int current_height = wallet.GetLastBlockHeight();
+        const int spend_height = current_height + 1;
+
+        if (delegation->tiered && delegation->unlock_height == 0) {
+            coin_control.m_allow_other_inputs = true;
+            coin_control.m_exclude_generated_quantum_inputs = true;
+            auto change_dest = wallet.GetNewQuantumChangeDestination();
+            if (!change_dest) return util::Error{util::ErrorString(change_dest)};
+            coin_control.destChange = *change_dest;
+
+            unlock_height = static_cast<uint32_t>(std::max(0, spend_height + int{delegation->unbonding_blocks}));
+            auto unbonding_dest = wallet.AddQuantumColdStakeDelegationForKeyHashes(
+                delegation->staker_pubkey_hash,
+                delegation->owner_pubkey_hash,
+                "coldstake-delegation-unbonding",
+                GetTime(),
+                delegation->unbonding_blocks,
+                unlock_height,
+                QUANTUM_TIERED_STATE_UNBONDING);
+            if (!unbonding_dest) return util::Error{util::ErrorString(unbonding_dest)};
+
+            destination_address = EncodeDestination(*unbonding_dest);
+            recipients.push_back({*unbonding_dest, amount, /*fSubtractFeeFromAmount=*/false});
+            started_unbonding = true;
+        } else {
+            if (delegation->tiered && delegation->unlock_height > static_cast<uint32_t>(std::max(0, spend_height))) {
+                return util::Error{strprintf(_("Error: Cold-stake delegation funds are unbonding and cannot be withdrawn until block %u"), delegation->unlock_height)};
+            }
+            coin_control.m_allow_other_inputs = false;
+            coin_control.m_input_family = CCoinControl::InputFamily::QUANTUM;
+
+            auto withdraw_dest = wallet.GetNewQuantumDestination("coldstake-delegation-withdrawal");
+            if (!withdraw_dest) return util::Error{util::ErrorString(withdraw_dest)};
+
+            destination_address = EncodeDestination(*withdraw_dest);
+            recipients.push_back({*withdraw_dest, amount, /*fSubtractFeeFromAmount=*/true});
+            completed_withdrawal = true;
+        }
+        auto res = CreateTransaction(wallet, recipients, change_pos, coin_control, /*sign=*/true);
+        if (!res) return util::Error{util::ErrorString(res)};
+        tx = res->tx;
+        fee = res->fee;
+    }
+
+    mapValue_t map_value;
+    map_value["comment"] = "Blackcoin quantum cold-stake delegation withdrawal";
     wallet.CommitTransaction(tx, std::move(map_value), {});
 
     WalletQuantumOperatorBondTx result;
@@ -648,6 +961,8 @@ std::vector<WalletEUTXOStateInfo> ListWalletEUTXOStates(CWallet& wallet, bool in
     for (const auto& [outpoint, record] : states) {
         coins.emplace(outpoint, Coin{});
     }
+    TRY_LOCK(::cs_main, main_lock);
+    if (!main_lock) return {};
     wallet.chain().findCoins(coins);
 
     std::vector<WalletEUTXOStateInfo> result;
@@ -1239,6 +1554,10 @@ public:
     {
         return m_wallet->FillPSBT(psbtx, complete, sighash_type, sign, bip32derivs, n_signed);
     }
+    bool finalizePSBT(PartiallySignedTransaction& psbtx, CMutableTransaction& mtx) override
+    {
+        return m_wallet->FinalizeAndExtractPSBT(psbtx, mtx);
+    }
     WalletBalances getBalances() override
     {
         LOCK(m_wallet->cs_wallet);
@@ -1426,12 +1745,24 @@ public:
         info.cpu_percent = m_wallet->m_pow_cpu_percent;
         info.hashrate = m_wallet->m_pow_hashrate;
         info.claims_submitted = m_wallet->m_pow_claims_submitted;
+        info.shadow_whitelist_height = SHADOW_WHITELIST_HEIGHT;
+        info.shadow_reward_start_height = SHADOW_REWARD_START_HEIGHT;
+        info.shadow_reward_end_height = SHADOW_REWARD_END_HEIGHT;
+        std::set<CScript> wallet_scripts;
         {
             TRY_LOCK(m_wallet->cs_wallet, wallet_lock);
             if (wallet_lock) {
                 info.payout_address = m_wallet->m_pow_payout_quantum;
+                CCoinControl coin_control;
+                coin_control.m_avoid_address_reuse = false;
+                for (const COutput& output : AvailableCoins(*m_wallet, &coin_control).All()) {
+                    if (output.txout.nValue > 0 && !output.txout.scriptPubKey.empty() && !output.txout.scriptPubKey.IsUnspendable()) {
+                        wallet_scripts.insert(output.txout.scriptPubKey);
+                    }
+                }
             } else {
                 info.payout_address_available = false;
+                info.wallet_goldrush_status_available = false;
             }
         }
         if (m_wallet->HaveChain()) {
@@ -1454,12 +1785,28 @@ public:
                 const CAmount next_reward = info.epoch_active ? ShadowBaseReward(next_height) : 0;
                 const CAmount next_pos_reward = next_reward - next_reward / 2;
                 info.pos_next_payout_pool = shadow_info.pos_amount + next_pos_reward;
-                info.pos_active_signalers = static_cast<int>(GetActiveShadowSignalCount(active.CoinsTip(), tip));
+                const std::map<CScript, CScript> active_signals = GetActiveShadowSignalPayouts(active.CoinsTip(), tip);
+                info.pos_active_signalers = static_cast<int>(active_signals.size());
                 info.pos_estimated_payout_per_signaler = info.pos_active_signalers > 0
                     ? info.pos_next_payout_pool / info.pos_active_signalers
                     : 0;
                 info.pos_claim_count = static_cast<int>(shadow_info.pos_count);
                 info.pos_last_payout_height = static_cast<int>(shadow_info.last_pos_height);
+                for (const CScript& script : wallet_scripts) {
+                    const bool whitelisted = IsWhitelisted(active.CoinsTip(), script);
+                    if (!whitelisted) continue;
+                    ++info.wallet_whitelisted_scripts;
+                    if (active_signals.count(script)) {
+                        info.wallet_active_signal = true;
+                    }
+                    const std::optional<ShadowSolverActivity> activity = GetRecentShadowSolverActivityForScript(active.CoinsTip(), tip, script);
+                    if (activity) {
+                        info.wallet_recent_solve_qualified = true;
+                        info.wallet_blocks_until_solver_expiry = std::max(
+                            info.wallet_blocks_until_solver_expiry,
+                            std::max(0, SHADOW_SOLVER_ACTIVITY_WINDOW - (tip->nHeight - static_cast<int>(activity->height))));
+                    }
+                }
             }
         }
         return info;
@@ -1649,6 +1996,18 @@ public:
         if (!qcs_info) return util::Error{_("Error: Created quantum cold-stake address is not wallet-backed")};
         return MakeWalletQuantumColdStakeInfo(*m_wallet, *qcs_info);
     }
+    WalletQuantumColdStakeBalanceInfo getQuantumColdStakeBalanceInfo(const std::string& coldstake_address) override
+    {
+        return MakeWalletColdStakeBalanceInfo(*m_wallet, coldstake_address);
+    }
+    util::Result<WalletQuantumOperatorBondTx> fundQuantumColdStakeAddress(const std::string& coldstake_address, CAmount amount) override
+    {
+        return FundColdStakeDelegationAddress(*m_wallet, coldstake_address, amount);
+    }
+    util::Result<WalletQuantumOperatorBondTx> withdrawQuantumColdStakeAddress(const std::string& coldstake_address) override
+    {
+        return WithdrawColdStakeDelegationAddress(*m_wallet, coldstake_address);
+    }
     WalletMigrationStatus getMigrationStatus() override
     {
         WalletMigrationStatus status;
@@ -1691,7 +2050,8 @@ public:
             const CScript& spk = out.txout.scriptPubKey;
             if (IsQuantumMigrationScript(spk)) {
                 CTxDestination dest;
-                if (ExtractDestination(spk, dest) && m_wallet->GetQuantumKeyInfo(dest).has_value()) {
+                const bool wallet_owned = ExtractDestination(spk, dest) && m_wallet->GetQuantumKeyInfo(dest).has_value();
+                if (wallet_owned) {
                     status.migrated_quantum_amount += out.txout.nValue;
                     ++status.migrated_quantum_outputs;
                 }
@@ -1699,6 +2059,12 @@ public:
                 if (IsGoldRushDirectPayoutOutput(view, out.outpoint, &marker_script) && marker_script == spk) {
                     status.goldrush_reward_amount_needing_move += out.txout.nValue;
                     ++status.goldrush_reward_outputs_needing_move;
+                } else if (wallet_owned && IsDirectQuantumMigrationScript(spk)) {
+                    status.direct_quantum_amount += out.txout.nValue;
+                    ++status.direct_quantum_outputs;
+                } else if (wallet_owned) {
+                    status.staked_quantum_amount += out.txout.nValue;
+                    ++status.staked_quantum_outputs;
                 }
             } else if (IsQuantumColdStakeScript(spk)) {
                 continue;

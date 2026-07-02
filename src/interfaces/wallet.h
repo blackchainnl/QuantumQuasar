@@ -56,6 +56,7 @@ struct WalletTxStatus;
 struct WalletMigrationResult;
 struct WalletPowMiningInfo;
 struct WalletQuantumAddressInfo;
+struct WalletQuantumColdStakeBalanceInfo;
 struct WalletQuantumColdStakeInfo;
 struct WalletQuantumOperatorBondInfo;
 struct WalletQuantumOperatorBondTx;
@@ -209,6 +210,9 @@ public:
         PartiallySignedTransaction& psbtx,
         bool& complete) = 0;
 
+    //! Finalize and extract PSBT with wallet/chain-aware script verification flags.
+    virtual bool finalizePSBT(PartiallySignedTransaction& psbtx, CMutableTransaction& mtx) = 0;
+
     //! Get balances.
     virtual WalletBalances getBalances() = 0;
 
@@ -348,6 +352,15 @@ public:
 
     //! Create a Quantum Cold-Stake deposit address using a hex ML-DSA staking public key.
     virtual util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label, uint16_t unbonding_blocks) = 0;
+
+    //! Return wallet-owned Quantum Cold-Stake delegation funding status.
+    virtual WalletQuantumColdStakeBalanceInfo getQuantumColdStakeBalanceInfo(const std::string& coldstake_address) = 0;
+
+    //! Fund this wallet's Quantum Cold-Stake delegation address from spendable quantum funds.
+    virtual util::Result<WalletQuantumOperatorBondTx> fundQuantumColdStakeAddress(const std::string& coldstake_address, CAmount amount) = 0;
+
+    //! Withdraw this wallet's Quantum Cold-Stake delegation funds to a fresh quantum address.
+    virtual util::Result<WalletQuantumOperatorBondTx> withdrawQuantumColdStakeAddress(const std::string& coldstake_address) = 0;
 
     //! Read wallet migration progress and deadline state.
     virtual WalletMigrationStatus getMigrationStatus() = 0;
@@ -558,6 +571,14 @@ struct WalletPowMiningInfo
     int pos_active_signalers{0};     //!< active signal-once participants still inside the 14-day window
     int pos_claim_count{0};          //!< number of accepted PoS Gold Rush payouts
     int pos_last_payout_height{0};   //!< last accepted PoS Gold Rush payout height, or 0 if none
+    int shadow_whitelist_height{0};   //!< deterministic Gold Rush whitelist snapshot height
+    int shadow_reward_start_height{0};//!< Gold Rush reward start height
+    int shadow_reward_end_height{0};  //!< Gold Rush reward end height
+    bool wallet_goldrush_status_available{true}; //!< false when wallet status could not be read without blocking
+    int wallet_whitelisted_scripts{0}; //!< wallet-owned spendable scripts in the deterministic whitelist
+    bool wallet_recent_solve_qualified{false}; //!< wallet has a whitelisted script with a recent solver marker
+    bool wallet_active_signal{false}; //!< wallet has an active QQSIGNAL entry
+    int wallet_blocks_until_solver_expiry{0}; //!< max recent-solver expiry across wallet-owned whitelisted scripts
     bool payout_address_available{true}; //!< false when the wallet lock is busy and the cached address was not read
 };
 
@@ -585,6 +606,18 @@ struct WalletQuantumColdStakeInfo
     bool tiered{false};
     uint16_t unbonding_blocks{0};
     uint32_t unlock_height{0};
+};
+
+//! Wallet-owned Quantum Cold-Stake delegation balance.
+struct WalletQuantumColdStakeBalanceInfo
+{
+    bool available{true};
+    bool valid_delegation_address{false};
+    CAmount amount{0};
+    int outputs{0};
+    CAmount spendable_amount{0};
+    int spendable_outputs{0};
+    int current_height{0};
 };
 
 //! Verified local Quantum Cold-Stake operator registry entry.
@@ -664,6 +697,10 @@ struct WalletMigrationStatus
     CAmount eligible_legacy_amount{0};
     unsigned int migrated_quantum_outputs{0};
     CAmount migrated_quantum_amount{0};
+    unsigned int direct_quantum_outputs{0};
+    CAmount direct_quantum_amount{0};
+    unsigned int staked_quantum_outputs{0};
+    CAmount staked_quantum_amount{0};
     unsigned int goldrush_reward_outputs_needing_move{0};
     CAmount goldrush_reward_amount_needing_move{0};
     bool goldrush_remigration_active{false};

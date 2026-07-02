@@ -345,12 +345,22 @@ static bool IsQuantumInputFamilyScript(const CScript& script_pub_key)
     return IsQuantumMigrationScript(script_pub_key) || IsQuantumColdStakeScript(script_pub_key);
 }
 
+static bool IsDirectQuantumMigrationInputScript(const CScript& script_pub_key)
+{
+    const auto tier = GetQuantumStakeTierProgram(script_pub_key);
+    return tier && !tier->tiered && !tier->cold_stake;
+}
+
 static bool MatchesCoinControlInputFamily(const CScript& script_pub_key, const CCoinControl& coin_control)
 {
     if (!coin_control.m_input_family) return true;
-    const bool is_quantum = IsQuantumInputFamilyScript(script_pub_key);
+    const bool is_quantum_migration = IsQuantumMigrationScript(script_pub_key);
+    const bool is_quantum = is_quantum_migration || IsQuantumColdStakeScript(script_pub_key);
     if (*coin_control.m_input_family == CCoinControl::InputFamily::QUANTUM) {
         return is_quantum;
+    }
+    if (*coin_control.m_input_family == CCoinControl::InputFamily::QUANTUM_MIGRATION) {
+        return is_quantum_migration && IsDirectQuantumMigrationInputScript(script_pub_key);
     }
     return !is_quantum && !IsEUTXOScript(script_pub_key);
 }
@@ -385,6 +395,13 @@ util::Result<PreSelectedInputs> FetchSelectedInputs(const CWallet& wallet, const
 
         if (!MatchesCoinControlInputFamily(txout.scriptPubKey, coin_control)) {
             return util::Error{strprintf(_("Pre-selected input %s does not match the selected wallet source"), outpoint.ToString())};
+        }
+        if (coin_control.m_exclude_generated_quantum_inputs &&
+            IsQuantumMigrationScript(txout.scriptPubKey)) {
+            const CWalletTx* wallet_tx = wallet.GetWalletTx(outpoint.hash);
+            if (wallet_tx && wallet_tx->IsCoinBase()) {
+                return util::Error{strprintf(_("Pre-selected input %s is a Gold Rush reward output. Use Move Gold Rush rewards during the migration window instead."), outpoint.ToString())};
+            }
         }
 
         if (input_bytes == -1) {
@@ -463,6 +480,11 @@ CoinsResult AvailableCoins(const CWallet& wallet,
 
             if (coinControl && !MatchesCoinControlInputFamily(output.scriptPubKey, *coinControl))
                 continue;
+
+            if (coinControl && coinControl->m_exclude_generated_quantum_inputs &&
+                wtx.IsCoinBase() && IsQuantumMigrationScript(output.scriptPubKey)) {
+                continue;
+            }
 
             // Skip manually selected coins (the caller can fetch them directly)
             if (coinControl && coinControl->HasSelected() && coinControl->IsSelected(outpoint))

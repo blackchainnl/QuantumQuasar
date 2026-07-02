@@ -2737,6 +2737,51 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
     return SignQuantumTransaction(tx, coins, verify_flags, quantum_spend_active, input_errors);
 }
 
+unsigned int CWallet::GetActiveScriptVerifyFlags() const
+{
+    unsigned int flags = STANDARD_SCRIPT_VERIFY_FLAGS;
+    bool quantum_spend_active = !HaveChain();
+    bool eutxo_spend_active = !HaveChain();
+    bool final_lockout_active = false;
+
+    if (HaveChain()) {
+        if (const CBlockIndex* tip = chain().getTip()) {
+            const int64_t tip_mtp = tip->GetMedianTimePast();
+            const auto& consensus = Params().GetConsensus();
+            if (consensus.IsProtocolV4(tip_mtp)) {
+                flags |= SCRIPT_VERIFY_ISCOINSTAKE;
+                flags |= SCRIPT_VERIFY_STRICTENC;
+                flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
+            }
+            if (consensus.IsNewNetworkStakeOnly(tip_mtp)) {
+                flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
+            }
+            quantum_spend_active = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
+            eutxo_spend_active = consensus.IsQuantumSpendEnforcementActive(tip_mtp);
+            final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp);
+            if (consensus.IsStakeTiersActive(tip->nHeight + 1)) {
+                flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
+            }
+        }
+    }
+    if (quantum_spend_active) {
+        flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
+        flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
+    }
+    if (eutxo_spend_active) {
+        flags |= SCRIPT_VERIFY_EUTXO;
+    }
+    if (final_lockout_active) {
+        flags |= SCRIPT_VERIFY_LEGACY_ECDSA_LOCKOUT;
+    }
+    return flags;
+}
+
+bool CWallet::FinalizeAndExtractPSBT(PartiallySignedTransaction& psbtx, CMutableTransaction& result) const
+{
+    return ::FinalizeAndExtractPSBT(psbtx, result, GetActiveScriptVerifyFlags());
+}
+
 TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& complete, int sighash_type, bool sign, bool bip32derivs, size_t * n_signed, bool finalize) const
 {
     if (n_signed) {
@@ -3018,7 +3063,7 @@ OutputType CWallet::TransactionChangeType(const std::optional<OutputType>& chang
     return m_default_address_type;
 }
 
-void CWallet::CommitTransaction(CTransactionRef tx, mapValue_t mapValue, std::vector<std::pair<std::string, std::string>> orderForm)
+bool CWallet::CommitTransaction(CTransactionRef tx, mapValue_t mapValue, std::vector<std::pair<std::string, std::string>> orderForm, std::string* broadcast_error)
 {
     LOCK(cs_wallet);
     WalletLogPrintf("CommitTransaction:\n%s", tx->ToString()); // NOLINT(bitcoin-unterminated-logprintf)
@@ -3049,14 +3094,18 @@ void CWallet::CommitTransaction(CTransactionRef tx, mapValue_t mapValue, std::ve
 
     if (!fBroadcastTransactions) {
         // Don't submit tx to the mempool
-        return;
+        return true;
     }
 
     std::string err_string;
     if (!SubmitTxMemoryPoolAndRelay(*wtx, err_string, true)) {
         WalletLogPrintf("CommitTransaction(): Transaction cannot be broadcast immediately, %s\n", err_string);
+        if (broadcast_error) *broadcast_error = err_string;
         // TODO: if we expect the failure to be long term or permanent, instead delete wtx from the wallet and return failure.
+        return false;
     }
+    if (broadcast_error) broadcast_error->clear();
+    return true;
 }
 
 bool CWallet::CommitRGBTransaction(CTransactionRef tx, mapValue_t mapValue, std::vector<std::pair<std::string, std::string>> orderForm, const RGBTxCommitData& rgb_data, std::string& error)
@@ -4383,6 +4432,98 @@ util::Result<CTxDestination> CWallet::AddQuantumColdStakeDelegation(const std::v
         const auto existing = m_quantum_coldstake_delegations.find(witness_program);
         if (existing != m_quantum_coldstake_delegations.end()) {
             if (existing->second.staker_pubkey_hash != staker_hash || existing->second.owner_pubkey_hash != owner_hash) {
+                return util::Error{_("Error: Quantum cold-stake witness program collision")};
+            }
+            if (!record_as_receive) {
+                return dest;
+            }
+            if (!SetAddressBook(dest, label, AddressPurpose::RECEIVE)) {
+                return util::Error{_("Error: Failed to write address book entry")};
+            }
+            return dest;
+        }
+
+        WalletBatch batch(GetDatabase());
+        if (!batch.TxnBegin()) {
+            return util::Error{_("Error: Failed to begin wallet database transaction")};
+        }
+        if (!batch.WriteQuantumColdStakeDelegation(witness_program, record)) {
+            batch.TxnAbort();
+            return util::Error{_("Error: Failed to write quantum cold-stake delegation")};
+        }
+        const std::string encoded_dest = EncodeDestination(dest);
+        if (record_as_receive) {
+            if (!batch.WritePurpose(encoded_dest, PurposeToString(AddressPurpose::RECEIVE))) {
+                batch.TxnAbort();
+                return util::Error{_("Error: Failed to write address purpose")};
+            }
+            if (!batch.WriteName(encoded_dest, label)) {
+                batch.TxnAbort();
+                return util::Error{_("Error: Failed to write address book entry")};
+            }
+        }
+        if (!batch.TxnCommit()) {
+            return util::Error{_("Error: Failed to commit wallet database transaction")};
+        }
+
+        m_quantum_coldstake_delegations.emplace(witness_program, record);
+        MaybeUpdateBirthTime(key_time);
+
+        if (record_as_receive) {
+            auto entry = m_address_book.find(dest);
+            updated = entry != m_address_book.end() && !entry->second.IsChange();
+            CAddressBookData& address_book = m_address_book[dest];
+            address_book.SetLabel(label);
+            address_book.purpose = AddressPurpose::RECEIVE;
+            notify_address_book = true;
+        }
+    }
+
+    if (notify_address_book) {
+        NotifyAddressBookChanged(dest, label, true, AddressPurpose::RECEIVE, updated ? CT_UPDATED : CT_NEW);
+    }
+    return dest;
+}
+
+util::Result<CTxDestination> CWallet::AddQuantumColdStakeDelegationForKeyHashes(const uint256& staker_pubkey_hash, const uint256& owner_pubkey_hash, const std::string& label, int64_t creation_time, uint16_t unbonding_blocks, uint32_t unlock_height, unsigned char state, bool record_as_receive)
+{
+    if (state != QUANTUM_TIERED_STATE_BONDED && state != QUANTUM_TIERED_STATE_UNBONDING) {
+        return util::Error{_("Error: Invalid cold-stake tier state")};
+    }
+    if (state == QUANTUM_TIERED_STATE_BONDED && unlock_height != 0) {
+        return util::Error{_("Error: Bonded cold-stake records cannot have an unlock height")};
+    }
+    if (state == QUANTUM_TIERED_STATE_UNBONDING && unlock_height == 0) {
+        return util::Error{_("Error: Unbonding cold-stake records require an unlock height")};
+    }
+
+    const std::vector<unsigned char> witness_program = QuantumTieredColdStakeProgramForKeyHashes(
+        staker_pubkey_hash,
+        owner_pubkey_hash,
+        state,
+        unbonding_blocks,
+        unlock_height);
+    const CTxDestination dest = WitnessUnknown{QUANTUM_COLDSTAKE_WITNESS_VERSION, witness_program};
+    const int64_t key_time = creation_time > 0 ? creation_time : GetTime();
+
+    bool updated = false;
+    bool notify_address_book = false;
+    {
+        LOCK(cs_wallet);
+        const bool has_staker_key = HaveQuantumKeyForProgram(VectorForUint256(staker_pubkey_hash));
+        const bool has_owner_key = HaveQuantumKeyForProgram(VectorForUint256(owner_pubkey_hash));
+        if (!has_staker_key && !has_owner_key) {
+            return util::Error{_("Error: This wallet has neither the staking nor owner ML-DSA key for this delegation")};
+        }
+
+        QuantumColdStakeDelegationRecord record;
+        record.staker_pubkey_hash = staker_pubkey_hash;
+        record.owner_pubkey_hash = owner_pubkey_hash;
+        record.creation_time = key_time;
+
+        const auto existing = m_quantum_coldstake_delegations.find(witness_program);
+        if (existing != m_quantum_coldstake_delegations.end()) {
+            if (existing->second.staker_pubkey_hash != staker_pubkey_hash || existing->second.owner_pubkey_hash != owner_pubkey_hash) {
                 return util::Error{_("Error: Quantum cold-stake witness program collision")};
             }
             if (!record_as_receive) {
@@ -6448,7 +6589,11 @@ bool CWallet::SetPowMining(bool enabled, int threads, int cpu_percent, bilingual
     }
 
     StopPowMining();
-    if (!enabled) return true;
+    if (!enabled) {
+        m_pow_threads = 1;
+        m_pow_cpu_percent = 1;
+        return true;
+    }
 
     {
         LOCK(cs_wallet);
@@ -6657,7 +6802,14 @@ bool CWallet::SubmitShadowPowClaim(const CScript& target, const CTxDestination& 
     mapValue_t map_value;
     map_value["comment"] = "Quantum Quasar built-in shadow PoW claim";
     try {
-        CommitTransaction(tx, std::move(map_value), {});
+        std::string broadcast_error;
+        if (!CommitTransaction(tx, std::move(map_value), {}, &broadcast_error)) {
+            error = strprintf(_("Broadcasting Gold Rush PoW claim failed: %s"), broadcast_error.empty() ? "transaction was not accepted into the mempool" : broadcast_error);
+            if (!AbandonTransaction(tx->GetHash())) {
+                WalletLogPrintf("Gold Rush PoW stale claim could not be abandoned: txid=%s\n", tx->GetHash().ToString());
+            }
+            return false;
+        }
     } catch (const std::exception& e) {
         error = strprintf(_("Broadcasting Gold Rush PoW claim failed: %s"), e.what());
         return false;

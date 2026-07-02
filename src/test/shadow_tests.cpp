@@ -367,6 +367,48 @@ BOOST_AUTO_TEST_CASE(pos_shadow_signal_v2_records_fee_paying_quantum_ledger_cred
     BOOST_REQUIRE(UndoShadowBlock(view, first_block, &first_index, &first_undo));
 }
 
+BOOST_AUTO_TEST_CASE(pos_shadow_below_threshold_solver_does_not_collect_goldrush_reward)
+{
+    CCoinsView base;
+    CCoinsViewCache view{&base, true};
+
+    const CScript whitelisted_target = CScript{} << OP_TRUE;
+    const CScript below_threshold_target = CScript{} << OP_2;
+    AddCoinForScript(view, COutPoint{uint256::ONE, 0}, 10'000 * COIN, whitelisted_target);
+    AddCoinForScript(view, COutPoint{uint256::ONE, 1}, 9'999 * COIN, below_threshold_target);
+
+    uint256 whitelist_hash;
+    CBlockIndex whitelist_index;
+    InitIndex(whitelist_index, SHADOW_WHITELIST_HEIGHT, nullptr, whitelist_hash);
+    ApplyLegacyWhitelistSnapshot(view, &whitelist_index);
+    BOOST_CHECK(IsWhitelisted(view, whitelisted_target));
+    BOOST_CHECK(!IsWhitelisted(view, below_threshold_target));
+
+    uint256 reward_hash;
+    CBlockIndex reward_index;
+    InitIndex(reward_index, SHADOW_REWARD_START_HEIGHT, &whitelist_index, reward_hash);
+    CBlock block;
+    block.vtx.push_back(MakeCoinbaseTx(CScript{} << OP_3));
+    block.vtx.push_back(MakeCoinstakeTx(below_threshold_target));
+    CBlockUndo undo = MakeUndoWithInputScripts(block, {{1, below_threshold_target}});
+
+    std::map<CScript, CAmount> direct_payouts;
+    CAmount direct_total{0};
+    BOOST_REQUIRE(GetShadowPosDirectPayouts(view, block, &reward_index, &undo, direct_payouts, direct_total));
+    BOOST_CHECK(direct_payouts.empty());
+    BOOST_CHECK_EQUAL(direct_total, 0);
+    BOOST_REQUIRE(ApplyShadowBlock(view, block, &reward_index, &undo));
+
+    const auto recent_activity = GetRecentShadowSolverActivity(view, &reward_index);
+    BOOST_CHECK(!recent_activity.count(below_threshold_target));
+    const ShadowGoldRushInfo reward_info = GetShadowGoldRushInfo(view, &reward_index);
+    BOOST_CHECK_EQUAL(reward_info.pos_count, 0U);
+    BOOST_CHECK_EQUAL(reward_info.pos_amount, 290 * COIN);
+    BOOST_CHECK_EQUAL(reward_info.claimed_amount, 0);
+
+    BOOST_REQUIRE(UndoShadowBlock(view, block, &reward_index, &undo));
+}
+
 BOOST_AUTO_TEST_CASE(pos_shadow_signal_lookback_pays_without_per_block_signal_and_expires)
 {
     CCoinsView base;

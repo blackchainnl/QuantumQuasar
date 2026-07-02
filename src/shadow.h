@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -113,6 +114,7 @@ CAmount ShadowMaxBlockDirectTotal(const CCoinsViewCache& view, const CBlockIndex
 /** Read-only Gold Rush pool and participant diagnostics for RPC/status reporting. */
 ShadowGoldRushInfo GetShadowGoldRushInfo(const CCoinsViewCache& view, const CBlockIndex* pindex);
 std::map<CScript, ShadowSolverActivity> GetRecentShadowSolverActivity(const CCoinsViewCache& view, const CBlockIndex* pindex);
+std::optional<ShadowSolverActivity> GetRecentShadowSolverActivityForScript(const CCoinsViewCache& view, const CBlockIndex* pindex, const CScript& target);
 uint64_t GetActiveShadowSignalCount(const CCoinsViewCache& view, const CBlockIndex* pindex);
 std::map<CScript, CScript> GetActiveShadowSignalPayouts(const CCoinsViewCache& view, const CBlockIndex* pindex);
 bool HasRecentShadowSolverActivity(const CCoinsViewCache& view, const CBlockIndex* pindex, const CScript& target, uint32_t solve_height, const uint256& solve_hash);

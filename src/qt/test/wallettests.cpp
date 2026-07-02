@@ -354,6 +354,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QLineEdit* coldstake_address = page.findChild<QLineEdit*>("coldstakeAddress");
     QPushButton* coldstake_new = page.findChild<QPushButton*>("newColdstakeAddress");
     QPushButton* coldstake_copy = page.findChild<QPushButton*>("coldstakeCopy");
+    BitcoinAmountField* coldstake_fund_amount = page.findChild<BitcoinAmountField*>("coldstakeFundAmount");
+    QPushButton* coldstake_fund = page.findChild<QPushButton*>("coldstakeFund");
+    QPushButton* coldstake_withdraw = page.findChild<QPushButton*>("coldstakeWithdraw");
     QLabel* coldstake_status = page.findChild<QLabel*>("coldstakeStatus");
 
     QVERIFY(staking_enable);
@@ -414,6 +417,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(coldstake_address);
     QVERIFY(coldstake_new);
     QVERIFY(coldstake_copy);
+    QVERIFY(coldstake_fund_amount);
+    QVERIFY(coldstake_fund);
+    QVERIFY(coldstake_withdraw);
     QVERIFY(coldstake_status);
 
     QVERIFY(QMetaObject::invokeMethod(&page, "updateStatus", Qt::DirectConnection));
@@ -459,6 +465,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(!coldstake_delegation_selector->isEnabled());
     QVERIFY(!coldstake_new->isEnabled());
     QVERIFY(!coldstake_copy->isEnabled());
+    QVERIFY(!coldstake_fund_amount->isEnabled());
+    QVERIFY(!coldstake_fund->isEnabled());
+    QVERIFY(!coldstake_withdraw->isEnabled());
 
     quantum_new->click();
     qApp->processEvents();
@@ -488,7 +497,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(!selfstake_output_selector->isEnabled());
     QVERIFY(selfstake_fund_amount->isEnabled());
     QVERIFY(selfstake_fund->isEnabled());
-    QVERIFY(selfstake_withdraw->isEnabled());
+    QVERIFY(!selfstake_withdraw->isEnabled());
     QVERIFY(selfstake_status->text().contains(QString("9450")));
 
     selfstake_copy->click();
@@ -527,6 +536,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(coldstake_delegation_selector->isEnabled());
     QVERIFY(coldstake_delegation_selector->findData(coldstake_address->text()) >= 0);
     QVERIFY(coldstake_copy->isEnabled());
+    QVERIFY(coldstake_fund_amount->isEnabled());
+    QVERIFY(!coldstake_fund->isEnabled());
+    QVERIFY(!coldstake_withdraw->isEnabled());
     QVERIFY(coldstake_status->text().contains(QString("Cold-stake address created")));
 
     coldstake_copy->click();

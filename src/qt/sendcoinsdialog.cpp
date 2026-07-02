@@ -407,8 +407,10 @@ bool SendCoinsDialog::signWithExternalSigner(PartiallySignedTransaction& psbtx, 
         processSendCoinsReturn(WalletModel::TransactionCreationFailed);
         return false;
     }
-    // fillPSBT does not always properly finalize
-    complete = FinalizeAndExtractPSBT(psbtx, mtx);
+    // fillPSBT does not always properly finalize. Use the wallet-aware
+    // finalizer so upgraded quantum witness programs are verified with the
+    // active chain's script flags instead of upstream's generic PSBT flags.
+    complete = model->wallet().finalizePSBT(psbtx, mtx);
     return true;
 }
 
@@ -745,9 +747,11 @@ void SendCoinsDialog::updateCoinControlState()
     // Include watch-only for wallets without private key
     m_coin_control->fAllowWatchOnly = model->wallet().privateKeysDisabled() && !model->wallet().hasExternalSigner();
     if (m_spend_source_combo && m_spend_source_combo->currentData().toInt() == SPEND_SOURCE_QUANTUM) {
-        m_coin_control->m_input_family = CCoinControl::InputFamily::QUANTUM;
+        m_coin_control->m_input_family = CCoinControl::InputFamily::QUANTUM_MIGRATION;
+        m_coin_control->m_exclude_generated_quantum_inputs = true;
     } else {
         m_coin_control->m_input_family = CCoinControl::InputFamily::LEGACY;
+        m_coin_control->m_exclude_generated_quantum_inputs = false;
     }
 }
 
@@ -806,10 +810,14 @@ void SendCoinsDialog::updateSpendSourceBalance()
     if (!model || !model->getOptionsModel() || !m_spend_source_combo || !m_spend_source_balance_label || !m_spend_source_warning_label) {
         return;
     }
-    const interfaces::WalletBalances balances = model->getCachedBalance();
     const bool quantum_source = m_spend_source_combo->currentData().toInt() == SPEND_SOURCE_QUANTUM;
-    const CAmount source_balance = quantum_source ? balances.quantum_balance : balances.legacy_balance;
-    const QString family = quantum_source ? tr("Quantum spendable:") : tr("Legacy spendable:");
+    CCoinControl source_control;
+    source_control.m_input_family = quantum_source
+        ? CCoinControl::InputFamily::QUANTUM_MIGRATION
+        : CCoinControl::InputFamily::LEGACY;
+    source_control.m_exclude_generated_quantum_inputs = quantum_source;
+    const CAmount source_balance = model->getAvailableBalance(&source_control);
+    const QString family = quantum_source ? tr("Direct quantum spendable:") : tr("Legacy spendable:");
     m_spend_source_balance_label->setText(QStringLiteral("%1 %2").arg(family, BitcoinUnits::formatWithUnit(model->getOptionsModel()->getDisplayUnit(), source_balance)));
     m_spend_source_warning_label->setVisible(quantum_source);
 }

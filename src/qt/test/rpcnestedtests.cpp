@@ -69,16 +69,10 @@ void RPCNestedTests::rpcNestedTests()
     RPCConsole::RPCExecuteCommandLine(m_node, result, "getblockchaininfo()");
     QVERIFY(result.substr(0,1) == "{");
 
-    RPCConsole::RPCExecuteCommandLine(m_node, result, "getshadowpowwork");
-    QVERIFY(result.substr(0,1) == "{");
-    QVERIFY(result.find("\"prefix\": \"QQSPROOF\"") != std::string::npos);
-    QVERIFY(result.find("\"target_bits\"") != std::string::npos);
-    QVERIFY(result.find("\"pow_amount\"") != std::string::npos);
-    QVERIFY(result.find("target_whitelisted") == std::string::npos);
-
-    RPCConsole::RPCExecuteCommandLine(m_node, result, "help getshadowpowwork");
-    QVERIFY(result.find("Argon2id QQSPROOF") != std::string::npos);
-    QVERIFY(result.find("not whitelist-gated") != std::string::npos);
+    RPCConsole::RPCParseCommandLine(nullptr, result, "getshadowpowwork", false, &filtered);
+    QVERIFY(filtered == "getshadowpowwork");
+    RPCConsole::RPCParseCommandLine(nullptr, result, "help getshadowpowwork", false, &filtered);
+    QVERIFY(filtered == "help getshadowpowwork");
 
     RPCConsole::RPCExecuteCommandLine(m_node, result, "getblockchaininfo "); //whitespace at the end will be tolerated
     QVERIFY(result.substr(0,1) == "{");

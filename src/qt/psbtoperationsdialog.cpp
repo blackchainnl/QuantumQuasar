@@ -52,7 +52,10 @@ void PSBTOperationsDialog::openWithPSBT(PartiallySignedTransaction psbtx)
 {
     m_transaction_data = psbtx;
 
-    bool complete = FinalizePSBT(psbtx); // Make sure all existing signatures are fully combined before checking for completeness.
+    CMutableTransaction finalized_tx;
+    bool complete = m_wallet_model
+        ? m_wallet_model->wallet().finalizePSBT(psbtx, finalized_tx)
+        : FinalizePSBT(psbtx); // Make sure all existing signatures are fully combined before checking for completeness.
     if (m_wallet_model) {
         size_t n_could_sign;
         TransactionError err = m_wallet_model->wallet().fillPSBT(SIGHASH_ALL, /*sign=*/false, /*bip32derivs=*/true, &n_could_sign, m_transaction_data, complete);
@@ -106,7 +109,10 @@ void PSBTOperationsDialog::signTransaction()
 void PSBTOperationsDialog::broadcastTransaction()
 {
     CMutableTransaction mtx;
-    if (!FinalizeAndExtractPSBT(m_transaction_data, mtx)) {
+    const bool complete = m_wallet_model
+        ? m_wallet_model->wallet().finalizePSBT(m_transaction_data, mtx)
+        : FinalizeAndExtractPSBT(m_transaction_data, mtx);
+    if (!complete) {
         // This is never expected to fail unless we were given a malformed PSBT
         // (e.g. with an invalid signature.)
         showStatus(tr("Unknown error processing transaction."), StatusLevel::ERR);
