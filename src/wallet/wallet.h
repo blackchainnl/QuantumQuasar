@@ -178,7 +178,9 @@ static const CAmount DEFAULT_MIN_STAKING_AMOUNT = 0.1 * COIN;
 //! -reservebalance default
 static const CAmount DEFAULT_RESERVE_BALANCE = 0;
 //! -donatetodevfund default
-static const unsigned int DEFAULT_DONATION_PERCENTAGE = 20;
+static const unsigned int DEFAULT_DONATION_PERCENTAGE = 0;
+static const unsigned int DEFAULT_DONATION_SUGGESTED_PERCENTAGE = 1;
+static const unsigned int DEFAULT_POST_MIGRATION_DONATION_PERCENTAGE = 5;
 static const unsigned int MIN_DONATION_PERCENTAGE = 0;
 static const unsigned int MAX_DONATION_PERCENTAGE = 95;
 

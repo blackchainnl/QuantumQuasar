@@ -102,8 +102,9 @@ void WalletInit::AddWalletOptions(ArgsManager& argsman) const
 
     argsman.AddArg("-minstakingamount=<amt>", strprintf("Minimum input value to be used for staking (default: %u)", wallet::DEFAULT_MIN_STAKING_AMOUNT), ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
     argsman.AddArg("-reservebalance=<amt>", strprintf("Reserved balance not used for staking (default: %u)", wallet::DEFAULT_RESERVE_BALANCE), ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
-    argsman.AddArg("-donatetodevfund=<n>", strprintf("Percentage of staking rewards contributed to the dev treasury (%u to %u, default: %u). Set 0 to opt out at any time. Quantum Quasar: this contribution is wallet-level (never consensus-enforced) and only applies after the Gold Rush epoch.",
-        wallet::MIN_DONATION_PERCENTAGE, wallet::MAX_DONATION_PERCENTAGE, wallet::DEFAULT_DONATION_PERCENTAGE), ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
+    argsman.AddArg("-donatetodevfund=<n>", strprintf("Percentage of staking rewards contributed to the dev treasury (%u to %u, default: %u). Set 0 to opt out at any time. The GUI suggests %u%% before wallet migration is complete and defaults to %u%% after wallet migration is complete unless the user chooses otherwise.",
+        wallet::MIN_DONATION_PERCENTAGE, wallet::MAX_DONATION_PERCENTAGE, wallet::DEFAULT_DONATION_PERCENTAGE,
+        wallet::DEFAULT_DONATION_SUGGESTED_PERCENTAGE, wallet::DEFAULT_POST_MIGRATION_DONATION_PERCENTAGE), ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
     argsman.AddArg("-qqautoredelegate=<true/false>", "Enable autonomous Quantum cold-stake redelegation in unlocked owner wallets (default: true)", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
     argsman.AddArg("-qqredelegationtriggermultiplier=<n>", "Autonomous redelegation trigger multiplier over expected zero-win interval (default: 6)", ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::WALLET);
     argsman.AddArg("-qqredelegationmaxpatienceblocks=<n>", "Autonomous redelegation maximum zero-win patience in blocks (default: 4050)", ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::WALLET);

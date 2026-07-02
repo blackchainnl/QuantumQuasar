@@ -1832,13 +1832,11 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
     bool isDevFundEnabled = (wallet.m_donation_percentage > 0 && !Params().GetDevFundAddress().empty()) ? true : false;
     int treasuryPercentage = wallet.m_donation_percentage;
 
-    // Quantum Quasar treasury contribution is WALLET-LEVEL and OPT-OUT (set -donatetodevfund=0)
-    // and begins only AFTER the Gold Rush epoch. It is NOT consensus-enforced, so opting out
-    // still produces a fully valid block. The default contribution is DEFAULT_DONATION_PERCENTAGE
-    // (20%) via wallet.m_donation_percentage above; a staker may change or disable it at any time.
-    if (!quantum_stake_rules_active) {
-        isDevFundEnabled = false; // no treasury contribution before/through the Gold Rush epoch
-    }
+    // Treasury contribution is WALLET-LEVEL and opt-in/opt-out (set -donatetodevfund).
+    // It is not consensus-enforced: consensus does not require any treasury output, so
+    // a staker who opts out still produces a fully valid block. The GUI keeps the
+    // default off until the wallet migration is complete, but a manual nonzero choice
+    // is honored whenever the coinstake format can safely include the extra output.
     if (stake_reward_split_active) {
         isDevFundEnabled = false; // The stake-reward split enforces exact participant/operator split; no wallet-level extra value outputs.
     }

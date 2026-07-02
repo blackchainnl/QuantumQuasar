@@ -59,6 +59,9 @@
 
 namespace {
 constexpr uint16_t OPERATOR_COMMITMENT_BLOCKS = 40500;
+const QString DONATION_PERCENT_SETTING = QStringLiteral("StakingMiningDonationPercent");
+const QString DONATION_USER_CONFIGURED_SETTING = QStringLiteral("StakingMiningDonationUserConfigured");
+const QString DONATION_POST_MIGRATION_DEFAULT_SETTING = QStringLiteral("StakingMiningDonationPostMigrationDefaultApplied");
 
 struct StakeLockPreset
 {
@@ -485,7 +488,7 @@ void StakingMiningPage::setupUi()
     m_donation_percent->setSuffix(QStringLiteral(" %"));
     m_donation_percent->setToolTip(tr("Percentage of staking rewards donated when the donation toggle is on."));
     QSettings settings;
-    const int saved_donation = settings.value(QStringLiteral("StakingMiningDonationPercent"), int{wallet::DEFAULT_DONATION_PERCENTAGE}).toInt();
+    const int saved_donation = settings.value(DONATION_PERCENT_SETTING, int{wallet::DEFAULT_DONATION_SUGGESTED_PERCENTAGE}).toInt();
     m_donation_percent->setValue(std::clamp(saved_donation, m_donation_percent->minimum(), m_donation_percent->maximum()));
 
     m_donation_status = new QLabel(tr("Donations are off"), stakingBox);
@@ -1198,6 +1201,9 @@ void StakingMiningPage::onUnlockQuantumLegacyStakingToggled(bool enabled)
 void StakingMiningPage::onDonationToggled(bool enabled)
 {
     if (m_updating || !m_wallet_model) return;
+    QSettings settings;
+    settings.setValue(DONATION_USER_CONFIGURED_SETTING, true);
+    if (enabled) settings.setValue(DONATION_PERCENT_SETTING, m_donation_percent->value());
     applyDonationPercentage(enabled ? static_cast<unsigned int>(m_donation_percent->value()) : 0);
     updateStatus();
 }
@@ -1205,7 +1211,10 @@ void StakingMiningPage::onDonationToggled(bool enabled)
 void StakingMiningPage::onDonationPercentChanged(int percentage)
 {
     QSettings settings;
-    settings.setValue(QStringLiteral("StakingMiningDonationPercent"), percentage);
+    settings.setValue(DONATION_PERCENT_SETTING, percentage);
+    if (!m_updating && m_donation_percent->hasFocus() && m_donation_enable->isChecked()) {
+        settings.setValue(DONATION_USER_CONFIGURED_SETTING, true);
+    }
     if (m_updating || !m_wallet_model || !m_donation_enable->isChecked()) return;
     applyDonationPercentage(static_cast<unsigned int>(percentage));
     updateStatus();
@@ -1220,6 +1229,56 @@ void StakingMiningPage::applyDonationPercentage(unsigned int percentage)
         options_model->setOption(OptionsModel::DonationPercentage, qlonglong{percentage});
     }
     Q_EMIT m_wallet_model->donationPercentageChanged(percentage);
+}
+
+void StakingMiningPage::applyDonationDefaults(bool wallet_migration_complete)
+{
+    if (!m_wallet_model) return;
+
+    QSettings settings;
+    const bool user_configured = settings.value(DONATION_USER_CONFIGURED_SETTING, false).toBool();
+    if (user_configured) return;
+
+    const bool post_default_applied = settings.value(DONATION_POST_MIGRATION_DEFAULT_SETTING, false).toBool();
+    if (wallet_migration_complete) {
+        if (!post_default_applied || m_wallet_model->wallet().getDonationPercentage() == wallet::DEFAULT_DONATION_PERCENTAGE) {
+            const unsigned int percentage = wallet::DEFAULT_POST_MIGRATION_DONATION_PERCENTAGE;
+            {
+                QSignalBlocker blocker(m_donation_percent);
+                m_donation_percent->setValue(static_cast<int>(percentage));
+            }
+            settings.setValue(DONATION_PERCENT_SETTING, static_cast<int>(percentage));
+            settings.setValue(DONATION_POST_MIGRATION_DEFAULT_SETTING, true);
+            applyDonationPercentage(percentage);
+        }
+        return;
+    }
+
+    if (m_wallet_model->wallet().getDonationPercentage() != wallet::DEFAULT_DONATION_PERCENTAGE) {
+        applyDonationPercentage(wallet::DEFAULT_DONATION_PERCENTAGE);
+    }
+    if (!m_donation_percent->hasFocus()) {
+        QSignalBlocker blocker(m_donation_percent);
+        m_donation_percent->setValue(static_cast<int>(wallet::DEFAULT_DONATION_SUGGESTED_PERCENTAGE));
+    }
+    settings.setValue(DONATION_PERCENT_SETTING, static_cast<int>(wallet::DEFAULT_DONATION_SUGGESTED_PERCENTAGE));
+}
+
+void StakingMiningPage::refreshDonationControls()
+{
+    if (!m_wallet_model || !m_donation_enable || !m_donation_percent || !m_donation_status) return;
+
+    interfaces::Wallet& w = m_wallet_model->wallet();
+    const unsigned int donation_percentage = w.getDonationPercentage();
+    m_donation_enable->setChecked(donation_percentage > 0);
+    if (donation_percentage > 0 && !m_donation_percent->hasFocus()) {
+        QSignalBlocker blocker(m_donation_percent);
+        m_donation_percent->setValue(static_cast<int>(donation_percentage));
+    }
+    m_donation_status->setText(donation_percentage > 0
+        ? tr("Donating %1% of staking rewards.").arg(donation_percentage)
+        : tr("Staking reward donations are off. Default suggestion is %1%; manual opt-in is honored before migration is complete.")
+              .arg(wallet::DEFAULT_DONATION_SUGGESTED_PERCENTAGE));
 }
 
 void StakingMiningPage::onPowEnableToggled(bool /*enabled*/)
@@ -1972,15 +2031,7 @@ void StakingMiningPage::updateStatus()
         m_stake_weight->setText(tr("refreshing..."));
     }
 
-    const unsigned int donation_percentage = w.getDonationPercentage();
-    m_donation_enable->setChecked(donation_percentage > 0);
-    if (donation_percentage > 0 && !m_donation_percent->hasFocus()) {
-        QSignalBlocker blocker(m_donation_percent);
-        m_donation_percent->setValue(static_cast<int>(donation_percentage));
-    }
-    m_donation_status->setText(donation_percentage > 0
-        ? tr("Donating %1% of staking rewards.").arg(donation_percentage)
-        : tr("Staking reward donations are off."));
+    refreshDonationControls();
 
     // PoW
     const interfaces::WalletPowMiningInfo info = w.getPowMiningInfo();
@@ -2169,6 +2220,10 @@ void StakingMiningPage::updateStatus()
         goldrush_reward_amount_needing_move = migration.goldrush_reward_amount_needing_move;
         goldrush_reward_outputs_needing_move = migration.goldrush_reward_outputs_needing_move;
         staked_quantum_amount = migration.staked_quantum_amount;
+        const bool wallet_migration_complete = migration.eligible_legacy_inputs == 0 &&
+                                               migration.goldrush_reward_outputs_needing_move == 0;
+        applyDonationDefaults(wallet_migration_complete);
+        refreshDonationControls();
         m_coldstake_fund_available = direct_delegation_balance > 0;
         const QString staked_note = migration.staked_quantum_amount > 0
             ? tr(" %1 is already bonded or delegated for staking.")

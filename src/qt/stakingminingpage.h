@@ -205,6 +205,8 @@ private:
     void refreshOperatorRegistry();
     void resetStatusForNoWallet();
     void applyDonationPercentage(unsigned int percentage);
+    void applyDonationDefaults(bool wallet_migration_complete);
+    void refreshDonationControls();
     bool requestStakingOnlyUnlock();
     bool requestNormalUnlock();
     void showHelpDialog(const QString& title, const QString& html);
