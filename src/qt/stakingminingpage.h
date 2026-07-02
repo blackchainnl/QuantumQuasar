@@ -130,6 +130,7 @@ private:
     QPushButton* m_quantum_copy{nullptr};
     QPushButton* m_quantum_pubkey_copy{nullptr};
     QComboBox* m_selfstake_lock_period{nullptr};
+    QComboBox* m_selfstake_selector{nullptr};
     QLineEdit* m_selfstake_address{nullptr};
     QPushButton* m_selfstake_new{nullptr};
     QPushButton* m_selfstake_copy{nullptr};
@@ -138,6 +139,7 @@ private:
     QPushButton* m_selfstake_withdraw{nullptr};
     QLabel* m_selfstake_status{nullptr};
     QLineEdit* m_operator_address{nullptr};
+    QComboBox* m_operator_selector{nullptr};
     QLineEdit* m_operator_pubkey{nullptr};
     QPushButton* m_operator_new{nullptr};
     QPushButton* m_operator_copy{nullptr};
@@ -152,6 +154,7 @@ private:
     QLabel* m_operator_registry_status{nullptr};
     QComboBox* m_coldstake_lock_period{nullptr};
     QComboBox* m_coldstake_operator_selector{nullptr};
+    QComboBox* m_coldstake_existing_selector{nullptr};
     QLineEdit* m_coldstake_address{nullptr};
     QPushButton* m_coldstake_new{nullptr};
     QPushButton* m_coldstake_copy{nullptr};

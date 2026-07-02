@@ -834,6 +834,44 @@ BOOST_AUTO_TEST_CASE(QuantumWalletChangeKeysPersistAndStayOffReceiveBook)
     }
 }
 
+BOOST_AUTO_TEST_CASE(TieredQuantumStakeAliasesPersistAndListAfterReload)
+{
+    for (DatabaseFormat format : DATABASE_FORMATS) {
+        const std::string name{strprintf("quantum-tiered-aliases-%i", format)};
+        CTxDestination stake_dest;
+        {
+            auto wallet{TestLoadQuantumWallet(name, format)};
+            LOCK(wallet->cs_wallet);
+            auto op_dest = wallet->GetNewTieredQuantumDestination("quantum-stake", /*unbonding_blocks=*/9450);
+            BOOST_REQUIRE(op_dest);
+            stake_dest = *op_dest;
+            const auto info = wallet->GetQuantumKeyInfo(stake_dest);
+            BOOST_REQUIRE(info.has_value());
+            BOOST_CHECK(wallet->FindAddressBookEntry(stake_dest) != nullptr);
+        }
+        {
+            auto wallet{TestLoadQuantumWallet(name, format)};
+            LOCK(wallet->cs_wallet);
+            BOOST_CHECK(wallet->IsMine(stake_dest) & ISMINE_SPENDABLE);
+            const auto info = wallet->GetQuantumKeyInfo(stake_dest);
+            BOOST_REQUIRE(info.has_value());
+
+            const std::vector<QuantumKeyInfo> infos = wallet->ListQuantumKeyInfos();
+            const auto listed = std::find_if(infos.begin(), infos.end(), [&](const QuantumKeyInfo& listed_info) {
+                return listed_info.destination == stake_dest;
+            });
+            BOOST_REQUIRE(listed != infos.end());
+            const auto* entry = wallet->FindAddressBookEntry(listed->destination);
+            BOOST_REQUIRE(entry);
+            BOOST_CHECK_EQUAL(entry->GetLabel(), "quantum-stake");
+            QuantumStakeTierProgram tier;
+            BOOST_CHECK(DecodeQuantumStakeTierProgram(QUANTUM_MIGRATION_WITNESS_VERSION, listed->witness_program, tier));
+            BOOST_CHECK(tier.IsBonded());
+            BOOST_CHECK_EQUAL(tier.unbonding_blocks, 9450);
+        }
+    }
+}
+
 BOOST_AUTO_TEST_CASE(QuantumWalletKeysEncryptReloadAndSign)
 {
     for (DatabaseFormat format : DATABASE_FORMATS) {
