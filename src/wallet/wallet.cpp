@@ -95,6 +95,7 @@
 #include <condition_variable>
 #include <exception>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <thread>
 #include <tuple>
@@ -3578,8 +3579,25 @@ std::vector<QuantumKeyInfo> CWallet::ListQuantumKeyInfos() const
 {
     AssertLockHeld(cs_wallet);
     std::vector<QuantumKeyInfo> infos;
-    infos.reserve(m_quantum_keys.size());
+    infos.reserve(m_quantum_keys.size() + m_address_book.size());
+    std::set<std::vector<unsigned char>> seen_programs;
+
+    // Include wallet-backed quantum address-book aliases first. Tiered staking
+    // addresses store the private key under the base quantum program, while
+    // the user-visible bonded address lives only in the address book.
+    for (const auto& [dest, address_book] : m_address_book) {
+        const auto* witness = std::get_if<WitnessUnknown>(&dest);
+        if (!witness || !IsQuantumMigrationWitnessProgram(witness->GetWitnessVersion(), witness->GetWitnessProgram())) continue;
+
+        const auto info = GetQuantumKeyInfo(dest);
+        if (!info || !seen_programs.insert(info->witness_program).second) continue;
+        infos.push_back(*info);
+    }
+
+    // Also return raw stored keys so wallet dumps and diagnostics still include
+    // change/private quantum keys that do not have receive-book aliases.
     for (const auto& [witness_program, record] : m_quantum_keys) {
+        if (!seen_programs.insert(witness_program).second) continue;
         QuantumKeyInfo info;
         info.destination = WitnessUnknown{QUANTUM_MIGRATION_WITNESS_VERSION, witness_program};
         info.witness_program = witness_program;

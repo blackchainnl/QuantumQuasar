@@ -324,6 +324,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QPushButton* quantum_copy = page.findChild<QPushButton*>("quantumCopy");
     QPushButton* quantum_pubkey_copy = page.findChild<QPushButton*>("quantumPubkeyCopy");
     QComboBox* selfstake_lock_period = page.findChild<QComboBox*>("selfStakeLockPeriod");
+    QComboBox* selfstake_selector = page.findChild<QComboBox*>("selfStakeAddressSelector");
     QLineEdit* selfstake_address = page.findChild<QLineEdit*>("selfStakeAddress");
     QPushButton* selfstake_new = page.findChild<QPushButton*>("newSelfStakeAddress");
     QPushButton* selfstake_copy = page.findChild<QPushButton*>("selfStakeCopy");
@@ -332,6 +333,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QPushButton* selfstake_withdraw = page.findChild<QPushButton*>("selfStakeWithdraw");
     QLabel* selfstake_status = page.findChild<QLabel*>("selfStakeStatus");
     QLineEdit* coldstake_operator_address = page.findChild<QLineEdit*>("coldstakeOperatorAddress");
+    QComboBox* coldstake_operator_address_selector = page.findChild<QComboBox*>("coldstakeOperatorAddressSelector");
     QLineEdit* coldstake_operator_pubkey = page.findChild<QLineEdit*>("coldstakeOperatorPubkey");
     QPushButton* coldstake_operator_new = page.findChild<QPushButton*>("newColdstakeOperatorKey");
     QPushButton* coldstake_operator_copy = page.findChild<QPushButton*>("coldstakeOperatorCopy");
@@ -346,6 +348,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QLabel* coldstake_operator_registry_status = page.findChild<QLabel*>("coldstakeOperatorRegistryStatus");
     QComboBox* coldstake_lock_period = page.findChild<QComboBox*>("coldstakeLockPeriod");
     QComboBox* coldstake_operator_selector = page.findChild<QComboBox*>("coldstakeOperatorSelector");
+    QComboBox* coldstake_delegation_selector = page.findChild<QComboBox*>("coldstakeDelegationSelector");
     QLineEdit* coldstake_address = page.findChild<QLineEdit*>("coldstakeAddress");
     QPushButton* coldstake_new = page.findChild<QPushButton*>("newColdstakeAddress");
     QPushButton* coldstake_copy = page.findChild<QPushButton*>("coldstakeCopy");
@@ -379,6 +382,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(quantum_copy);
     QVERIFY(quantum_pubkey_copy);
     QVERIFY(selfstake_lock_period);
+    QVERIFY(selfstake_selector);
     QVERIFY(selfstake_address);
     QVERIFY(selfstake_new);
     QVERIFY(selfstake_copy);
@@ -387,6 +391,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(selfstake_withdraw);
     QVERIFY(selfstake_status);
     QVERIFY(coldstake_operator_address);
+    QVERIFY(coldstake_operator_address_selector);
     QVERIFY(coldstake_operator_pubkey);
     QVERIFY(coldstake_operator_new);
     QVERIFY(coldstake_operator_copy);
@@ -401,6 +406,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(coldstake_operator_registry_status);
     QVERIFY(coldstake_lock_period);
     QVERIFY(coldstake_operator_selector);
+    QVERIFY(coldstake_delegation_selector);
     QVERIFY(coldstake_address);
     QVERIFY(coldstake_new);
     QVERIFY(coldstake_copy);
@@ -428,11 +434,13 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(!quantum_copy->isEnabled());
     QVERIFY(!quantum_pubkey_copy->isEnabled());
     QVERIFY(selfstake_new->isEnabled());
+    QVERIFY(!selfstake_selector->isEnabled());
     QVERIFY(!selfstake_copy->isEnabled());
     QVERIFY(!selfstake_fund_amount->isEnabled());
     QVERIFY(!selfstake_fund->isEnabled());
     QVERIFY(!selfstake_withdraw->isEnabled());
     QVERIFY(coldstake_operator_new->isEnabled());
+    QVERIFY(!coldstake_operator_address_selector->isEnabled());
     QVERIFY(!coldstake_operator_copy->isEnabled());
     QVERIFY(!coldstake_operator_use->isEnabled());
     QVERIFY(!coldstake_operator_bond_amount->isEnabled());
@@ -442,6 +450,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(!coldstake_operator_select->isEnabled());
     QCOMPARE(coldstake_operator_registry->rowCount(), 0);
     QVERIFY(!coldstake_operator_selector->currentData().toString().size());
+    QVERIFY(!coldstake_delegation_selector->isEnabled());
     QVERIFY(!coldstake_new->isEnabled());
     QVERIFY(!coldstake_copy->isEnabled());
 
@@ -468,6 +477,8 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(IsValidDestination(gui_selfstake_dest));
     QVERIFY(IsQuantumMigrationDestination(gui_selfstake_dest));
     QVERIFY(selfstake_copy->isEnabled());
+    QVERIFY(selfstake_selector->isEnabled());
+    QVERIFY(selfstake_selector->findData(selfstake_address->text()) >= 0);
     QVERIFY(selfstake_fund_amount->isEnabled());
     QVERIFY(selfstake_fund->isEnabled());
     QVERIFY(selfstake_withdraw->isEnabled());
@@ -483,6 +494,8 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(IsQuantumMigrationDestination(gui_operator_dest));
     QVERIFY(IsHex(coldstake_operator_pubkey->text().toStdString()));
     QCOMPARE(coldstake_operator_pubkey->text().size(), int{ML_DSA::PUBLICKEY_BYTES * 2});
+    QVERIFY(coldstake_operator_address_selector->isEnabled());
+    QVERIFY(coldstake_operator_address_selector->findData(coldstake_operator_address->text()) >= 0);
     QVERIFY(coldstake_operator_copy->isEnabled());
     QVERIFY(coldstake_operator_use->isEnabled());
     QVERIFY(coldstake_operator_status->text().contains(QString("30-day")));
@@ -503,6 +516,8 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(IsQuantumColdStakeDestination(gui_coldstake_dest));
     QCOMPARE(quantum_coldstake_count->text(), QString("1"));
     QVERIFY(quantum_address_count->text().toInt() >= 2);
+    QVERIFY(coldstake_delegation_selector->isEnabled());
+    QVERIFY(coldstake_delegation_selector->findData(coldstake_address->text()) >= 0);
     QVERIFY(coldstake_copy->isEnabled());
     QVERIFY(coldstake_status->text().contains(QString("Cold-stake address created")));
 
