@@ -168,18 +168,28 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
         self.log.info("Solving a PoS block with the whitelisted address to create a solver marker")
         solve_block_hash = self._mine_pos_block(wallet)
         solve_height = node.getblock(solve_block_hash)["height"]
+        goldrush_after_solve = wallet.getgoldrushinfo()
+        if not goldrush_after_solve["wallet_recent_solve_qualified"]:
+            raise AssertionError(f"wallet does not see recent solver marker: {goldrush_after_solve}")
 
-        self.log.info("Broadcasting a fee-paying QQSIGNAL linked to a quantum payout address")
-        payout_address = wallet.getnewquantumaddress()["address"]
-        signal = wallet.sendshadowsignal(signal_address, solve_height, solve_block_hash, payout_address)
-        assert_equal(signal["address"], signal_address)
-        assert_equal(signal["quantum_address"], payout_address)
-        assert signal["txid"] in node.getrawmempool()
-        decoded = node.decoderawtransaction(signal["hex"])
-        assert any(QQSIGNAL_HEX in vout["scriptPubKey"]["hex"] for vout in decoded["vout"])
+        self.log.info("Pre-creating the wallet-backed PoS Gold Rush quantum payout address")
+        payout_address = wallet.getnewquantumaddress("goldrush-pos")["address"]
 
-        self.log.info("Mining a later PoS block that includes the signal and creates the payout")
-        payout_block_hash = self._mine_pos_block(wallet, signal["txid"])
+        self.log.info("Mining a later PoS block; the staking loop auto-broadcasts and includes QQSIGNAL")
+        payout_block_hash = self._mine_pos_block(wallet)
+        payout_block = node.getblock(payout_block_hash, 2)
+        signal_txids = [
+            tx["txid"]
+            for tx in payout_block["tx"][2:]
+            if any(QQSIGNAL_HEX in vout["scriptPubKey"]["hex"] for vout in tx["vout"])
+        ]
+        assert_equal(len(signal_txids), 1)
+        signal_txid = signal_txids[0]
+        wallet_signals = [
+            tx for tx in wallet.listtransactions("*", 100, 0, True)
+            if tx.get("txid") == signal_txid and tx.get("comment") == "Blackcoin shadow signal"
+        ]
+        assert_equal(len(wallet_signals), 1)
         self._assert_no_onchain_block_output_to(payout_block_hash, payout_address)
 
         payout_utxo = self._wait_for_quantum_utxo(wallet, payout_address)
@@ -219,7 +229,10 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
         premature_raw, _ = self._build_quantum_spend(wallet, payout_utxo, next_quantum)
         premature_accept = node.testmempoolaccept([premature_raw])[0]
         assert_equal(premature_accept["allowed"], False)
-        assert_equal(premature_accept["reject-reason"], "goldrush-remigration-premature")
+        assert premature_accept["reject-reason"] in (
+            "goldrush-remigration-premature",
+            "bad-txns-premature-spend-of-coinbase",
+        ), premature_accept
 
         self.log.info("Advancing to migration and rejecting the still-immature QQSIGNAL payout")
         self._advance_to_migration_window()

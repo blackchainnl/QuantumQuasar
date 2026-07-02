@@ -7,6 +7,7 @@
 
 #include <index/txindex.h>
 #include <addresstype.h>
+#include <chain.h>
 #include <common/args.h>
 #include <consensus/demurrage.h>
 #include <crypto/mldsa.h>
@@ -102,6 +103,203 @@ bool HasUnderCapRedelegationAlternative(const CCoinsViewCache& view, const uint2
         candidates.push_back(std::move(candidate));
     }
     return HasUnderCapQuantumRedelegationCandidate(candidates, delegation_amount);
+}
+
+struct AutoShadowSignalCandidate
+{
+    CScript target;
+    uint32_t solve_height{0};
+    uint256 solve_hash;
+};
+
+static constexpr const char* SHADOW_SIGNAL_COMMENT{"Blackcoin shadow signal"};
+static constexpr const char* SHADOW_SIGNAL_PAYOUT_LABEL{"goldrush-pos"};
+
+bool HasPendingShadowSignal(CWallet& wallet) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
+{
+    for (const auto& [txid, wtx] : wallet.mapWallet) {
+        const auto comment = wtx.mapValue.find("comment");
+        if (comment == wtx.mapValue.end() || comment->second != SHADOW_SIGNAL_COMMENT) continue;
+        if (wtx.isAbandoned() || wtx.isConflicted()) continue;
+        if (wallet.GetTxDepthInMainChain(wtx) == 0) return true;
+    }
+    return false;
+}
+
+bool EnsureShadowSignalPayout(CWallet& wallet, CScript& payout_script, std::string& payout_address, bilingual_str& error)
+{
+    {
+        LOCK(wallet.cs_wallet);
+        for (const auto& [dest, entry] : wallet.m_address_book) {
+            if (entry.IsChange() || entry.GetLabel() != SHADOW_SIGNAL_PAYOUT_LABEL) continue;
+            if (!IsValidDestination(dest) || !IsQuantumMigrationDestination(dest)) continue;
+            if (wallet.IsMine(dest) == ISMINE_NO) continue;
+            payout_address = EncodeDestination(dest);
+            payout_script = GetScriptForDestination(dest);
+            return true;
+        }
+    }
+
+    auto dest = wallet.GetNewQuantumDestination(SHADOW_SIGNAL_PAYOUT_LABEL);
+    if (!dest) {
+        error = util::ErrorString(dest);
+        return false;
+    }
+    payout_address = EncodeDestination(*dest);
+    payout_script = GetScriptForDestination(*dest);
+    wallet.WalletLogPrintf("Gold Rush PoS signaler created payout address %s. Back up the wallet.\n", payout_address);
+    return true;
+}
+
+bool FindAutoShadowSignalCandidate(CWallet& wallet, AutoShadowSignalCandidate& candidate) EXCLUSIVE_LOCKS_REQUIRED(::cs_main, wallet.cs_wallet)
+{
+    const CBlockIndex* tip = wallet.chain().getTip();
+    if (!tip) return false;
+    const Consensus::Params& consensus = Params().GetConsensus();
+    if (!consensus.IsGoldRushEpoch(tip->GetMedianTimePast()) ||
+        tip->nHeight < SHADOW_REWARD_START_HEIGHT ||
+        tip->nHeight > SHADOW_REWARD_END_HEIGHT) {
+        LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: inactive at height=%d\n", tip->nHeight);
+        return false;
+    }
+    if (wallet.m_shadow_signal_last_auto_scan_height >= tip->nHeight) {
+        LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: already scanned height=%d\n", tip->nHeight);
+        return false;
+    }
+    wallet.m_shadow_signal_last_auto_scan_height = tip->nHeight;
+    if (HasPendingShadowSignal(wallet)) {
+        LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: pending signal already exists\n");
+        return false;
+    }
+
+    const CCoinsViewCache& view = wallet.chain().getCoinsTip();
+    const std::map<CScript, CScript> active_signals = GetActiveShadowSignalPayouts(view, tip);
+    const std::map<CScript, ShadowSolverActivity> recent_solvers = GetRecentShadowSolverActivity(view, tip);
+    if (recent_solvers.empty()) {
+        LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: no recent solver markers\n");
+        return false;
+    }
+
+    CCoinControl coin_control;
+    coin_control.m_avoid_address_reuse = false;
+    std::vector<COutput> outputs = AvailableCoins(wallet, &coin_control).All();
+    std::sort(outputs.begin(), outputs.end(), [](const COutput& a, const COutput& b) {
+        if (a.txout.nValue != b.txout.nValue) return a.txout.nValue < b.txout.nValue;
+        return a.outpoint < b.outpoint;
+    });
+
+    const CChain& active_chain = wallet.chain().chainman().ActiveChain();
+    for (const COutput& output : outputs) {
+        if (output.txout.nValue <= 0 || output.input_bytes < 0) continue;
+        const CScript& target = output.txout.scriptPubKey;
+        if (target.empty() || target.IsUnspendable()) continue;
+        if (!IsWhitelisted(view, target)) continue;
+        if (active_signals.count(target)) continue;
+        const auto solver_it = recent_solvers.find(target);
+        if (solver_it == recent_solvers.end()) continue;
+        const CBlockIndex* solved = active_chain[solver_it->second.height];
+        if (!solved) continue;
+
+        candidate.target = target;
+        candidate.solve_height = solver_it->second.height;
+        candidate.solve_hash = solved->GetBlockHash();
+        LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: candidate found solve_height=%u\n", candidate.solve_height);
+        return true;
+    }
+    LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: no spendable whitelisted recent-solver output (recent=%u active=%u)\n",
+             recent_solvers.size(), active_signals.size());
+    return false;
+}
+
+bool BuildAutoShadowSignalTransaction(CWallet& wallet, const AutoShadowSignalCandidate& candidate, const CScript& payout_script, CMutableTransaction& signal_tx, std::map<COutPoint, Coin>& coins, CAmount& fee, bilingual_str& error)
+{
+    std::vector<unsigned char> signal;
+    if (!BuildShadowSignalData(candidate.target, payout_script, candidate.solve_height, candidate.solve_hash, signal)) {
+        error = _("Failed to build Gold Rush PoS signal payload.");
+        return false;
+    }
+
+    CTxDestination target_dest;
+    if (!ExtractDestination(candidate.target, target_dest) || !IsValidDestination(target_dest)) {
+        error = _("Gold Rush PoS signal target does not resolve to a wallet address.");
+        return false;
+    }
+
+    CCoinControl coin_control;
+    coin_control.destChange = target_dest;
+    coin_control.m_allow_other_inputs = false;
+    coin_control.m_avoid_address_reuse = false;
+    signal_tx = CMutableTransaction();
+    fee = 0;
+    coins.clear();
+
+    LOCK2(::cs_main, wallet.cs_wallet);
+    const CBlockIndex* tip = wallet.chain().getTip();
+    if (!tip) return false;
+    const CCoinsViewCache& view = wallet.chain().getCoinsTip();
+    if (GetActiveShadowSignalPayouts(view, tip).count(candidate.target)) {
+        LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: candidate became active before build\n");
+        return false;
+    }
+    bool has_solver_activity = HasRecentShadowSolverActivity(view, tip, candidate.target, candidate.solve_height, candidate.solve_hash);
+    if (!has_solver_activity && candidate.solve_height == static_cast<uint32_t>(tip->nHeight)) {
+        const auto recent_solvers = GetRecentShadowSolverActivity(view, tip);
+        const auto it = recent_solvers.find(candidate.target);
+        has_solver_activity = it != recent_solvers.end() && it->second.height == candidate.solve_height;
+    }
+    if (!has_solver_activity) {
+        LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: candidate solve marker missing before build\n");
+        return false;
+    }
+    if (HasPendingShadowSignal(wallet)) {
+        LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: pending signal appeared before build\n");
+        return false;
+    }
+
+    const int64_t current_time = GetAdjustedTimeSeconds();
+    const CFeeRate fee_rate = GetMinimumFeeRate(wallet, coin_control, current_time);
+    std::vector<COutput> outputs = AvailableCoins(wallet, &coin_control).All();
+    std::sort(outputs.begin(), outputs.end(), [](const COutput& a, const COutput& b) {
+        if (a.txout.nValue != b.txout.nValue) return a.txout.nValue < b.txout.nValue;
+        return a.outpoint < b.outpoint;
+    });
+
+    for (const COutput& output : outputs) {
+        if (output.txout.scriptPubKey != candidate.target || output.input_bytes < 0) continue;
+
+        CMutableTransaction tx;
+        tx.nVersion = CTransaction::CURRENT_VERSION;
+        tx.nTime = current_time;
+        static constexpr uint32_t MAX_SEQUENCE_NONFINAL = 0xfffffffe;
+        tx.vin.emplace_back(output.outpoint, CScript(), MAX_SEQUENCE_NONFINAL);
+        tx.vout.emplace_back(output.txout.nValue, candidate.target);
+        tx.vout.emplace_back(0, CScript() << OP_RETURN << signal);
+
+        const TxSize tx_size = CalculateMaximumSignedTxSize(CTransaction(tx), &wallet, &coin_control);
+        if (tx_size.vsize <= 0) continue;
+        const CAmount candidate_fee = std::max(GetMinFee(static_cast<size_t>(tx_size.vsize), static_cast<uint32_t>(current_time)), fee_rate.GetFee(static_cast<uint32_t>(tx_size.vsize)));
+        const CAmount candidate_change = output.txout.nValue - candidate_fee;
+        CTxOut change_out(candidate_change, candidate.target);
+        if (!MoneyRange(candidate_change) || candidate_change <= 0 || IsDust(change_out, wallet.chain().relayDustFee())) continue;
+        if (candidate_fee > wallet.m_default_max_tx_fee) {
+            error = strprintf(_("Gold Rush PoS signal fee exceeds wallet max transaction fee (%s)."), FormatMoney(wallet.m_default_max_tx_fee));
+            return false;
+        }
+
+        const auto tx_it = wallet.mapWallet.find(output.outpoint.hash);
+        if (tx_it == wallet.mapWallet.end() || output.outpoint.n >= tx_it->second.tx->vout.size()) continue;
+        const CWalletTx& wtx = tx_it->second;
+        const int prev_height = wtx.state<TxStateConfirmed>() ? wtx.state<TxStateConfirmed>()->confirmed_block_height : 0;
+        coins.emplace(output.outpoint, Coin(output.txout, prev_height, wtx.IsCoinBase(), wtx.IsCoinStake(), wtx.nTimeSmart));
+
+        tx.vout[0].nValue = candidate_change;
+        signal_tx = std::move(tx);
+        fee = candidate_fee;
+        return true;
+    }
+
+    error = _("No spendable non-dust UTXO found for the Gold Rush PoS signal address.");
+    return false;
 }
 
 QuantumRedelegationPolicy AutoRedelegationPolicyFromArgs()
@@ -744,6 +942,80 @@ int MaybeAutoDemurrageAttest(CWallet& wallet)
     return submitted;
 }
 
+int MaybeAutoShadowSignal(CWallet& wallet)
+{
+    if (!gArgs.GetBoolArg("-qqautoshadowsignal", true)) return 0;
+    if (!wallet.m_enabled_staking.load() || wallet.IsLocked() || wallet.m_wallet_unlock_staking_only || wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
+        return 0;
+    }
+
+    AutoShadowSignalCandidate candidate;
+    {
+        LOCK2(::cs_main, wallet.cs_wallet);
+        if (!FindAutoShadowSignalCandidate(wallet, candidate)) return 0;
+    }
+
+    CScript payout_script;
+    std::string payout_address;
+    bilingual_str error;
+    if (!EnsureShadowSignalPayout(wallet, payout_script, payout_address, error)) {
+        wallet.WalletLogPrintf("Gold Rush PoS signal skipped: %s\n", error.original);
+        return 0;
+    }
+
+    CMutableTransaction signal_tx;
+    std::map<COutPoint, Coin> coins;
+    CAmount fee{0};
+    if (!BuildAutoShadowSignalTransaction(wallet, candidate, payout_script, signal_tx, coins, fee, error)) {
+        if (!error.empty()) {
+            wallet.WalletLogPrintf("Gold Rush PoS signal skipped: %s\n", error.original);
+        }
+        return 0;
+    }
+
+    std::map<int, bilingual_str> input_errors;
+    if (!wallet.SignTransaction(signal_tx, coins, SIGHASH_DEFAULT, input_errors)) {
+        if (!input_errors.empty()) {
+            error = strprintf(_("Signing Gold Rush PoS signal failed: %s"), input_errors.begin()->second.original);
+        } else {
+            error = _("Signing Gold Rush PoS signal failed.");
+        }
+        wallet.WalletLogPrintf("%s\n", error.original);
+        return 0;
+    }
+
+    CTransactionRef tx = MakeTransactionRef(std::move(signal_tx));
+    {
+        ChainstateManager& chainman = wallet.chain().chainman();
+        LOCK(::cs_main);
+        const MempoolAcceptResult accept = chainman.ProcessTransaction(tx, /*test_accept=*/true);
+        if (accept.m_result_type != MempoolAcceptResult::ResultType::VALID) {
+            wallet.WalletLogPrintf("Gold Rush PoS signal rejected: %s\n", accept.m_state.ToString());
+            return 0;
+        }
+    }
+
+    mapValue_t map_value;
+    map_value["comment"] = SHADOW_SIGNAL_COMMENT;
+    try {
+        wallet.CommitTransaction(tx, std::move(map_value), {});
+    } catch (const std::exception& e) {
+        wallet.WalletLogPrintf("Broadcasting Gold Rush PoS signal failed: %s\n", e.what());
+        return 0;
+    }
+
+    CTxDestination signal_dest;
+    std::string signal_address;
+    if (ExtractDestination(candidate.target, signal_dest) && IsValidDestination(signal_dest)) {
+        signal_address = EncodeDestination(signal_dest);
+    } else {
+        signal_address = HexStr(candidate.target);
+    }
+    wallet.WalletLogPrintf("Gold Rush PoS signal submitted: txid=%s address=%s solve_height=%u payout=%s fee=%s\n",
+                           tx->GetHash().ToString(), signal_address, candidate.solve_height, payout_address, FormatMoney(fee));
+    return 1;
+}
+
 int MaybeAutoRedelegateQuantumColdStake(CWallet& wallet)
 {
     if (!gArgs.GetBoolArg("-qqautoredelegate", true)) return 0;
@@ -1168,7 +1440,6 @@ bool SelectCoinsForStaking(const CWallet& wallet, CAmount& nTargetValue, std::se
 typedef std::vector<unsigned char> valtype;
 bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterval, CMutableTransaction& txNew, CAmount& nFees, CTxDestination destination, const std::vector<CTransactionRef>& selected_txs)
 {
-    (void)selected_txs;
     bool fAllowWatchOnly = wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS);
     CBlockIndex* pindexPrev = wallet.chain().getTip();
     arith_uint256 bnTargetPerCoinDay;
@@ -1208,6 +1479,14 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
     if (setCoins.empty())
         return false;
 
+    std::set<COutPoint> selected_tx_inputs;
+    for (const CTransactionRef& tx : selected_txs) {
+        if (!tx) continue;
+        for (const CTxIn& txin : tx->vin) {
+            if (!txin.prevout.IsNull()) selected_tx_inputs.insert(txin.prevout);
+        }
+    }
+
     CAmount nCredit = 0;
     bool fKernelFound = false;
     CScript scriptPubKeyKernel, scriptPubKeyOut;
@@ -1224,6 +1503,7 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
 
     for (const std::pair<const CWalletTx*, unsigned int> &pcoin : setCoins)
     {
+        if (selected_tx_inputs.count(COutPoint(pcoin.first->GetHash(), pcoin.second))) continue;
         if (final_quantum_lockout &&
             !IsQuantumMigrationScript(pcoin.first->tx->vout[pcoin.second].scriptPubKey) &&
             !IsQuantumColdStakeScript(pcoin.first->tx->vout[pcoin.second].scriptPubKey)) {
@@ -1233,7 +1513,7 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
         uint256 blockHash;
         CTransactionRef tx;
         if (!g_txindex->FindTx(pcoin.first->GetHash(), blockHash, tx)) {
-            LogPrintf("couldnt retrieve tx %s\n", *pcoin.first->GetHash().ToString().c_str());
+            LogPrintf("couldnt retrieve tx %s\n", pcoin.first->GetHash().ToString());
             continue;
         }
 
@@ -1386,10 +1666,11 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
 
     for (const std::pair<const CWalletTx*, unsigned int> &pcoin : setCoins)
     {
+        if (selected_tx_inputs.count(COutPoint(pcoin.first->GetHash(), pcoin.second))) continue;
         uint256 blockHash;
         CTransactionRef tx;
         if (!g_txindex->FindTx(pcoin.first->GetHash(), blockHash, tx)) {
-            LogPrintf("couldnt retrieve tx %s\n", *pcoin.first->GetHash().ToString().c_str());
+            LogPrintf("couldnt retrieve tx %s\n", pcoin.first->GetHash().ToString());
             continue;
         }
 
