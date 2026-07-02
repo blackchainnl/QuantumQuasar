@@ -116,6 +116,11 @@ private:
     QLabel* m_goldrush_badge{nullptr};
     QLabel* m_pos_goldrush_status{nullptr};
     QLabel* m_staking_summary{nullptr};
+    QLabel* m_dashboard_action{nullptr};
+    QLabel* m_dashboard_wallet{nullptr};
+    QLabel* m_dashboard_pos{nullptr};
+    QLabel* m_dashboard_pow{nullptr};
+    QLabel* m_dashboard_coldstake{nullptr};
     QCheckBox* m_donation_enable{nullptr};
     QSpinBox* m_donation_percent{nullptr};
     QLabel* m_donation_status{nullptr};

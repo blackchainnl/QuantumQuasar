@@ -34,11 +34,13 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHeaderView>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
+#include <QScrollArea>
 #include <QSize>
 #include <QSizePolicy>
 #include <QSignalBlocker>
@@ -274,7 +276,22 @@ QSize StakingMiningPage::minimumSizeHint() const
 
 void StakingMiningPage::setupUi()
 {
-    auto* outer = new QVBoxLayout(this);
+    auto* page = new QVBoxLayout(this);
+    page->setContentsMargins(0, 0, 0, 0);
+
+    auto* scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
+    auto* content = new QWidget(scroll);
+    auto* outer = new QVBoxLayout(content);
+    outer->setContentsMargins(12, 12, 12, 12);
+    outer->setSpacing(10);
+    scroll->setWidget(content);
+    page->addWidget(scroll);
+
     auto configureLineEdit = [](QLineEdit* edit) {
         edit->setMinimumWidth(0);
         edit->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
@@ -284,6 +301,64 @@ void StakingMiningPage::setupUi()
         label->setTextFormat(Qt::RichText);
         label->setStyleSheet(QStringLiteral("QLabel { background: #f5f7fb; border: 1px solid #d8dee9; border-radius: 6px; padding: 8px; }"));
     };
+    auto configureStatusCard = [](QLabel* label) {
+        label->setWordWrap(true);
+        label->setTextFormat(Qt::RichText);
+        label->setMinimumHeight(74);
+        label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        label->setStyleSheet(QStringLiteral(
+            "QLabel { background: #ffffff; border: 1px solid #cfd8e3; border-radius: 6px; padding: 10px; }"
+            "QLabel[attention=\"true\"] { background: #fff7e6; border-color: #d8a441; }"));
+    };
+
+    auto* dashboardBox = new QGroupBox(tr("Staking & Mining dashboard"), this);
+    auto* dashboard = new QGridLayout(dashboardBox);
+    dashboard->setHorizontalSpacing(8);
+    dashboard->setVerticalSpacing(8);
+    m_dashboard_action = new QLabel(tr("Load a wallet to see the next recommended action."), dashboardBox);
+    m_dashboard_action->setObjectName(QStringLiteral("stakingMiningDashboardAction"));
+    m_dashboard_action->setWordWrap(true);
+    m_dashboard_action->setTextFormat(Qt::RichText);
+    m_dashboard_action->setStyleSheet(QStringLiteral("QLabel { background: #eef6ff; border: 1px solid #b8d7f5; border-radius: 6px; padding: 10px; }"));
+    m_dashboard_wallet = new QLabel(tr("Wallet status will appear here."), dashboardBox);
+    m_dashboard_wallet->setObjectName(QStringLiteral("stakingMiningDashboardWallet"));
+    configureStatusCard(m_dashboard_wallet);
+    m_dashboard_pos = new QLabel(tr("PoS Gold Rush status will appear here."), dashboardBox);
+    m_dashboard_pos->setObjectName(QStringLiteral("stakingMiningDashboardPos"));
+    configureStatusCard(m_dashboard_pos);
+    m_dashboard_pow = new QLabel(tr("PoW miner status will appear here."), dashboardBox);
+    m_dashboard_pow->setObjectName(QStringLiteral("stakingMiningDashboardPow"));
+    configureStatusCard(m_dashboard_pow);
+    m_dashboard_coldstake = new QLabel(tr("Quantum staking status will appear here."), dashboardBox);
+    m_dashboard_coldstake->setObjectName(QStringLiteral("stakingMiningDashboardColdstake"));
+    configureStatusCard(m_dashboard_coldstake);
+    dashboard->addWidget(m_dashboard_action, 0, 0, 1, 2);
+    dashboard->addWidget(m_dashboard_wallet, 1, 0);
+    dashboard->addWidget(m_dashboard_pos, 1, 1);
+    dashboard->addWidget(m_dashboard_pow, 2, 0);
+    dashboard->addWidget(m_dashboard_coldstake, 2, 1);
+    dashboard->setColumnStretch(0, 1);
+    dashboard->setColumnStretch(1, 1);
+    outer->addWidget(dashboardBox);
+
+    auto* workflowTabs = new QTabWidget(this);
+    workflowTabs->setObjectName(QStringLiteral("stakingMiningWorkflowTabs"));
+    auto* miningTab = new QWidget(workflowTabs);
+    auto* miningLayout = new QVBoxLayout(miningTab);
+    miningLayout->setContentsMargins(8, 8, 8, 8);
+    miningLayout->setSpacing(10);
+    auto* coldstakeTab = new QWidget(workflowTabs);
+    auto* coldstakeLayout = new QVBoxLayout(coldstakeTab);
+    coldstakeLayout->setContentsMargins(8, 8, 8, 8);
+    coldstakeLayout->setSpacing(10);
+    auto* advancedTab = new QWidget(workflowTabs);
+    auto* advancedLayout = new QVBoxLayout(advancedTab);
+    advancedLayout->setContentsMargins(8, 8, 8, 8);
+    advancedLayout->setSpacing(10);
+    workflowTabs->addTab(miningTab, tr("Gold Rush"));
+    workflowTabs->addTab(coldstakeTab, tr("Quantum staking"));
+    workflowTabs->addTab(advancedTab, tr("Migration & assets"));
+    outer->addWidget(workflowTabs);
 
     // ---- Staking section ----
     auto* stakingBox = new QGroupBox(tr("Staking"), this);
@@ -349,7 +424,7 @@ void StakingMiningPage::setupUi()
     sgrid->addWidget(new QLabel(tr("Donation:"), stakingBox), 10, 0);
     sgrid->addWidget(m_donation_percent, 10, 1);
     sgrid->addWidget(m_donation_status, 11, 0, 1, 2);
-    outer->addWidget(stakingBox);
+    miningLayout->addWidget(stakingBox);
 
     // ---- Gold Rush Proof-of-Work section ----
     auto* powBox = new QGroupBox(tr("Gold Rush Proof-of-Work mining"), this);
@@ -418,7 +493,8 @@ void StakingMiningPage::setupUi()
     pgrid->addWidget(m_pow_status, r++, 1, 1, 2);
     pgrid->addWidget(m_pow_apply, r++, 1);
     pgrid->addWidget(m_pow_warning, r++, 0, 1, 3);
-    outer->addWidget(powBox);
+    miningLayout->addWidget(powBox);
+    miningLayout->addStretch();
 
     // ---- Quantum cold-staking section ----
     auto* coldstakeBox = new QGroupBox(tr("Quantum staking and cold staking"), this);
@@ -481,27 +557,27 @@ void StakingMiningPage::setupUi()
     m_selfstake_status->setObjectName(QStringLiteral("selfStakeStatus"));
     m_selfstake_status->setWordWrap(true);
 
-    auto* operatorHeading = new QLabel(tr("<b>Operate a cold-staking node</b><br>Create a fixed 30-day operator bond, keep this wallet online, and let delegators select you from the verified registry."), coldstakeBox);
+    auto* operatorHeading = new QLabel(tr("<b>Run a cold-staking node</b><br>Create the fixed 30-day node bond, keep this wallet online, and delegators can select this node from the verified registry after normal confirmations."), coldstakeBox);
     operatorHeading->setTextFormat(Qt::RichText);
     m_operator_address = new QLineEdit(coldstakeBox);
     m_operator_address->setObjectName(QStringLiteral("coldstakeOperatorAddress"));
     configureLineEdit(m_operator_address);
     m_operator_address->setReadOnly(true);
-    m_operator_address->setToolTip(tr("Wallet-backed quantum address for this operator key."));
+    m_operator_address->setToolTip(tr("Wallet-backed quantum address for this cold-staking node bond."));
     m_operator_selector = new QComboBox(coldstakeBox);
     m_operator_selector->setObjectName(QStringLiteral("coldstakeOperatorAddressSelector"));
     m_operator_selector->setEditable(false);
     m_operator_selector->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_operator_selector->setToolTip(tr("Select a previously-created 30-day cold-stake operator bond key."));
-    m_operator_selector->addItem(tr("No saved operator keys"), QString());
+    m_operator_selector->setToolTip(tr("Select a previously-created 30-day cold-staking node bond key."));
+    m_operator_selector->addItem(tr("No saved node keys"), QString());
     m_operator_pubkey = new QLineEdit(coldstakeBox);
     m_operator_pubkey->setObjectName(QStringLiteral("coldstakeOperatorPubkey"));
     configureLineEdit(m_operator_pubkey);
     m_operator_pubkey->setReadOnly(true);
-    m_operator_pubkey->setToolTip(tr("Public ML-DSA staking key to give delegators. Keep the wallet online to stake for delegated cold deposits."));
-    m_operator_new = new QPushButton(tr("Create 30-day operator bond key"), coldstakeBox);
+    m_operator_pubkey->setToolTip(tr("Public ML-DSA staking key used by delegators to verify this node. Keep the wallet online to stake delegated cold deposits."));
+    m_operator_new = new QPushButton(tr("Create node key"), coldstakeBox);
     m_operator_new->setObjectName(QStringLiteral("newColdstakeOperatorKey"));
-    m_operator_copy = new QPushButton(tr("Copy operator key"), coldstakeBox);
+    m_operator_copy = new QPushButton(tr("Copy node key"), coldstakeBox);
     m_operator_copy->setObjectName(QStringLiteral("coldstakeOperatorCopy"));
     m_operator_use_for_delegation = new QPushButton(tr("Use for delegation"), coldstakeBox);
     m_operator_use_for_delegation->setObjectName(QStringLiteral("coldstakeOperatorUseForDelegation"));
@@ -509,21 +585,21 @@ void StakingMiningPage::setupUi()
     m_operator_bond_amount->setObjectName(QStringLiteral("coldstakeOperatorBondAmount"));
     m_operator_bond_amount->SetMinValue(CENT);
     m_operator_bond_amount->setValue(COIN);
-    m_operator_bond_amount->setToolTip(tr("Amount to send to this wallet-backed 30-day operator bond address. The protocol only requires a nonzero live bond output."));
-    m_operator_fund = new QPushButton(tr("Activate operator"), coldstakeBox);
+    m_operator_bond_amount->setToolTip(tr("Amount to send to this wallet-backed 30-day node bond address. The protocol only requires a nonzero live bond output."));
+    m_operator_fund = new QPushButton(tr("Activate node"), coldstakeBox);
     m_operator_fund->setObjectName(QStringLiteral("coldstakeOperatorFund"));
-    m_operator_fund->setToolTip(tr("Create, sign, and broadcast a wallet transaction funding this operator bond address."));
-    m_operator_withdraw = new QPushButton(tr("Stop operator"), coldstakeBox);
+    m_operator_fund->setToolTip(tr("Create, sign, and broadcast a wallet transaction funding this node bond address."));
+    m_operator_withdraw = new QPushButton(tr("Stop node"), coldstakeBox);
     m_operator_withdraw->setObjectName(QStringLiteral("coldstakeOperatorWithdraw"));
     m_operator_withdraw->setToolTip(tr("If bonded, starts the 30-day unbonding spend. If already unbonded and mature, withdraws to a fresh quantum address."));
-    m_operator_status = new QLabel(tr("No operator key selected. Fund a 30-day commitment bond; once the bond has normal confirmations, the operator is available for delegation."), coldstakeBox);
+    m_operator_status = new QLabel(tr("No node key selected. Fund a 30-day commitment bond; once the bond has normal confirmations, the node is available for delegation."), coldstakeBox);
     m_operator_status->setObjectName(QStringLiteral("coldstakeOperatorStatus"));
     m_operator_status->setWordWrap(true);
 
     m_operator_registry = new QTableWidget(coldstakeBox);
     m_operator_registry->setObjectName(QStringLiteral("coldstakeOperatorRegistry"));
     m_operator_registry->setColumnCount(5);
-    m_operator_registry->setHorizontalHeaderLabels(QStringList{tr("Operator"), tr("Delegated"), tr("Share"), tr("Status"), tr("Cap")});
+    m_operator_registry->setHorizontalHeaderLabels(QStringList{tr("Node"), tr("Delegated"), tr("Share"), tr("Status"), tr("Cap")});
     m_operator_registry->horizontalHeader()->setStretchLastSection(true);
     m_operator_registry->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_operator_registry->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -532,15 +608,15 @@ void StakingMiningPage::setupUi()
     m_operator_registry->setAlternatingRowColors(true);
     m_operator_registry->setMinimumHeight(96);
     m_operator_registry->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
-    m_operator_registry_refresh = new QPushButton(tr("Refresh operators"), coldstakeBox);
+    m_operator_registry_refresh = new QPushButton(tr("Refresh nodes"), coldstakeBox);
     m_operator_registry_refresh->setObjectName(QStringLiteral("coldstakeOperatorRefresh"));
-    m_operator_registry_use = new QPushButton(tr("Select operator"), coldstakeBox);
+    m_operator_registry_use = new QPushButton(tr("Select node"), coldstakeBox);
     m_operator_registry_use->setObjectName(QStringLiteral("coldstakeOperatorSelect"));
-    m_operator_registry_status = new QLabel(tr("Operator registry not loaded."), coldstakeBox);
+    m_operator_registry_status = new QLabel(tr("Node registry not loaded."), coldstakeBox);
     m_operator_registry_status->setObjectName(QStringLiteral("coldstakeOperatorRegistryStatus"));
     m_operator_registry_status->setWordWrap(true);
 
-    auto* delegateHeading = new QLabel(tr("<b>Delegate coins to an operator</b><br>Select a verified operator, create a wallet-backed delegation address, then fund it. This wallet keeps the owner-spend key."), coldstakeBox);
+    auto* delegateHeading = new QLabel(tr("<b>Delegate coins to a node</b><br>Select a verified node, create a wallet-backed delegation address, then fund it. This wallet keeps the owner-spend key."), coldstakeBox);
     delegateHeading->setTextFormat(Qt::RichText);
     m_coldstake_quantum_available = new QLabel(QStringLiteral("-"), coldstakeBox);
     m_coldstake_quantum_available->setObjectName(QStringLiteral("coldstakeQuantumAvailable"));
@@ -559,8 +635,8 @@ void StakingMiningPage::setupUi()
     m_coldstake_operator_selector->setObjectName(QStringLiteral("coldstakeOperatorSelector"));
     m_coldstake_operator_selector->setEditable(false);
     m_coldstake_operator_selector->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_coldstake_operator_selector->setToolTip(tr("Choose a verified cold-staking operator from the local registry, or select this wallet's operator key after creating one."));
-    m_coldstake_operator_selector->addItem(tr("Refresh operators to select a cold-staking operator"), QString());
+    m_coldstake_operator_selector->setToolTip(tr("Choose a verified cold-staking node from the local registry, or select this wallet's node key after creating one."));
+    m_coldstake_operator_selector->addItem(tr("Refresh nodes to select a cold-staking node"), QString());
     m_coldstake_existing_selector = new QComboBox(coldstakeBox);
     m_coldstake_existing_selector->setObjectName(QStringLiteral("coldstakeDelegationSelector"));
     m_coldstake_existing_selector->setEditable(false);
@@ -580,7 +656,7 @@ void StakingMiningPage::setupUi()
     m_coldstake_fund_amount->setObjectName(QStringLiteral("coldstakeFundAmount"));
     m_coldstake_fund_amount->SetMinValue(CENT);
     m_coldstake_fund_amount->setValue(COIN);
-    m_coldstake_fund_amount->setToolTip(tr("Amount of spendable quantum balance to delegate to the selected operator."));
+    m_coldstake_fund_amount->setToolTip(tr("Amount of spendable quantum balance to delegate to the selected node."));
     m_coldstake_fund = new QPushButton(tr("Delegate coins"), coldstakeBox);
     m_coldstake_fund->setObjectName(QStringLiteral("coldstakeFund"));
     m_coldstake_fund->setToolTip(tr("Create, sign, and broadcast a quantum-only transaction funding this cold-stake delegation address."));
@@ -613,14 +689,14 @@ void StakingMiningPage::setupUi()
 
     r = 0;
     operatorGrid->addWidget(operatorHeading, r++, 0, 1, 4);
-    operatorGrid->addWidget(new QLabel(tr("Operator lock:"), operatorTab), r, 0);
+    operatorGrid->addWidget(new QLabel(tr("Node bond lock:"), operatorTab), r, 0);
     operatorGrid->addWidget(new QLabel(tr("30 days fixed"), operatorTab), r++, 1, 1, 3);
-    operatorGrid->addWidget(new QLabel(tr("Saved operator key:"), operatorTab), r, 0);
+    operatorGrid->addWidget(new QLabel(tr("Saved node key:"), operatorTab), r, 0);
     operatorGrid->addWidget(m_operator_selector, r++, 1, 1, 3);
-    operatorGrid->addWidget(new QLabel(tr("Operator address:"), operatorTab), r, 0);
+    operatorGrid->addWidget(new QLabel(tr("Node bond address:"), operatorTab), r, 0);
     operatorGrid->addWidget(m_operator_address, r, 1, 1, 2);
     operatorGrid->addWidget(m_operator_new, r++, 3);
-    operatorGrid->addWidget(new QLabel(tr("Operator public key:"), operatorTab), r, 0);
+    operatorGrid->addWidget(new QLabel(tr("Node public key:"), operatorTab), r, 0);
     operatorGrid->addWidget(m_operator_pubkey, r, 1, 1, 2);
     operatorGrid->addWidget(m_operator_copy, r++, 3);
     operatorGrid->addWidget(m_operator_use_for_delegation, r++, 1, 1, 3);
@@ -629,7 +705,7 @@ void StakingMiningPage::setupUi()
     operatorGrid->addWidget(m_operator_fund, r, 2);
     operatorGrid->addWidget(m_operator_withdraw, r++, 3);
     operatorGrid->addWidget(m_operator_status, r++, 0, 1, 4);
-    operatorGrid->addWidget(new QLabel(tr("Available operators:"), operatorTab), r, 0);
+    operatorGrid->addWidget(new QLabel(tr("Available nodes:"), operatorTab), r, 0);
     operatorGrid->addWidget(m_operator_registry_refresh, r, 1);
     operatorGrid->addWidget(m_operator_registry_use, r++, 2, 1, 2);
     operatorGrid->addWidget(m_operator_registry, r++, 0, 1, 4);
@@ -647,7 +723,7 @@ void StakingMiningPage::setupUi()
     delegateGrid->addWidget(m_coldstake_existing_selector, r++, 1, 1, 3);
     delegateGrid->addWidget(new QLabel(tr("Lock period:"), delegateTab), r, 0);
     delegateGrid->addWidget(m_coldstake_lock_period, r++, 1, 1, 3);
-    delegateGrid->addWidget(new QLabel(tr("Operator:"), delegateTab), r, 0);
+    delegateGrid->addWidget(new QLabel(tr("Node:"), delegateTab), r, 0);
     delegateGrid->addWidget(m_coldstake_operator_selector, r++, 1, 1, 3);
     delegateGrid->addWidget(m_coldstake_selection_summary, r++, 0, 1, 4);
     delegateGrid->addWidget(new QLabel(tr("Delegation address:"), delegateTab), r, 0);
@@ -661,7 +737,8 @@ void StakingMiningPage::setupUi()
     delegateGrid->addWidget(m_coldstake_status, r++, 0, 1, 4);
     delegateGrid->setColumnStretch(1, 1);
     delegateGrid->setColumnStretch(2, 1);
-    outer->addWidget(coldstakeBox);
+    coldstakeLayout->addWidget(coldstakeBox);
+    coldstakeLayout->addStretch();
 
     // ---- Quantum migration section ----
     auto* migrationBox = new QGroupBox(tr("Quantum migration"), this);
@@ -799,7 +876,8 @@ void StakingMiningPage::setupUi()
     mgrid->addWidget(m_eutxo_states, r++, 0, 1, 4);
     mgrid->addWidget(m_eutxo_status, r++, 0, 1, 4);
     mgrid->addWidget(m_migration_advice, r++, 0, 1, 4);
-    outer->addWidget(migrationBox);
+    advancedLayout->addWidget(migrationBox);
+    advancedLayout->addStretch();
 
     outer->addStretch();
 }
@@ -1075,7 +1153,7 @@ void StakingMiningPage::onMigrateGoldRushRewards()
     const int rc = QMessageBox::question(
         this,
         tr("Move Gold Rush rewards"),
-        tr("This will create a fresh wallet-backed quantum address and move wallet-owned Gold Rush reward outputs into it. After confirmation, those funds can be used for sends, staking, operator bonds, or cold-stake delegation. Continue?"));
+        tr("This will create a fresh wallet-backed quantum address and move wallet-owned Gold Rush reward outputs into it. After confirmation, those funds can be used for sends, staking, node bonds, or cold-stake delegation. Continue?"));
     if (rc != QMessageBox::Yes) return;
 
     WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
@@ -1283,7 +1361,7 @@ void StakingMiningPage::onCreateOperatorKey()
     m_operator_address->setText(QString::fromStdString(result->address));
     m_operator_pubkey->setText(QString::fromStdString(result->public_key));
     m_operator_last_action_status.clear();
-    m_operator_status->setText(tr("30-day operator bond key ready. Back up this wallet before funding it; delegators use this public key to verify your operator commitment."));
+    m_operator_status->setText(tr("30-day node bond key ready. Back up this wallet before funding it; delegators use this public key to verify your node commitment."));
     QApplication::clipboard()->setText(m_operator_pubkey->text());
     m_force_full_refresh = true;
     updateStatus();
@@ -1299,7 +1377,7 @@ void StakingMiningPage::onCopyOperatorKey()
 void StakingMiningPage::onUseOperatorKeyForDelegation()
 {
     if (m_operator_pubkey && !m_operator_pubkey->text().isEmpty()) {
-        setColdStakeOperatorSelection(m_operator_pubkey->text(), tr("This wallet operator key"));
+        setColdStakeOperatorSelection(m_operator_pubkey->text(), tr("This wallet node key"));
     }
 }
 
@@ -1307,16 +1385,16 @@ void StakingMiningPage::onFundOperatorBond()
 {
     if (!m_wallet_model || !m_operator_bond_amount) return;
     if (m_operator_address->text().isEmpty()) {
-        m_operator_status->setText(tr("Create or select an operator bond key first."));
+        m_operator_status->setText(tr("Create or select a node bond key first."));
         return;
     }
     if (!m_operator_bond_amount->validate()) {
-        m_operator_status->setText(tr("Enter a valid operator bond amount."));
+        m_operator_status->setText(tr("Enter a valid node bond amount."));
         return;
     }
     const CAmount amount = m_operator_bond_amount->value();
     if (amount <= 0) {
-        m_operator_status->setText(tr("Operator bond amount must be positive."));
+        m_operator_status->setText(tr("Node bond amount must be positive."));
         return;
     }
 
@@ -1327,11 +1405,11 @@ void StakingMiningPage::onFundOperatorBond()
     if (!result) {
         const QString msg = QString::fromStdString(util::ErrorString(result).original);
         m_operator_status->setText(msg);
-        QMessageBox::warning(this, tr("Activate operator"), msg);
+        QMessageBox::warning(this, tr("Activate node"), msg);
         return;
     }
 
-    m_operator_last_action_status = tr("Operator bond funding broadcast: %1. Amount: %2. Fee: %3.")
+    m_operator_last_action_status = tr("Node bond funding broadcast: %1. Amount: %2. Fee: %3.")
         .arg(QString::fromStdString(result->txid))
         .arg(formatBLK(result->amount))
         .arg(formatBLK(result->fee));
@@ -1344,7 +1422,7 @@ void StakingMiningPage::onWithdrawOperatorBond()
 {
     if (!m_wallet_model) return;
     if (m_operator_address->text().isEmpty()) {
-        m_operator_status->setText(tr("Create or select an operator bond key first."));
+        m_operator_status->setText(tr("Create or select a node bond key first."));
         return;
     }
 
@@ -1353,7 +1431,7 @@ void StakingMiningPage::onWithdrawOperatorBond()
     if (info.valid_operator_address && info.bonded_outputs > 0) {
         const int rc = QMessageBox::question(
             this,
-            tr("Stop cold-stake operator"),
+            tr("Stop cold-staking node"),
             tr("This will start the 30-day unbonding period for %1. The principal remains locked until the unbonding height. Continue?")
                 .arg(formatBLK(info.bonded_amount)));
         if (rc != QMessageBox::Yes) return;
@@ -1366,18 +1444,18 @@ void StakingMiningPage::onWithdrawOperatorBond()
     if (!result) {
         const QString msg = QString::fromStdString(util::ErrorString(result).original);
         m_operator_status->setText(msg);
-        QMessageBox::warning(this, tr("Stop operator"), msg);
+        QMessageBox::warning(this, tr("Stop node"), msg);
         return;
     }
 
     if (result->started_unbonding) {
-        m_operator_last_action_status = tr("Operator unbonding started: %1. Amount: %2. Unlock height: %3. Fee: %4.")
+        m_operator_last_action_status = tr("Node unbonding started: %1. Amount: %2. Unlock height: %3. Fee: %4.")
             .arg(QString::fromStdString(result->txid))
             .arg(formatBLK(result->amount))
             .arg(result->unlock_height)
             .arg(formatBLK(result->fee));
     } else {
-        m_operator_last_action_status = tr("Operator funds withdrawn: %1. Amount: %2. Destination: %3. Fee: %4.")
+        m_operator_last_action_status = tr("Node bond funds withdrawn: %1. Amount: %2. Destination: %3. Fee: %4.")
             .arg(QString::fromStdString(result->txid))
             .arg(formatBLK(result->amount))
             .arg(QString::fromStdString(result->address))
@@ -1416,7 +1494,7 @@ void StakingMiningPage::onCreateColdStakeAddress()
 
     const QString staking_pubkey = selectedColdStakeOperatorPubKey();
     if (staking_pubkey.isEmpty()) {
-        m_coldstake_status->setText(tr("Select a cold-staking operator before creating a delegation address."));
+        m_coldstake_status->setText(tr("Select a cold-staking node before creating a delegation address."));
         return;
     }
     const uint16_t unbonding_blocks = selectedStakeLockBlocks(m_coldstake_lock_period);
@@ -1512,7 +1590,7 @@ void StakingMiningPage::onWithdrawColdStakeAddress()
         const int rc = QMessageBox::question(
             this,
             tr("Withdraw cold-stake delegation"),
-            tr("This will owner-spend %1 from the selected delegation to a fresh quantum address controlled by this wallet. The selected operator will stop staking those funds. Continue?")
+            tr("This will owner-spend %1 from the selected delegation to a fresh quantum address controlled by this wallet. The selected node will stop staking those funds. Continue?")
                 .arg(formatBLK(info.spendable_amount)));
         if (rc != QMessageBox::Yes) return;
     }
@@ -1554,8 +1632,8 @@ void StakingMiningPage::refreshOperatorRegistry()
 
     if (!pool.available) {
         QSignalBlocker selector_blocker(m_coldstake_operator_selector);
-        m_coldstake_operator_selector->addItem(tr("Operator registry busy; try Refresh again"), QString());
-        m_operator_registry_status->setText(tr("Operator registry is busy. No delegation operator is selected."));
+        m_coldstake_operator_selector->addItem(tr("Node registry busy; try Refresh again"), QString());
+        m_operator_registry_status->setText(tr("Node registry is busy. No delegation node is selected."));
         m_operator_registry_loaded = false;
         m_operator_registry_refresh_seconds = 0;
         refreshControlsEnabled();
@@ -1606,7 +1684,7 @@ void StakingMiningPage::refreshOperatorRegistry()
             m_coldstake_operator_selector->setCurrentIndex(previous_index);
             if (previous_registry_row >= 0) m_operator_registry->selectRow(previous_registry_row);
         } else {
-            const QString label = previous_label.trimmed().isEmpty() || previous_label == tr("No verified operators discovered")
+            const QString label = previous_label.trimmed().isEmpty() || previous_label == tr("No verified nodes discovered")
                 ? tr("%1  |  selected, not yet verified in registry").arg(shortenHex(previous_selection.toStdString()))
                 : tr("%1  |  selected, not yet verified in registry").arg(previous_label);
             m_coldstake_operator_selector->addItem(label, previous_selection);
@@ -1615,7 +1693,7 @@ void StakingMiningPage::refreshOperatorRegistry()
     } else if (selectable_count == 0) {
         QSignalBlocker selector_blocker(m_coldstake_operator_selector);
         m_coldstake_operator_selector->clear();
-        m_coldstake_operator_selector->addItem(tr("No verified operators discovered"), QString());
+        m_coldstake_operator_selector->addItem(tr("No verified nodes discovered"), QString());
     } else {
         m_coldstake_operator_selector->setCurrentIndex(0);
         if (m_operator_registry->rowCount() > 0) {
@@ -1624,8 +1702,8 @@ void StakingMiningPage::refreshOperatorRegistry()
     }
 
     m_operator_registry_status->setText(pool.operators.empty()
-        ? tr("No cold-staking operators are published in this node's local registry. Use getquantumpoolinfo in the console to inspect the same data.")
-        : tr("%1 operator(s) discovered. Total delegated cold stake: %2. Operators become available after normal confirmations; the 30-day bond is the unbonding commitment. Wallet cap: %3.")
+        ? tr("No cold-staking nodes are published in this node's local registry. Use getquantumpoolinfo in the console to inspect the same data.")
+        : tr("%1 node(s) discovered. Total delegated cold stake: %2. Nodes become available after normal confirmations; the 30-day bond is the unbonding commitment. Wallet cap: %3.")
               .arg(static_cast<int>(pool.operators.size()))
               .arg(formatBLK(pool.total_coldstake))
               .arg(formatBps(pool.cap_bps)));
@@ -1777,6 +1855,47 @@ void StakingMiningPage::updateStatus()
         .arg(info.enabled ? tr("running") : tr("off"))
         .arg(formatBLK(info.next_claim_payout))
         .arg(unlock_mode));
+
+    m_dashboard_wallet->setText(tr(
+        "<b>Wallet</b><br>"
+        "Legacy: %1<br>"
+        "Quantum: %2<br>"
+        "Unlock: %3")
+        .arg(formatBLK(balances.legacy_balance))
+        .arg(formatBLK(balances.quantum_balance))
+        .arg(unlock_mode));
+
+    m_dashboard_pos->setText(tr(
+        "<b>PoS Gold Rush</b><br>"
+        "%1<br>"
+        "Next split: %2<br>"
+        "Active signalers: %3")
+        .arg(wallet_signal_text)
+        .arg(formatBLK(info.pos_estimated_payout_per_signaler))
+        .arg(QString::number(info.pos_active_signalers)));
+
+    m_dashboard_pow->setText(tr(
+        "<b>PoW Gold Rush</b><br>"
+        "%1<br>"
+        "Next claim: %2<br>"
+        "Payout: %3")
+        .arg(info.enabled ? tr("running at %1 tries/s").arg(QString::number(info.hashrate, 'f', 1)) : tr("off"))
+        .arg(formatBLK(info.next_claim_payout))
+        .arg(info.payout_address.empty() ? tr("not created yet") : shortenHex(info.payout_address)));
+
+    QString recommended_action;
+    if (info.epoch_active && info.wallet_whitelisted_scripts > 0 && !normal_signing_available) {
+        recommended_action = tr("Unlock with <b>Quantum and Legacy Staking</b> if you want this wallet to broadcast Gold Rush PoS signals. Legacy staking-only unlock will not create quantum signal transactions.");
+    } else if (info.epoch_active && info.wallet_recent_solve_qualified && !info.wallet_active_signal) {
+        recommended_action = tr("This wallet has a recent PoS solve. Keep staking enabled and use a normal unlock so the wallet can publish the Gold Rush signal.");
+    } else if (info.epoch_active && !info.enabled) {
+        recommended_action = tr("Gold Rush PoW is available. Start with 1 core at 1% CPU, then increase only if you want more local CPU usage.");
+    } else if (!staking && balances.legacy_balance > 0) {
+        recommended_action = tr("Enable staking to secure the network. Whitelisted wallets can also qualify for PoS Gold Rush payouts during the epoch.");
+    } else {
+        recommended_action = tr("No urgent action. Review the workflow tabs below for staking, mining, migration, and cold-staking actions.");
+    }
+    m_dashboard_action->setText(tr("<b>Recommended next step</b><br>%1").arg(recommended_action));
 
     if (m_pow_apply_pending) {
         m_pow_status->setText(m_pow_pending_enabled ? tr("Starting Gold Rush PoW mining...") : tr("Stopping Gold Rush PoW mining..."));
@@ -1957,7 +2076,7 @@ void StakingMiningPage::updateStatus()
     {
         QSignalBlocker operator_blocker(m_operator_selector);
         m_operator_selector->clear();
-        m_operator_selector->addItem(tr("Select saved operator key"), QString());
+        m_operator_selector->addItem(tr("Select saved node key"), QString());
         for (const interfaces::WalletQuantumAddressInfo& info : quantum_addresses) {
             const QString address = QString::fromStdString(info.address);
             if (!info.tiered || info.label != "coldstake-operator" ||
@@ -1971,7 +2090,7 @@ void StakingMiningPage::updateStatus()
         }
         if (saved_operator_count == 0) {
             m_operator_selector->clear();
-            m_operator_selector->addItem(tr("No saved operator keys"), QString());
+            m_operator_selector->addItem(tr("No saved node keys"), QString());
         } else if (!previous_operator.isEmpty()) {
             const int selected = m_operator_selector->findData(previous_operator);
             if (selected >= 0) m_operator_selector->setCurrentIndex(selected);
@@ -2083,7 +2202,7 @@ void StakingMiningPage::updateStatus()
             m_operator_address->setText(QString::fromStdString(operator_it->address));
             m_operator_pubkey->setText(QString::fromStdString(operator_it->public_key));
         } else {
-            m_operator_status->setText(tr("No operator key selected. Operators must fund a 30-day bonded staking address before delegators can verify them."));
+            m_operator_status->setText(tr("No node key selected. Nodes must fund a 30-day bonded staking address before delegators can verify them."));
         }
     }
     if (!m_operator_address->text().isEmpty()) {
@@ -2093,29 +2212,29 @@ void StakingMiningPage::updateStatus()
             if (bond_info.bonded_outputs > 0) {
                 local_bonded_operator = true;
                 m_operator_withdraw_available = true;
-                m_operator_status->setText(tr("Operator bond active: %1 across %2 output(s). Delegators can verify this operator. Stop/withdraw starts the 30-day unbonding period.")
+                m_operator_status->setText(tr("Node bond active: %1 across %2 output(s). Delegators can verify this node. Stop/withdraw starts the 30-day unbonding period.")
                     .arg(formatBLK(bond_info.bonded_amount))
                     .arg(bond_info.bonded_outputs));
                 m_operator_withdraw->setText(tr("Start withdrawal"));
             } else if (bond_info.withdrawable_outputs > 0) {
-                m_operator_status->setText(tr("Operator bond is unbonded and withdrawable: %1 across %2 output(s).")
+                m_operator_status->setText(tr("Node bond is unbonded and withdrawable: %1 across %2 output(s).")
                     .arg(formatBLK(bond_info.withdrawable_amount))
                     .arg(bond_info.withdrawable_outputs));
                 m_operator_withdraw->setText(tr("Complete withdrawal"));
                 m_operator_withdraw_available = true;
             } else if (bond_info.unbonding_outputs > 0) {
-                m_operator_status->setText(tr("Operator bond is unbonding: %1 across %2 output(s). Next unlock height: %3.")
+                m_operator_status->setText(tr("Node bond is unbonding: %1 across %2 output(s). Next unlock height: %3.")
                     .arg(formatBLK(bond_info.unbonding_amount))
                     .arg(bond_info.unbonding_outputs)
                     .arg(bond_info.next_unlock_height));
                 m_operator_withdraw->setText(tr("Withdrawal pending"));
             } else {
-                m_operator_status->setText(tr("30-day operator bond key ready. Click Activate operator to create and sign the funding transaction. It becomes available after normal confirmations."));
-                m_operator_withdraw->setText(tr("Stop operator"));
+                m_operator_status->setText(tr("30-day node bond key ready. Click Activate node to create and sign the funding transaction. It becomes available after normal confirmations."));
+                m_operator_withdraw->setText(tr("Stop node"));
             }
         }
     } else {
-        m_operator_withdraw->setText(tr("Stop operator"));
+        m_operator_withdraw->setText(tr("Stop node"));
         m_operator_last_action_status.clear();
     }
     if (!m_operator_last_action_status.isEmpty() &&
@@ -2153,13 +2272,13 @@ void StakingMiningPage::updateStatus()
         ? tr("none")
         : shortenHex(selectedColdStakeOperatorPubKey().toStdString());
     m_coldstake_selection_summary->setText(selected_operator_hash.isEmpty()
-        ? tr("Selected operator: %1. Your confirmed delegations: %2 across %3 output(s). Pending: %4 across %5 output(s).")
+        ? tr("Selected node: %1. Your confirmed delegations: %2 across %3 output(s). Pending: %4 across %5 output(s).")
               .arg(selected_operator_label)
               .arg(formatBLK(wallet_delegated_amount))
               .arg(wallet_delegated_outputs)
               .arg(formatBLK(wallet_pending_delegated_amount))
               .arg(wallet_pending_delegated_outputs)
-        : tr("Selected operator: %1. Your confirmed delegations: %2 across %3 output(s); %4 confirmed to this operator across %5 output(s). Pending to this operator: %6 across %7 output(s).")
+        : tr("Selected node: %1. Your confirmed delegations: %2 across %3 output(s); %4 confirmed to this node across %5 output(s). Pending to this node: %6 across %7 output(s).")
               .arg(selected_operator_label)
               .arg(formatBLK(wallet_delegated_amount))
               .arg(wallet_delegated_outputs)
@@ -2169,10 +2288,10 @@ void StakingMiningPage::updateStatus()
               .arg(selected_operator_pending_count));
 
     const QString operator_state = local_bonded_operator
-        ? tr("this wallet is an active operator")
+        ? tr("this wallet is an active cold-staking node")
         : (m_operator_address->text().isEmpty()
-            ? tr("no local operator selected")
-            : tr("operator key selected; fund or wait for confirmations"));
+            ? tr("no local node selected")
+            : tr("node key selected; fund or wait for confirmations"));
     const QString goldrush_move_note = goldrush_reward_outputs_needing_move > 0
         ? tr("%1 Gold Rush reward output(s), %2, must first move to a fresh quantum address.")
               .arg(goldrush_reward_outputs_needing_move)
@@ -2181,7 +2300,7 @@ void StakingMiningPage::updateStatus()
     m_coldstake_summary->setText(tr(
         "<b>Cold-staking snapshot</b><br>"
         "Available for delegation: %1 direct quantum &nbsp;|&nbsp; Already bonded/delegated: %2<br>"
-        "Operator: %3 &nbsp;|&nbsp; Confirmed delegated by this wallet: %4 across %5 output(s); pending %6 across %7 output(s)<br>"
+        "Node: %3 &nbsp;|&nbsp; Confirmed delegated by this wallet: %4 across %5 output(s); pending %6 across %7 output(s)<br>"
         "%8")
         .arg(formatBLK(direct_delegation_balance))
         .arg(formatBLK(staked_quantum_amount))
@@ -2191,6 +2310,24 @@ void StakingMiningPage::updateStatus()
         .arg(formatBLK(wallet_pending_delegated_amount))
         .arg(wallet_pending_delegated_outputs)
         .arg(goldrush_move_note));
+
+    m_dashboard_coldstake->setText(tr(
+        "<b>Quantum staking</b><br>"
+        "Ready to stake/delegate: %1<br>"
+        "Bonded/delegated: %2<br>"
+        "Pending delegation: %3")
+        .arg(formatBLK(direct_delegation_balance))
+        .arg(formatBLK(staked_quantum_amount + wallet_delegated_amount))
+        .arg(formatBLK(wallet_pending_delegated_amount)));
+
+    if (goldrush_reward_outputs_needing_move > 0) {
+        m_dashboard_action->setText(tr("<b>Recommended next step</b><br>Move %1 in Gold Rush rewards to a fresh quantum address before using those rewards for sends, staking, node bonds, or delegation.")
+            .arg(formatBLK(goldrush_reward_amount_needing_move)));
+    } else if (migration.available && migration.eligible_legacy_amount > 0 && migration.quantum_spends_active) {
+        m_dashboard_action->setText(tr("<b>Recommended next step</b><br>Move remaining legacy funds to a quantum address before the final migration deadline."));
+    } else if (direct_delegation_balance > 0 && wallet_delegated_amount == 0 && staked_quantum_amount == 0) {
+        m_dashboard_action->setText(tr("<b>Recommended next step</b><br>You have spendable quantum funds available. Choose <b>Stake my coins</b> to stake locally or <b>Delegate coins</b> to use a verified cold-staking node."));
+    }
 
     if (!m_coldstake_address->text().isEmpty()) {
         const interfaces::WalletQuantumColdStakeBalanceInfo delegation_info =
@@ -2203,16 +2340,16 @@ void StakingMiningPage::updateStatus()
                           .arg(formatBLK(delegation_info.unconfirmed_amount))
                           .arg(delegation_info.unconfirmed_outputs)
                     : QString();
-                m_coldstake_status->setText(tr("Delegation active: %1 confirmed across %2 output(s). The selected operator can stake confirmed coins; this wallet keeps the owner key.%3")
+                m_coldstake_status->setText(tr("Delegation active: %1 confirmed across %2 output(s). The selected node can stake confirmed coins; this wallet keeps the owner key.%3")
                     .arg(formatBLK(delegation_info.confirmed_amount))
                     .arg(delegation_info.confirmed_outputs)
                     .arg(pending));
             } else if (delegation_info.outputs > 0) {
-                m_coldstake_status->setText(tr("Delegation funding is pending confirmation: %1 across %2 output(s). It will count toward the operator pool after it confirms.")
+                m_coldstake_status->setText(tr("Delegation funding is pending confirmation: %1 across %2 output(s). It will count toward the selected node after it confirms.")
                     .arg(formatBLK(delegation_info.unconfirmed_amount))
                     .arg(delegation_info.unconfirmed_outputs));
             } else {
-                m_coldstake_status->setText(tr("Delegation address ready. Enter an amount and click Delegate coins to move spendable quantum coins under this operator."));
+                m_coldstake_status->setText(tr("Delegation address ready. Enter an amount and click Delegate coins to move spendable quantum coins under this node."));
             }
         } else {
             m_coldstake_status->setText(tr("Selected delegation address is not backed by this wallet."));
@@ -2257,6 +2394,11 @@ void StakingMiningPage::resetStatusForNoWallet()
     m_goldrush_badge->setText(tr("Gold Rush: no wallet loaded"));
     m_pos_goldrush_status->setText(tr("PoS Gold Rush jackpot: no wallet loaded"));
     m_staking_summary->setText(tr("Load a wallet to view staking, Gold Rush, and unlock status."));
+    m_dashboard_action->setText(tr("<b>Recommended next step</b><br>Load a wallet to view staking, mining, migration, and cold-staking actions."));
+    m_dashboard_wallet->setText(tr("<b>Wallet</b><br>No wallet loaded."));
+    m_dashboard_pos->setText(tr("<b>PoS Gold Rush</b><br>No wallet loaded."));
+    m_dashboard_pow->setText(tr("<b>PoW Gold Rush</b><br>No wallet loaded."));
+    m_dashboard_coldstake->setText(tr("<b>Quantum staking</b><br>No wallet loaded."));
 
     m_donation_enable->setChecked(false);
     m_donation_status->setText(tr("Load a wallet to configure staking reward donations."));
@@ -2306,18 +2448,18 @@ void StakingMiningPage::resetStatusForNoWallet()
     {
         QSignalBlocker operator_selector_blocker(m_operator_selector);
         m_operator_selector->clear();
-        m_operator_selector->addItem(tr("Load a wallet to select an operator key"), QString());
+        m_operator_selector->addItem(tr("Load a wallet to select a node key"), QString());
     }
     if (m_operator_bond_amount) m_operator_bond_amount->setValue(COIN);
     m_operator_last_action_status.clear();
-    m_operator_status->setText(tr("No operator key selected. Operators must fund a 30-day bonded staking address before delegators can verify them."));
-    m_operator_withdraw->setText(tr("Stop operator"));
+    m_operator_status->setText(tr("No node key selected. Nodes must fund a 30-day bonded staking address before delegators can verify them."));
+    m_operator_withdraw->setText(tr("Stop node"));
     m_operator_registry->setRowCount(0);
-    m_operator_registry_status->setText(tr("Load a wallet to view cold-staking operators."));
+    m_operator_registry_status->setText(tr("Load a wallet to view cold-staking nodes."));
     {
         QSignalBlocker selector_blocker(m_coldstake_operator_selector);
         m_coldstake_operator_selector->clear();
-        m_coldstake_operator_selector->addItem(tr("Load a wallet to select a cold-staking operator"), QString());
+        m_coldstake_operator_selector->addItem(tr("Load a wallet to select a cold-staking node"), QString());
     }
     {
         QSignalBlocker delegation_selector_blocker(m_coldstake_existing_selector);
