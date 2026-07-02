@@ -22,6 +22,7 @@ GOLD_RUSH_END_TIME = 2_000_000_000
 QUANTUM_SPEND_FEE = Decimal("0.01")
 WALLET_NAME = "goldrush_pos_signal"
 QQSIGNAL_HEX = "51515349474e414c"
+QQSPROOF_HEX = "51515350524f4f46"
 
 
 class GoldRushPosSignalTest(BitcoinTestFramework):
@@ -172,18 +173,40 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
         if not goldrush_after_solve["wallet_recent_solve_qualified"]:
             raise AssertionError(f"wallet does not see recent solver marker: {goldrush_after_solve}")
 
-        self.log.info("Pre-creating the wallet-backed PoS Gold Rush quantum payout address")
-        payout_address = wallet.getnewquantumaddress("goldrush-pos")["address"]
+        self.log.info("Funding a non-whitelisted PoW claim address after the whitelist snapshot")
+        pow_claim_address = wallet.getnewaddress("", "legacy")
+        self.generatetoaddress(node, COINBASE_MATURITY + 2, pow_claim_address, sync_fun=self.no_op)
+        self._sync_mocktime_to_tip()
 
-        self.log.info("Mining a later PoS block; the staking loop auto-broadcasts and includes QQSIGNAL")
-        payout_block_hash = self._mine_pos_block(wallet)
+        self.log.info("Pre-creating wallet-backed PoS and PoW Gold Rush quantum payout addresses")
+        payout_address = wallet.getnewquantumaddress("goldrush-pos")["address"]
+        pow_payout_address = wallet.getnewquantumaddress("goldrush-pow")["address"]
+
+        self.log.info("Broadcasting a fee-paying QQSPROOF claim before the next PoS block")
+        pow_claim = wallet.sendshadowpowclaim(pow_claim_address, pow_payout_address, 500000)
+        assert pow_claim["txid"] in node.getrawmempool()
+
+        self.log.info("Mining a later PoS block that includes both auto QQSIGNAL and pending QQSPROOF")
+        locked_non_whitelist_for_combo = self._lock_non_whitelist_script_utxos(wallet, whitelist_script)
+        try:
+            payout_block_hash = self._mine_pos_block(wallet)
+        finally:
+            if locked_non_whitelist_for_combo:
+                wallet.lockunspent(True, locked_non_whitelist_for_combo)
         payout_block = node.getblock(payout_block_hash, 2)
+        payout_height = payout_block["height"]
         signal_txids = [
             tx["txid"]
             for tx in payout_block["tx"][2:]
             if any(QQSIGNAL_HEX in vout["scriptPubKey"]["hex"] for vout in tx["vout"])
         ]
         assert_equal(len(signal_txids), 1)
+        assert pow_claim["txid"] in [tx["txid"] for tx in payout_block["tx"][2:]]
+        assert any(
+            QQSPROOF_HEX in vout["scriptPubKey"]["hex"]
+            for tx in payout_block["tx"][2:]
+            for vout in tx["vout"]
+        ), "combined payout block must include the fee-paying QQSPROOF"
         signal_txid = signal_txids[0]
         wallet_signals = [
             tx for tx in wallet.listtransactions("*", 100, 0, True)
@@ -191,20 +214,34 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
         ]
         assert_equal(len(wallet_signals), 1)
         self._assert_no_onchain_block_output_to(payout_block_hash, payout_address)
+        self._assert_no_onchain_block_output_to(payout_block_hash, pow_payout_address)
 
         payout_utxo = self._wait_for_quantum_utxo(wallet, payout_address)
+        pow_payout_utxo = self._wait_for_quantum_utxo(wallet, pow_payout_address)
         assert_equal(payout_utxo["confirmations"], 1)
+        assert_equal(pow_payout_utxo["confirmations"], 1)
         assert node.gettxout(payout_utxo["txid"], payout_utxo["vout"], False) is not None
+        assert node.gettxout(pow_payout_utxo["txid"], pow_payout_utxo["vout"], False) is not None
         assert Decimal(str(payout_utxo["amount"])) > 0
+        assert Decimal(str(pow_payout_utxo["amount"])) > 0
+        combined_info = wallet.getgoldrushinfo()
+        assert_equal(combined_info["last_pos_height"], payout_height)
+        assert_equal(combined_info["last_pow_height"], payout_height)
+        assert combined_info["pos_count"] >= 1
+        assert combined_info["pow_count"] >= 1
 
-        self.log.info("Disconnecting and reconnecting the payout block removes and restores the synthetic coin")
+        self.log.info("Disconnecting and reconnecting the combined payout block removes and restores both synthetic coins")
         node.invalidateblock(payout_block_hash)
         self._assert_no_quantum_utxo(wallet, payout_address)
+        self._assert_no_quantum_utxo(wallet, pow_payout_address)
         assert node.gettxout(payout_utxo["txid"], payout_utxo["vout"], False) is None
+        assert node.gettxout(pow_payout_utxo["txid"], pow_payout_utxo["vout"], False) is None
         node.reconsiderblock(payout_block_hash)
         self.wait_until(lambda: node.getbestblockhash() == payout_block_hash)
         payout_utxo = self._wait_for_quantum_utxo(wallet, payout_address)
+        pow_payout_utxo = self._wait_for_quantum_utxo(wallet, pow_payout_address)
         assert_equal(payout_utxo["confirmations"], 1)
+        assert_equal(pow_payout_utxo["confirmations"], 1)
 
         self.log.info("Mining a follow-up PoS block with no QQSIGNAL still pays the active 14-day look-back signaler")
         locked_non_whitelist = self._lock_non_whitelist_script_utxos(wallet, whitelist_script)
@@ -277,8 +314,10 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
         self.log.info("Reorging below the QQSIGNAL payout block removes both payout generations")
         node.invalidateblock(payout_block_hash)
         self._assert_no_quantum_utxo(wallet, payout_address)
+        self._assert_no_quantum_utxo(wallet, pow_payout_address)
         self._assert_no_quantum_utxo(wallet, next_quantum)
         assert node.gettxout(matured_utxo["txid"], matured_utxo["vout"], False) is None
+        assert node.gettxout(pow_payout_utxo["txid"], pow_payout_utxo["vout"], False) is None
         assert node.gettxout(migrated_utxo["txid"], migrated_utxo["vout"], False) is None
 
 
