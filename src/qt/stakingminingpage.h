@@ -102,6 +102,7 @@ private:
     bool m_operator_withdraw_available{false};
     bool m_coldstake_fund_available{false};
     bool m_coldstake_withdraw_available{false};
+    bool m_coldstake_operator_user_selected{false};
     QString m_selfstake_last_action_status;
     QString m_operator_last_action_status;
     QString m_coldstake_last_action_status;

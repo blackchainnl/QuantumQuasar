@@ -289,6 +289,7 @@ void TransactionTableModel::updateTransaction(const QString &hash, int status, b
 
 void TransactionTableModel::updateConfirmations()
 {
+    if (priv->size() == 0) return;
     // Blocks came in since last poll.
     // Invalidate status (number of confirmations) and (possibly) description
     //  for all rows. Qt is smart enough to only actually request the data for the
@@ -365,13 +366,14 @@ bool IsQuantumClaimControlLabel(const std::string& address)
 {
     return address == "PoW Claim" || address == "PoS Claim" ||
            address == "Quantum PoW Claim" || address == "Quantum PoS Claim" ||
-           address == "Gold Rush PoW claim" || address == "Gold Rush signal";
+           address == "Gold Rush PoW claim" || address == "Gold Rush signal" ||
+           address == "goldrush-pow" || address == "pos-goldrush-test";
 }
 
 QString QuantumClaimControlType(const std::string& address)
 {
-    if (address.find("PoW") != std::string::npos) return QObject::tr("PoW Claim");
-    if (address.find("PoS") != std::string::npos || address.find("signal") != std::string::npos) return QObject::tr("PoS Claim");
+    if (address.find("PoW") != std::string::npos || address == "goldrush-pow") return QObject::tr("PoW Claim");
+    if (address.find("PoS") != std::string::npos || address.find("signal") != std::string::npos || address == "pos-goldrush-test") return QObject::tr("PoS Claim");
     return QObject::tr("Quantum Claim");
 }
 } // namespace
@@ -778,6 +780,7 @@ void TransactionTableModel::updateDisplayUnit()
 {
     // emit dataChanged to update Amount column with the current unit
     updateAmountColumnTitle();
+    if (priv->size() == 0) return;
     Q_EMIT dataChanged(index(0, Amount), index(priv->size()-1, Amount));
 }
 

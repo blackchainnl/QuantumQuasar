@@ -701,6 +701,7 @@ bool CreateQuantumColdStakeRedelegationTransaction(
     CAmount input_amount{0};
     unsigned int selected_inputs{0};
     uint256 source_staker_hash;
+    uint256 source_owner_hash;
     {
         LOCK(wallet.cs_wallet);
         if (wallet.IsLocked()) {
@@ -727,6 +728,7 @@ bool CreateQuantumColdStakeRedelegationTransaction(
             return false;
         }
         source_staker_hash = source_info->staker_pubkey_hash;
+        source_owner_hash = source_info->owner_pubkey_hash;
 
         CoinFilterParams filter;
         filter.only_spendable = true;
@@ -776,25 +778,34 @@ bool CreateQuantumColdStakeRedelegationTransaction(
     }
 
     const std::string label = options.label.empty() ? "redelegated-coldstake" : options.label;
-    const std::string owner_label = label + " owner";
-    auto owner_dest = wallet.GetNewQuantumDestination(owner_label);
-    if (!owner_dest) {
-        error = util::ErrorString(owner_dest);
-        return false;
+    CTxDestination target_dest;
+    bool target_wallet_backed{false};
+    if (options.dry_run) {
+        target_dest = WitnessUnknown{
+            QUANTUM_COLDSTAKE_WITNESS_VERSION,
+            QuantumColdStakeProgramForKeyHashes(target_staker_hash, source_owner_hash)};
+    } else {
+        const std::string owner_label = label + " owner";
+        auto owner_dest = wallet.GetNewQuantumDestination(owner_label);
+        if (!owner_dest) {
+            error = util::ErrorString(owner_dest);
+            return false;
+        }
+        std::vector<unsigned char> owner_pubkey;
+        {
+            LOCK(wallet.cs_wallet);
+            const auto owner_info = wallet.GetQuantumKeyInfo(*owner_dest);
+            CHECK_NONFATAL(owner_info.has_value());
+            owner_pubkey = owner_info->public_key;
+        }
+        auto target_dest_result = wallet.AddQuantumColdStakeDelegation(target_staking_pubkey, owner_pubkey, label, GetTime());
+        if (!target_dest_result) {
+            error = util::ErrorString(target_dest_result);
+            return false;
+        }
+        target_dest = *target_dest_result;
+        target_wallet_backed = true;
     }
-    std::vector<unsigned char> owner_pubkey;
-    {
-        LOCK(wallet.cs_wallet);
-        const auto owner_info = wallet.GetQuantumKeyInfo(*owner_dest);
-        CHECK_NONFATAL(owner_info.has_value());
-        owner_pubkey = owner_info->public_key;
-    }
-    auto target_dest_result = wallet.AddQuantumColdStakeDelegation(target_staking_pubkey, owner_pubkey, label, GetTime());
-    if (!target_dest_result) {
-        error = util::ErrorString(target_dest_result);
-        return false;
-    }
-    const CTxDestination target_dest = *target_dest_result;
 
     std::vector<CRecipient> recipients;
     recipients.push_back({target_dest, input_amount, /*fSubtractFeeFromAmount=*/true});
@@ -854,7 +865,7 @@ bool CreateQuantumColdStakeRedelegationTransaction(
     }
 
     result.target_dest = target_dest;
-    result.target_wallet_backed = true;
+    result.target_wallet_backed = target_wallet_backed;
     result.input_amount = input_amount;
     result.output_amount = output_amount;
     result.fee = res->fee;

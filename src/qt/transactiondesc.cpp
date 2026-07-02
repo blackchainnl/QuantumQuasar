@@ -40,9 +40,11 @@ QString GoldRushWalletControlLabel(const interfaces::WalletTx& wtx)
 {
     const auto it = wtx.value_map.find("comment");
     if (it == wtx.value_map.end()) return {};
-    if (it->second == "Blackcoin shadow signal") return QObject::tr("PoS Claim");
+    if (it->second == "Blackcoin shadow signal" || it->second == "pos-goldrush-test") return QObject::tr("PoS Claim");
     if (it->second == "Quantum Quasar built-in shadow PoW claim" ||
-        it->second == "Blackcoin shadow PoW claim") {
+        it->second == "Blackcoin shadow PoW claim" ||
+        it->second == "Gold Rush PoW claim" ||
+        it->second == "goldrush-pow") {
         return QObject::tr("PoW Claim");
     }
     return {};
@@ -160,10 +162,13 @@ bool GetPaymentRequestMerchant(const std::string& pr, QString& merchant)
             cn_pos = pr.find({0x06, 0x03, 0x55, 0x04, 0x03}, cn_pos + 5);
             if (cn_pos != std::string::npos) {
                 cn_pos += 5;
+                if (cn_pos >= pr.size()) return false;
                 if (pr[cn_pos] == 0x13 || pr[cn_pos] == 0x0c) {
                     cn_pos++; // Consume the type
-                    int str_len = pr[cn_pos];
+                    if (cn_pos >= pr.size()) return false;
+                    const unsigned char str_len = static_cast<unsigned char>(pr[cn_pos]);
                     cn_pos++; // Consume the string length
+                    if (str_len == 0 || cn_pos > pr.size() || str_len > pr.size() - cn_pos) return false;
                     merchant = QString::fromUtf8(pr.data() + cn_pos, str_len);
                     return true;
                 }
@@ -175,6 +180,12 @@ bool GetPaymentRequestMerchant(const std::string& pr, QString& merchant)
 
 QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wallet, TransactionRecord* rec, BitcoinUnit unit)
 {
+    if (!rec) {
+        return "<html><font face='verdana, arial, helvetica, sans-serif'>" +
+               tr("No transaction is selected.") +
+               "</font></html>";
+    }
+
     int numBlocks;
     interfaces::WalletTxStatus status;
     interfaces::WalletOrderForm orderForm;
@@ -185,6 +196,12 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
 
     strHTML.reserve(4000);
     strHTML += "<html><font face='verdana, arial, helvetica, sans-serif'>";
+    if (!wtx.tx) {
+        strHTML += "<b>" + tr("Transaction ID") + ":</b> " + rec->getTxHash() + "<br>";
+        strHTML += "<br>" + tr("This transaction is no longer available in the loaded wallet. It may have been removed by a rescan, reorg, abandon action, or wallet reload.") + "<br>";
+        strHTML += "</font></html>";
+        return strHTML;
+    }
 
     int64_t nTime = wtx.time;
     CAmount nCredit = wtx.credit;

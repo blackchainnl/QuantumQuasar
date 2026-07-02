@@ -111,6 +111,11 @@ QString formatBps(int64_t bps)
     return QString::number(static_cast<double>(bps) / 100.0, 'f', 2) + QStringLiteral("%");
 }
 
+bool confirmBroadcast(QWidget* parent, const QString& title, const QString& body)
+{
+    return QMessageBox::question(parent, title, body, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes;
+}
+
 QString formatAssetAmount(uint64_t amount)
 {
     return QString::number(static_cast<qulonglong>(amount));
@@ -271,7 +276,12 @@ StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget
     connect(m_coldstake_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopyColdStakeAddress);
     connect(m_coldstake_fund, &QPushButton::clicked, this, &StakingMiningPage::onFundColdStakeAddress);
     connect(m_coldstake_withdraw, &QPushButton::clicked, this, &StakingMiningPage::onWithdrawColdStakeAddress);
-    connect(m_coldstake_operator_selector, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() { refreshControlsEnabled(); });
+    connect(m_coldstake_operator_selector, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
+        if (!m_updating && !selectedColdStakeOperatorPubKey().isEmpty()) {
+            m_coldstake_operator_user_selected = true;
+        }
+        refreshControlsEnabled();
+    });
 }
 
 StakingMiningPage::~StakingMiningPage() = default;
@@ -1233,7 +1243,7 @@ void StakingMiningPage::applyDonationPercentage(unsigned int percentage)
 
 void StakingMiningPage::applyDonationDefaults(bool wallet_migration_complete)
 {
-    if (!m_wallet_model) return;
+    if (!m_wallet_model || !m_donation_percent) return;
 
     QSettings settings;
     const bool user_configured = settings.value(DONATION_USER_CONFIGURED_SETTING, false).toBool();
@@ -1241,7 +1251,7 @@ void StakingMiningPage::applyDonationDefaults(bool wallet_migration_complete)
 
     const bool post_default_applied = settings.value(DONATION_POST_MIGRATION_DEFAULT_SETTING, false).toBool();
     if (wallet_migration_complete) {
-        if (!post_default_applied || m_wallet_model->wallet().getDonationPercentage() == wallet::DEFAULT_DONATION_PERCENTAGE) {
+        if (!post_default_applied && !m_donation_percent->hasFocus()) {
             const unsigned int percentage = wallet::DEFAULT_POST_MIGRATION_DONATION_PERCENTAGE;
             {
                 QSignalBlocker blocker(m_donation_percent);
@@ -1249,14 +1259,10 @@ void StakingMiningPage::applyDonationDefaults(bool wallet_migration_complete)
             }
             settings.setValue(DONATION_PERCENT_SETTING, static_cast<int>(percentage));
             settings.setValue(DONATION_POST_MIGRATION_DEFAULT_SETTING, true);
-            applyDonationPercentage(percentage);
         }
         return;
     }
 
-    if (m_wallet_model->wallet().getDonationPercentage() != wallet::DEFAULT_DONATION_PERCENTAGE) {
-        applyDonationPercentage(wallet::DEFAULT_DONATION_PERCENTAGE);
-    }
     if (!m_donation_percent->hasFocus()) {
         QSignalBlocker blocker(m_donation_percent);
         m_donation_percent->setValue(static_cast<int>(wallet::DEFAULT_DONATION_SUGGESTED_PERCENTAGE));
@@ -1277,8 +1283,9 @@ void StakingMiningPage::refreshDonationControls()
     }
     m_donation_status->setText(donation_percentage > 0
         ? tr("Donating %1% of staking rewards.").arg(donation_percentage)
-        : tr("Staking reward donations are off. Default suggestion is %1%; manual opt-in is honored before migration is complete.")
-              .arg(wallet::DEFAULT_DONATION_SUGGESTED_PERCENTAGE));
+        : tr("Staking reward donations are off. Suggested default is %1% before full migration and %2% after migration; manual opt-in is required.")
+              .arg(wallet::DEFAULT_DONATION_SUGGESTED_PERCENTAGE)
+              .arg(wallet::DEFAULT_POST_MIGRATION_DONATION_PERCENTAGE));
 }
 
 void StakingMiningPage::onPowEnableToggled(bool /*enabled*/)
@@ -1329,6 +1336,22 @@ void StakingMiningPage::onApplyPow()
     const bool enabled = m_pow_enable->isChecked();
     const int cores = m_pow_cores->value();
     const int percent = m_pow_percent->value();
+    const interfaces::WalletPowMiningInfo current_info = m_wallet_model->wallet().getPowMiningInfo();
+
+    if (enabled && !current_info.enabled) {
+        const QString body = tr("This will start the built-in Gold Rush PoW miner with %1 CPU core(s) at %2% target duty cycle.\n\n"
+                                "The wallet must be normally unlocked so it can sign QQSPROOF claim transactions. "
+                                "A wallet-backed quantum payout key may be created automatically; back up this wallet after enabling mining.\n\n"
+                                "Start mining now?")
+                                 .arg(cores)
+                                 .arg(percent);
+        if (!confirmBroadcast(this, tr("Start Gold Rush PoW mining"), body)) {
+            QSignalBlocker blocker(m_pow_enable);
+            m_pow_enable->setChecked(false);
+            refreshControlsEnabled();
+            return;
+        }
+    }
 
     if (enabled && !requestNormalUnlock()) {
         m_pow_enable->setChecked(false);
@@ -1549,6 +1572,16 @@ void StakingMiningPage::onFundSelfStakeAddress()
         return;
     }
 
+    if (!confirmBroadcast(
+            this,
+            tr("Activate quantum staking"),
+            tr("This will broadcast a wallet transaction funding quantum staking address:\n%1\n\nAmount: %2\n\n"
+               "If the address has a lock period, stopping staking later will require the unbonding period before withdrawal. Continue?")
+                .arg(m_selfstake_address->text())
+                .arg(formatBLK(amount)))) {
+        return;
+    }
+
     WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
     if (!ctx.isValid()) return;
 
@@ -1680,6 +1713,16 @@ void StakingMiningPage::onFundOperatorBond()
         return;
     }
 
+    if (!confirmBroadcast(
+            this,
+            tr("Activate cold-staking node"),
+            tr("This will broadcast a wallet transaction funding this node's 30-day operator bond:\n%1\n\nAmount: %2\n\n"
+               "Delegators use this bond to verify the node. Stopping the node later starts the fixed 30-day unbonding period. Continue?")
+                .arg(m_operator_address->text())
+                .arg(formatBLK(amount)))) {
+        return;
+    }
+
     WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
     if (!ctx.isValid()) return;
 
@@ -1771,14 +1814,14 @@ void StakingMiningPage::onUseRegistryOperatorForDelegation()
 void StakingMiningPage::onCreateColdStakeAddress()
 {
     if (!m_wallet_model) return;
-    WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
-    if (!ctx.isValid()) return;
-
     const QString staking_pubkey = selectedColdStakeOperatorPubKey();
     if (staking_pubkey.isEmpty()) {
         m_coldstake_status->setText(tr("Select a cold-staking node before creating a delegation address."));
         return;
     }
+    WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
+    if (!ctx.isValid()) return;
+
     const uint16_t unbonding_blocks = selectedStakeLockBlocks(m_coldstake_lock_period);
     auto result = m_wallet_model->wallet().createQuantumColdStakeAddress(staking_pubkey.toStdString(), "coldstake-gui", unbonding_blocks);
     if (!result) {
@@ -1818,6 +1861,17 @@ void StakingMiningPage::onFundColdStakeAddress()
     const CAmount amount = m_coldstake_fund_amount->value();
     if (amount <= 0) {
         m_coldstake_status->setText(tr("Delegation amount must be positive."));
+        return;
+    }
+
+    if (!confirmBroadcast(
+            this,
+            tr("Delegate coins"),
+            tr("This will broadcast a wallet transaction delegating coins to cold-staking address:\n%1\n\nAmount: %2\nSelected node: %3\n\n"
+               "If unmoved Gold Rush reward outputs must be used, the wallet will first move them to a fresh quantum address when quantum spending is active. Continue?")
+                .arg(m_coldstake_address->text())
+                .arg(formatBLK(amount))
+                .arg(selectedColdStakeOperatorPubKey().isEmpty() ? tr("not selected") : shortenHex(selectedColdStakeOperatorPubKey().toStdString())))) {
         return;
     }
 
@@ -1902,18 +1956,15 @@ void StakingMiningPage::refreshOperatorRegistry()
 {
     if (!m_wallet_model || !m_operator_registry || !m_coldstake_operator_selector) return;
 
-    const QString previous_selection = selectedColdStakeOperatorPubKey();
+    const QString previous_selection = m_coldstake_operator_user_selected ? selectedColdStakeOperatorPubKey() : QString();
     const QString previous_label = m_coldstake_operator_selector->currentText();
     interfaces::WalletQuantumPoolInfo pool = m_wallet_model->wallet().getQuantumPoolInfo();
 
+    QSignalBlocker selector_blocker(m_coldstake_operator_selector);
     m_operator_registry->setRowCount(0);
-    {
-        QSignalBlocker selector_blocker(m_coldstake_operator_selector);
-        m_coldstake_operator_selector->clear();
-    }
+    m_coldstake_operator_selector->clear();
 
     if (!pool.available) {
-        QSignalBlocker selector_blocker(m_coldstake_operator_selector);
         m_coldstake_operator_selector->addItem(tr("Node registry busy; try Refresh again"), QString());
         m_operator_registry_status->setText(tr("Node registry is busy. No delegation node is selected."));
         m_operator_registry_loaded = false;
@@ -1973,14 +2024,12 @@ void StakingMiningPage::refreshOperatorRegistry()
             m_coldstake_operator_selector->setCurrentIndex(m_coldstake_operator_selector->count() - 1);
         }
     } else if (selectable_count == 0) {
-        QSignalBlocker selector_blocker(m_coldstake_operator_selector);
         m_coldstake_operator_selector->clear();
         m_coldstake_operator_selector->addItem(tr("No verified nodes discovered"), QString());
     } else {
+        m_coldstake_operator_selector->insertItem(0, tr("Select a verified cold-staking node"), QString());
         m_coldstake_operator_selector->setCurrentIndex(0);
-        if (m_operator_registry->rowCount() > 0) {
-            m_operator_registry->selectRow(0);
-        }
+        m_operator_registry->clearSelection();
     }
 
     m_operator_registry_status->setText(pool.operators.empty()
@@ -2739,6 +2788,7 @@ void StakingMiningPage::resetStatusForNoWallet()
         m_coldstake_operator_selector->clear();
         m_coldstake_operator_selector->addItem(tr("Load a wallet to select a cold-staking node"), QString());
     }
+    m_coldstake_operator_user_selected = false;
     {
         QSignalBlocker delegation_selector_blocker(m_coldstake_existing_selector);
         m_coldstake_existing_selector->clear();
@@ -2952,5 +3002,6 @@ void StakingMiningPage::setColdStakeOperatorSelection(const QString& pubkey, con
         index = m_coldstake_operator_selector->count() - 1;
     }
     m_coldstake_operator_selector->setCurrentIndex(index);
+    m_coldstake_operator_user_selected = true;
     refreshControlsEnabled();
 }

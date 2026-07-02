@@ -601,7 +601,7 @@ static RPCHelpMan getquantumoperatorbondinfo()
 static RPCHelpMan fundquantumoperatorbond()
 {
     return RPCHelpMan{"fundquantumoperatorbond",
-        "\nFunds a fixed 30-day cold-stake operator bond from legacy wallet coins.\n" + HELP_REQUIRING_PASSPHRASE,
+        "\nFunds a fixed 30-day cold-stake operator bond from wallet coins eligible for quantum staking.\n" + HELP_REQUIRING_PASSPHRASE,
         {
             {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed fixed 30-day cold-stake operator address."},
             {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "Amount to bond."},
@@ -1541,6 +1541,7 @@ static RPCHelpMan setpowmining()
             {RPCResult::Type::NUM, "threads", "Configured worker threads."},
             {RPCResult::Type::NUM, "cpu_percent", "Configured per-core CPU duty cycle."},
             {RPCResult::Type::STR, "payout_address", "The quantum payout address (created if needed)."},
+            {RPCResult::Type::STR, "warning", /*optional=*/true, "Backup reminder when a wallet-backed quantum payout key was created."},
         }},
         RPCExamples{
             HelpExampleCli("setpowmining", "true 2 50")
@@ -1554,6 +1555,11 @@ static RPCHelpMan setpowmining()
     const bool enabled = request.params[0].get_bool();
     const int threads = request.params[1].isNull() ? 1 : request.params[1].getInt<int>();
     const int cpu_percent = request.params[2].isNull() ? 1 : request.params[2].getInt<int>();
+    bool created_payout_key = false;
+    {
+        LOCK(pwallet->cs_wallet);
+        created_payout_key = enabled && pwallet->m_pow_payout_quantum.empty();
+    }
 
     bilingual_str error;
     const bool ok = pwallet->SetPowMining(enabled, threads, cpu_percent, error);
@@ -1568,6 +1574,9 @@ static RPCHelpMan setpowmining()
     {
         LOCK(pwallet->cs_wallet);
         result.pushKV("payout_address", pwallet->m_pow_payout_quantum);
+    }
+    if (created_payout_key) {
+        result.pushKV("warning", "A new wallet-backed ML-DSA quantum payout address was created for PoW rewards. Back up this wallet before relying on mined rewards.");
     }
     return result;
 },
@@ -1816,7 +1825,7 @@ static RPCHelpMan redelegatequantumcoldstake()
             {"source_coldstake_address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-owned source Quantum Cold-Stake address."},
             {"target_staking_pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Target operator/staker ML-DSA-44 public key."},
             {"options", RPCArg::Type::OBJ, RPCArg::Default{UniValue::VOBJ}, "Redelegation options.", {
-                {"dry_run", RPCArg::Type::BOOL, RPCArg::Default{true}, "Build and return the transaction plan without broadcasting. This still creates the new wallet-backed target QCS address so returned transaction hex remains spendable if used later."},
+                {"dry_run", RPCArg::Type::BOOL, RPCArg::Default{true}, "Build and return a read-only, unsigned transaction plan without broadcasting or creating wallet metadata. Set false to create the wallet-backed target QCS address and broadcast."},
                 {"enforce_pool_cap", RPCArg::Type::BOOL, RPCArg::Default{true}, "Refuse over-cap redelegation only when an under-cap alternative exists; otherwise allow bootstrap and report the over-cap projection."},
                 {"require_verified_operator", RPCArg::Type::BOOL, RPCArg::Default{true}, "Refuse if the target operator has no locally verified 30-day Operator-tier commitment."},
                 {"fee_rate", RPCArg::Type::AMOUNT, RPCArg::Optional::OMITTED, "Optional fee rate in " + CURRENCY_ATOM + "/vB."},
@@ -1826,7 +1835,7 @@ static RPCHelpMan redelegatequantumcoldstake()
         RPCResult{RPCResult::Type::OBJ, "", "", {
             {RPCResult::Type::BOOL, "dry_run", "Whether the transaction was only planned."},
             {RPCResult::Type::STR, "source_address", "Source QCS address."},
-            {RPCResult::Type::STR, "target_address", "New wallet-backed target QCS address."},
+            {RPCResult::Type::STR, "target_address", "Target QCS address. In dry_run this is a planning address and is not written to the wallet."},
             {RPCResult::Type::BOOL, "target_wallet_backed", "Whether this wallet stores the target owner key and QCS metadata."},
             {RPCResult::Type::STR_AMOUNT, "input_amount", "Selected source value."},
             {RPCResult::Type::STR_AMOUNT, "output_amount", "Redelegated output value after fees."},
@@ -1841,7 +1850,7 @@ static RPCHelpMan redelegatequantumcoldstake()
                 {RPCResult::Type::BOOL, "cap_enforced", "Whether over-cap projections are refused."},
                 {RPCResult::Type::BOOL, "cap_filter_unlocked", "Whether the over-cap target was allowed because no under-cap alternative exists."},
             }},
-            {RPCResult::Type::STR_HEX, "hex", "Transaction hex."},
+            {RPCResult::Type::STR_HEX, "hex", "Transaction hex. Dry-run hex is unsigned planning output and is not intended for broadcast."},
             {RPCResult::Type::STR_HEX, "txid", /*optional=*/true, "Broadcast transaction id."},
         }},
         RPCExamples{

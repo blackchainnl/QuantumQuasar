@@ -167,6 +167,7 @@ class QuantumRedelegationTest(BitcoinTestFramework):
         assert_equal(bootstrap_plan["pool_policy"]["cap_filter_unlocked"], True)
 
         self.log.info("Dry-running the explicit owner-spend redelegation transaction")
+        before_dry_addresses = {entry["address"] for entry in owner_a.listquantumcoldstakingdelegations()}
         dry_plan = owner_a.redelegatequantumcoldstake(
             current["address"],
             small["staking_pubkey"],
@@ -179,7 +180,9 @@ class QuantumRedelegationTest(BitcoinTestFramework):
         assert_equal(dry_plan["dry_run"], True)
         assert_equal(dry_plan["source_address"], current["address"])
         assert_equal(node.validateaddress(dry_plan["target_address"])["isquantumcoldstake"], True)
-        assert_equal(dry_plan["target_wallet_backed"], True)
+        assert_equal(dry_plan["target_wallet_backed"], False)
+        after_dry_addresses = {entry["address"] for entry in owner_a.listquantumcoldstakingdelegations()}
+        assert_equal(after_dry_addresses, before_dry_addresses)
         assert_equal(dry_plan["input_amount"], Decimal("100.00000000"))
         assert dry_plan["output_amount"] < dry_plan["input_amount"]
         assert dry_plan["fee"] > Decimal("0")
