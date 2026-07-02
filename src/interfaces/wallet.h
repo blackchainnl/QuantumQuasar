@@ -63,6 +63,12 @@ struct WalletQuantumStakeOutputInfo;
 struct WalletQuantumPoolInfo;
 struct WalletQuantumPoolOperatorInfo;
 struct WalletMigrationStatus;
+struct WalletRGBAssignmentInfo;
+struct WalletRGBAssetInfo;
+struct WalletEUTXOStateInfo;
+struct WalletDemurrageOutputInfo;
+struct WalletDemurrageInfo;
+struct WalletQuantumActionTx;
 
 using WalletOrderForm = std::vector<std::pair<std::string, std::string>>;
 using WalletValueMap = std::map<std::string, std::string>;
@@ -345,6 +351,24 @@ public:
 
     //! Read wallet migration progress and deadline state.
     virtual WalletMigrationStatus getMigrationStatus() = 0;
+
+    //! Sweep spendable legacy coins into a wallet-backed quantum address.
+    virtual util::Result<WalletQuantumActionTx> migrateLegacyToQuantum() = 0;
+
+    //! Move wallet-owned Gold Rush reward outputs to a fresh quantum address during the migration window.
+    virtual util::Result<WalletQuantumActionTx> migrateGoldRushRewards() = 0;
+
+    //! List wallet-owned RGB assets and assignments.
+    virtual std::vector<WalletRGBAssetInfo> listRGBAssets(bool include_spent = false) = 0;
+
+    //! List wallet-persisted EUTXO states.
+    virtual std::vector<WalletEUTXOStateInfo> listEUTXOStates(bool include_spent = false) = 0;
+
+    //! Read wallet demurrage exposure for direct quantum outputs.
+    virtual WalletDemurrageInfo getDemurrageInfo() = 0;
+
+    //! Create and broadcast a demurrage liveness attestation for a wallet-backed quantum address.
+    virtual util::Result<WalletQuantumActionTx> sendDemurrageAttestation(const std::string& address) = 0;
 
     //! Return whether is a legacy wallet
     virtual bool isLegacy() = 0;
@@ -645,6 +669,101 @@ struct WalletMigrationStatus
     bool goldrush_remigration_active{false};
     bool quantum_spends_active{false};
     std::string advice;
+};
+
+//! Generic wallet-created maintenance transaction result.
+struct WalletQuantumActionTx
+{
+    std::string txid;
+    std::string address;
+    CAmount amount{0};
+    CAmount fee{0};
+    int vsize{0};
+    unsigned int selected_inputs{0};
+    CAmount selected_amount{0};
+    std::string warning;
+};
+
+//! Wallet-owned RGB assignment metadata.
+struct WalletRGBAssignmentInfo
+{
+    std::string txid;
+    uint32_t vout{0};
+    uint64_t amount{0};
+    bool spent{false};
+    int64_t creation_time{0};
+};
+
+//! Wallet-owned RGB asset summary.
+struct WalletRGBAssetInfo
+{
+    std::string contract_id;
+    std::string ticker;
+    std::string name;
+    uint64_t total_supply{0};
+    uint64_t balance{0};
+    int64_t creation_time{0};
+    bool proof_available{false};
+    int proof_transition_count{0};
+    int transition_count{0};
+    std::vector<WalletRGBAssignmentInfo> assignments;
+};
+
+//! Wallet-persisted EUTXO state summary.
+struct WalletEUTXOStateInfo
+{
+    std::string txid;
+    uint32_t vout{0};
+    CAmount amount{0};
+    std::string datum_hex;
+    std::string validator_hex;
+    std::string address;
+    int64_t creation_time{0};
+    bool spent{false};
+};
+
+//! Per-output demurrage state.
+struct WalletDemurrageOutputInfo
+{
+    std::string txid;
+    uint32_t vout{0};
+    std::string address;
+    int depth{0};
+    int coin_height{0};
+    std::optional<int> latest_attestation_height;
+    int inactive_blocks{0};
+    int64_t remaining_ppm{0};
+    CAmount nominal_amount{0};
+    CAmount effective_amount{0};
+    CAmount burned_if_spent_amount{0};
+    bool locked{false};
+    bool attestation_due{false};
+    int blocks_until_decay{0};
+    int blocks_until_lock{0};
+    std::string action;
+};
+
+//! Wallet demurrage exposure summary.
+struct WalletDemurrageInfo
+{
+    bool available{true};
+    bool demurrage_active{false};
+    int tip_height{-1};
+    int evaluation_height{0};
+    int64_t evaluation_time{0};
+    int demurrage_activation_height{0};
+    int demurrage_effective_activation_height{0};
+    bool demurrage_height_guard_satisfied{false};
+    bool demurrage_post_migration_guard_satisfied{false};
+    bool wallet_staking_enabled{false};
+    int quantum_outputs{0};
+    int decaying_outputs{0};
+    int locked_outputs{0};
+    int attestation_due_outputs{0};
+    CAmount nominal_amount{0};
+    CAmount effective_amount{0};
+    CAmount burned_if_spent_amount{0};
+    std::vector<WalletDemurrageOutputInfo> outputs;
 };
 
 //! Return implementation of Wallet interface. This function is defined in

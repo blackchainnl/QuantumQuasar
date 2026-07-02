@@ -101,6 +101,18 @@ QString formatBps(int64_t bps)
     return QString::number(static_cast<double>(bps) / 100.0, 'f', 2) + QStringLiteral("%");
 }
 
+QString formatAssetAmount(uint64_t amount)
+{
+    return QString::number(static_cast<qulonglong>(amount));
+}
+
+QTableWidgetItem* readOnlyItem(const QString& text)
+{
+    auto* item = new QTableWidgetItem(text);
+    item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+    return item;
+}
+
 QString addressSelectorLabel(const std::string& label, const std::string& address, uint16_t lock_blocks)
 {
     QString text = label.empty() ? QObject::tr("Unlabeled") : QString::fromStdString(label);
@@ -196,6 +208,11 @@ StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget
     connect(m_quantum_new, &QPushButton::clicked, this, &StakingMiningPage::onCreateQuantumAddress);
     connect(m_quantum_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopyQuantumAddress);
     connect(m_quantum_pubkey_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopyQuantumPubkey);
+    connect(m_migration_legacy_sweep, &QPushButton::clicked, this, &StakingMiningPage::onMigrateLegacyToQuantum);
+    connect(m_migration_goldrush_sweep, &QPushButton::clicked, this, &StakingMiningPage::onMigrateGoldRushRewards);
+    connect(m_demurrage_attest, &QPushButton::clicked, this, &StakingMiningPage::onSendDemurrageAttestation);
+    connect(m_rgb_copy_contract, &QPushButton::clicked, this, &StakingMiningPage::onCopySelectedRGBContract);
+    connect(m_rgb_assets, &QTableWidget::itemSelectionChanged, this, [this]() { refreshControlsEnabled(); });
     connect(m_selfstake_selector, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
         if (m_updating || !m_selfstake_selector) return;
         const QString address = m_selfstake_selector->itemData(index).toString();
@@ -619,6 +636,66 @@ void StakingMiningPage::setupUi()
     m_quantum_copy->setObjectName(QStringLiteral("quantumCopy"));
     m_quantum_pubkey_copy = new QPushButton(tr("Copy key"), migrationBox);
     m_quantum_pubkey_copy->setObjectName(QStringLiteral("quantumPubkeyCopy"));
+    m_migration_legacy_sweep = new QPushButton(tr("Move legacy to quantum"), migrationBox);
+    m_migration_legacy_sweep->setObjectName(QStringLiteral("migrationLegacySweep"));
+    m_migration_legacy_sweep->setToolTip(tr("Create, sign, and broadcast a transaction moving all spendable legacy wallet funds to a fresh wallet-backed quantum address."));
+    m_migration_goldrush_sweep = new QPushButton(tr("Move Gold Rush rewards"), migrationBox);
+    m_migration_goldrush_sweep->setObjectName(QStringLiteral("migrationGoldrushSweep"));
+    m_migration_goldrush_sweep->setToolTip(tr("During the migration window, move wallet-owned Gold Rush reward outputs to a fresh quantum address before final lockout."));
+    m_migration_action_status = new QLabel(QStringLiteral("-"), migrationBox);
+    m_migration_action_status->setObjectName(QStringLiteral("migrationActionStatus"));
+    m_migration_action_status->setWordWrap(true);
+
+    m_demurrage_status = new QLabel(tr("Demurrage: unknown"), migrationBox);
+    m_demurrage_status->setObjectName(QStringLiteral("demurrageStatus"));
+    m_demurrage_status->setWordWrap(true);
+    m_demurrage_amounts = new QLabel(QStringLiteral("-"), migrationBox);
+    m_demurrage_amounts->setObjectName(QStringLiteral("demurrageAmounts"));
+    m_demurrage_amounts->setWordWrap(true);
+    m_demurrage_guards = new QLabel(QStringLiteral("-"), migrationBox);
+    m_demurrage_guards->setObjectName(QStringLiteral("demurrageGuards"));
+    m_demurrage_guards->setWordWrap(true);
+    m_demurrage_attest = new QPushButton(tr("Attest selected quantum address"), migrationBox);
+    m_demurrage_attest->setObjectName(QStringLiteral("demurrageAttest"));
+    m_demurrage_attest->setToolTip(tr("Create a fee-paying liveness attestation for the selected wallet-backed quantum address."));
+
+    m_rgb_assets = new QTableWidget(migrationBox);
+    m_rgb_assets->setObjectName(QStringLiteral("rgbAssets"));
+    m_rgb_assets->setColumnCount(5);
+    m_rgb_assets->setHorizontalHeaderLabels(QStringList{tr("Asset"), tr("Balance"), tr("Supply"), tr("Assignments"), tr("Contract")});
+    m_rgb_assets->horizontalHeader()->setStretchLastSection(true);
+    m_rgb_assets->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_rgb_assets->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    m_rgb_assets->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_rgb_assets->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_rgb_assets->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_rgb_assets->setAlternatingRowColors(true);
+    m_rgb_assets->setMinimumHeight(88);
+    m_rgb_assets->setMaximumHeight(140);
+    m_rgb_assets->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_rgb_copy_contract = new QPushButton(tr("Copy RGB contract"), migrationBox);
+    m_rgb_copy_contract->setObjectName(QStringLiteral("rgbCopyContract"));
+    m_rgb_status = new QLabel(tr("RGB wallet assets not loaded."), migrationBox);
+    m_rgb_status->setObjectName(QStringLiteral("rgbStatus"));
+    m_rgb_status->setWordWrap(true);
+
+    m_eutxo_states = new QTableWidget(migrationBox);
+    m_eutxo_states->setObjectName(QStringLiteral("eutxoStates"));
+    m_eutxo_states->setColumnCount(5);
+    m_eutxo_states->setHorizontalHeaderLabels(QStringList{tr("Outpoint"), tr("Amount"), tr("Spent"), tr("Datum"), tr("Validator")});
+    m_eutxo_states->horizontalHeader()->setStretchLastSection(true);
+    m_eutxo_states->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_eutxo_states->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    m_eutxo_states->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_eutxo_states->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_eutxo_states->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_eutxo_states->setAlternatingRowColors(true);
+    m_eutxo_states->setMinimumHeight(88);
+    m_eutxo_states->setMaximumHeight(140);
+    m_eutxo_states->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_eutxo_status = new QLabel(tr("EUTXO states not loaded."), migrationBox);
+    m_eutxo_status->setObjectName(QStringLiteral("eutxoStatus"));
+    m_eutxo_status->setWordWrap(true);
 
     r = 0;
     mgrid->addWidget(new QLabel(tr("Phase:"), migrationBox), r, 0);
@@ -640,6 +717,23 @@ void StakingMiningPage::setupUi()
     mgrid->addWidget(m_quantum_pubkey, r, 1, 1, 2);
     mgrid->addWidget(m_quantum_pubkey_copy, r++, 3);
     mgrid->addWidget(m_quantum_new, r++, 1, 1, 2);
+    mgrid->addWidget(m_migration_legacy_sweep, r, 1);
+    mgrid->addWidget(m_migration_goldrush_sweep, r++, 2);
+    mgrid->addWidget(m_migration_action_status, r++, 0, 1, 4);
+    mgrid->addWidget(new QLabel(tr("Demurrage:"), migrationBox), r, 0);
+    mgrid->addWidget(m_demurrage_status, r++, 1, 1, 3);
+    mgrid->addWidget(new QLabel(tr("Exposure:"), migrationBox), r, 0);
+    mgrid->addWidget(m_demurrage_amounts, r++, 1, 1, 3);
+    mgrid->addWidget(new QLabel(tr("Guards:"), migrationBox), r, 0);
+    mgrid->addWidget(m_demurrage_guards, r, 1, 1, 2);
+    mgrid->addWidget(m_demurrage_attest, r++, 3);
+    mgrid->addWidget(new QLabel(tr("RGB assets:"), migrationBox), r, 0);
+    mgrid->addWidget(m_rgb_copy_contract, r++, 3);
+    mgrid->addWidget(m_rgb_assets, r++, 0, 1, 4);
+    mgrid->addWidget(m_rgb_status, r++, 0, 1, 4);
+    mgrid->addWidget(new QLabel(tr("EUTXO states:"), migrationBox), r++, 0, 1, 4);
+    mgrid->addWidget(m_eutxo_states, r++, 0, 1, 4);
+    mgrid->addWidget(m_eutxo_status, r++, 0, 1, 4);
     mgrid->addWidget(m_migration_advice, r++, 0, 1, 4);
     outer->addWidget(migrationBox);
 
@@ -871,6 +965,106 @@ void StakingMiningPage::onCopyQuantumPubkey()
     if (m_quantum_pubkey && !m_quantum_pubkey->text().isEmpty()) {
         QApplication::clipboard()->setText(m_quantum_pubkey->text());
     }
+}
+
+void StakingMiningPage::onMigrateLegacyToQuantum()
+{
+    if (!m_wallet_model) return;
+    const int rc = QMessageBox::question(
+        this,
+        tr("Move legacy funds to quantum"),
+        tr("This will create a fresh wallet-backed quantum address and move all spendable legacy wallet funds into it. Back up the wallet after the transaction is created. Continue?"));
+    if (rc != QMessageBox::Yes) return;
+
+    WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
+    if (!ctx.isValid()) return;
+
+    auto result = m_wallet_model->wallet().migrateLegacyToQuantum();
+    if (!result) {
+        const QString msg = QString::fromStdString(util::ErrorString(result).original);
+        m_migration_action_status->setText(msg);
+        QMessageBox::warning(this, tr("Move legacy funds to quantum"), msg);
+        return;
+    }
+
+    m_quantum_address->setText(QString::fromStdString(result->address));
+    m_migration_action_status->setText(tr("Migration broadcast: %1. Moved %2 from %3 input(s); fee %4. Back up this wallet now.")
+        .arg(QString::fromStdString(result->txid))
+        .arg(formatBLK(result->amount))
+        .arg(result->selected_inputs)
+        .arg(formatBLK(result->fee)));
+    updateStatus();
+}
+
+void StakingMiningPage::onMigrateGoldRushRewards()
+{
+    if (!m_wallet_model) return;
+    const int rc = QMessageBox::question(
+        this,
+        tr("Move Gold Rush rewards"),
+        tr("This will create a fresh wallet-backed quantum address and move wallet-owned Gold Rush reward outputs into it. Continue?"));
+    if (rc != QMessageBox::Yes) return;
+
+    WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
+    if (!ctx.isValid()) return;
+
+    auto result = m_wallet_model->wallet().migrateGoldRushRewards();
+    if (!result) {
+        const QString msg = QString::fromStdString(util::ErrorString(result).original);
+        m_migration_action_status->setText(msg);
+        QMessageBox::warning(this, tr("Move Gold Rush rewards"), msg);
+        return;
+    }
+
+    m_quantum_address->setText(QString::fromStdString(result->address));
+    m_migration_action_status->setText(tr("Gold Rush reward migration broadcast: %1. Moved %2 from %3 output(s); fee %4. Back up this wallet now.")
+        .arg(QString::fromStdString(result->txid))
+        .arg(formatBLK(result->amount))
+        .arg(result->selected_inputs)
+        .arg(formatBLK(result->fee)));
+    updateStatus();
+}
+
+void StakingMiningPage::onSendDemurrageAttestation()
+{
+    if (!m_wallet_model) return;
+    const QString address = m_quantum_address->text().trimmed();
+    if (address.isEmpty()) {
+        m_demurrage_status->setText(tr("Select or create a quantum address before sending an attestation."));
+        return;
+    }
+    const int rc = QMessageBox::question(
+        this,
+        tr("Demurrage attestation"),
+        tr("This will create a small fee-paying liveness attestation for the selected quantum address:\n%1\n\nContinue?")
+            .arg(address));
+    if (rc != QMessageBox::Yes) return;
+
+    WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
+    if (!ctx.isValid()) return;
+
+    auto result = m_wallet_model->wallet().sendDemurrageAttestation(address.toStdString());
+    if (!result) {
+        const QString msg = QString::fromStdString(util::ErrorString(result).original);
+        m_demurrage_status->setText(msg);
+        QMessageBox::warning(this, tr("Demurrage attestation"), msg);
+        return;
+    }
+
+    m_demurrage_status->setText(tr("Demurrage attestation broadcast: %1. Fee: %2.")
+        .arg(QString::fromStdString(result->txid))
+        .arg(formatBLK(result->fee)));
+    updateStatus();
+}
+
+void StakingMiningPage::onCopySelectedRGBContract()
+{
+    if (!m_rgb_assets || m_rgb_assets->selectedItems().empty()) return;
+    const int row = m_rgb_assets->selectedItems().front()->row();
+    QTableWidgetItem* contract_item = m_rgb_assets->item(row, 4);
+    if (!contract_item) return;
+    const QString contract_id = contract_item->data(Qt::UserRole).toString();
+    if (!contract_id.isEmpty()) QApplication::clipboard()->setText(contract_id);
 }
 
 void StakingMiningPage::onCreateSelfStakeAddress()
@@ -1332,6 +1526,77 @@ void StakingMiningPage::updateStatus()
         m_migration_advice->setText(tr("Wallet is busy; migration status will refresh shortly."));
     }
 
+    const interfaces::WalletDemurrageInfo demurrage = w.getDemurrageInfo();
+    if (demurrage.available) {
+        m_demurrage_status->setText(demurrage.demurrage_active
+            ? tr("Demurrage active at evaluation height %1. Outputs due for attestation: %2.")
+                  .arg(demurrage.evaluation_height)
+                  .arg(demurrage.attestation_due_outputs)
+            : tr("Demurrage inactive. Evaluation height %1; direct quantum outputs monitored: %2.")
+                  .arg(demurrage.evaluation_height)
+                  .arg(demurrage.quantum_outputs));
+        m_demurrage_amounts->setText(tr("Nominal %1   |   Effective %2   |   Burned if spent %3   |   Decaying %4   |   Locked %5")
+            .arg(formatBLK(demurrage.nominal_amount))
+            .arg(formatBLK(demurrage.effective_amount))
+            .arg(formatBLK(demurrage.burned_if_spent_amount))
+            .arg(demurrage.decaying_outputs)
+            .arg(demurrage.locked_outputs));
+        m_demurrage_guards->setText(tr("Height guard: %1   |   Post-migration guard: %2")
+            .arg(demurrage.demurrage_height_guard_satisfied ? tr("yes") : tr("no"))
+            .arg(demurrage.demurrage_post_migration_guard_satisfied ? tr("yes") : tr("no")));
+    } else {
+        m_demurrage_status->setText(tr("Demurrage status is busy; it will refresh shortly."));
+        m_demurrage_amounts->setText(QStringLiteral("-"));
+        m_demurrage_guards->setText(QStringLiteral("-"));
+    }
+
+    const std::vector<interfaces::WalletRGBAssetInfo> rgb_assets = w.listRGBAssets(/*include_spent=*/false);
+    {
+        QSignalBlocker rgb_blocker(m_rgb_assets);
+        m_rgb_assets->setRowCount(static_cast<int>(rgb_assets.size()));
+        for (int row = 0; row < static_cast<int>(rgb_assets.size()); ++row) {
+            const interfaces::WalletRGBAssetInfo& asset = rgb_assets.at(row);
+            const QString contract_id = QString::fromStdString(asset.contract_id);
+            m_rgb_assets->setItem(row, 0, readOnlyItem(QString::fromStdString(asset.ticker.empty() ? asset.name : asset.ticker)));
+            m_rgb_assets->setItem(row, 1, readOnlyItem(formatAssetAmount(asset.balance)));
+            m_rgb_assets->setItem(row, 2, readOnlyItem(formatAssetAmount(asset.total_supply)));
+            m_rgb_assets->setItem(row, 3, readOnlyItem(QString::number(static_cast<int>(asset.assignments.size()))));
+            auto* contract_item = readOnlyItem(shortenHex(asset.contract_id));
+            contract_item->setData(Qt::UserRole, contract_id);
+            contract_item->setToolTip(contract_id);
+            m_rgb_assets->setItem(row, 4, contract_item);
+        }
+    }
+    m_rgb_status->setText(rgb_assets.empty()
+        ? tr("No RGB assets are stored in this wallet yet. Use the RPC console for validated consignment import/export until the guided transfer workflow is complete.")
+        : tr("%1 RGB asset(s) loaded. Consignment import/export and transfer construction remain advanced console workflows.")
+              .arg(static_cast<int>(rgb_assets.size())));
+
+    const std::vector<interfaces::WalletEUTXOStateInfo> eutxo_states = w.listEUTXOStates(/*include_spent=*/true);
+    {
+        QSignalBlocker eutxo_blocker(m_eutxo_states);
+        m_eutxo_states->setRowCount(static_cast<int>(eutxo_states.size()));
+        for (int row = 0; row < static_cast<int>(eutxo_states.size()); ++row) {
+            const interfaces::WalletEUTXOStateInfo& state = eutxo_states.at(row);
+            const QString outpoint = QString::fromStdString(state.txid) + QStringLiteral(":") + QString::number(state.vout);
+            auto* outpoint_item = readOnlyItem(shortenHex(outpoint.toStdString()));
+            outpoint_item->setToolTip(outpoint);
+            m_eutxo_states->setItem(row, 0, outpoint_item);
+            m_eutxo_states->setItem(row, 1, readOnlyItem(formatBLK(state.amount)));
+            m_eutxo_states->setItem(row, 2, readOnlyItem(state.spent ? tr("yes") : tr("no")));
+            auto* datum_item = readOnlyItem(shortenHex(state.datum_hex));
+            datum_item->setToolTip(QString::fromStdString(state.datum_hex));
+            m_eutxo_states->setItem(row, 3, datum_item);
+            auto* validator_item = readOnlyItem(shortenHex(state.validator_hex));
+            validator_item->setToolTip(QString::fromStdString(state.validator_hex));
+            m_eutxo_states->setItem(row, 4, validator_item);
+        }
+    }
+    m_eutxo_status->setText(eutxo_states.empty()
+        ? tr("No EUTXO state metadata is stored in this wallet yet.")
+        : tr("%1 EUTXO state record(s) loaded. Use the RPC console for create/verify transition tooling until the guided EUTXO workflow is complete.")
+              .arg(static_cast<int>(eutxo_states.size())));
+
     const std::vector<interfaces::WalletQuantumAddressInfo> quantum_addresses = w.listQuantumAddresses();
     const std::vector<interfaces::WalletQuantumColdStakeInfo> coldstake_delegations = w.listQuantumColdStakeDelegations();
     m_quantum_address_count->setText(QString::number(static_cast<int>(quantum_addresses.size())));
@@ -1567,6 +1832,14 @@ void StakingMiningPage::resetStatusForNoWallet()
     m_migration_quantum_amount->setText(QStringLiteral("-"));
     m_migration_goldrush_amount->setText(QStringLiteral("-"));
     m_migration_advice->setText(tr("Load a wallet to view migration status."));
+    m_migration_action_status->setText(QStringLiteral("-"));
+    m_demurrage_status->setText(tr("Load a wallet to view demurrage status."));
+    m_demurrage_amounts->setText(QStringLiteral("-"));
+    m_demurrage_guards->setText(QStringLiteral("-"));
+    m_rgb_assets->setRowCount(0);
+    m_rgb_status->setText(tr("Load a wallet to view RGB assets."));
+    m_eutxo_states->setRowCount(0);
+    m_eutxo_status->setText(tr("Load a wallet to view EUTXO states."));
     m_quantum_address_count->setText(QStringLiteral("0"));
     m_coldstake_count->setText(QStringLiteral("0"));
     m_quantum_address->clear();
@@ -1643,6 +1916,10 @@ void StakingMiningPage::refreshControlsEnabled()
     m_quantum_new->setEnabled(can_create_quantum);
     m_quantum_copy->setEnabled(m_quantum_address && !m_quantum_address->text().isEmpty());
     m_quantum_pubkey_copy->setEnabled(m_quantum_pubkey && !m_quantum_pubkey->text().isEmpty());
+    m_migration_legacy_sweep->setEnabled(can_create_quantum);
+    m_migration_goldrush_sweep->setEnabled(can_create_quantum);
+    m_demurrage_attest->setEnabled(can_create_quantum && m_quantum_address && !m_quantum_address->text().isEmpty());
+    m_rgb_copy_contract->setEnabled(has_wallet && m_rgb_assets && !m_rgb_assets->selectedItems().empty());
     m_selfstake_lock_period->setEnabled(can_create_quantum);
     m_selfstake_selector->setEnabled(has_wallet && m_selfstake_selector->count() > 1);
     m_selfstake_new->setEnabled(can_create_quantum);
