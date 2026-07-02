@@ -2356,11 +2356,19 @@ static bool CheckQuantumMigrationSpendIsolation(const CTransaction& tx, const CC
     return true;
 }
 
+static bool QuantumQuasarOutputRulesActive(unsigned int flags)
+{
+    return flags & (SCRIPT_VERIFY_ISCOINSTAKE |
+                    SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT |
+                    SCRIPT_VERIFY_EUTXO |
+                    SCRIPT_VERIFY_LEGACY_ECDSA_LOCKOUT);
+}
+
 static bool CheckQuantumQuasarOutputs(const CTransaction& tx, unsigned int flags, std::string& reject_reason)
 {
     for (unsigned int i = 0; i < tx.vout.size(); ++i) {
         const CTxOut& txout = tx.vout[i];
-        if ((flags & SCRIPT_VERIFY_ISCOINSTAKE) && IsShadowMarkerScript(txout.scriptPubKey)) {
+        if (QuantumQuasarOutputRulesActive(flags) && IsShadowMarkerScript(txout.scriptPubKey)) {
             reject_reason = "shadow-marker-output";
             return false;
         }
