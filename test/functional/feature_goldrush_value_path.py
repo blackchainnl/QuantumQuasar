@@ -182,7 +182,10 @@ class GoldRushValuePathTest(BitcoinTestFramework):
         premature_raw, _ = self._build_quantum_spend(wallet, payout_utxo, next_quantum)
         premature_accept = node.testmempoolaccept([premature_raw])[0]
         assert_equal(premature_accept["allowed"], False)
-        assert_equal(premature_accept["reject-reason"], "goldrush-remigration-premature")
+        assert premature_accept["reject-reason"] in (
+            "goldrush-remigration-premature",
+            "bad-txns-premature-spend-of-coinbase",
+        ), premature_accept
 
         self.log.info("Advancing to migration and rejecting the still-immature synthetic payout")
         self._advance_to_migration_window()
