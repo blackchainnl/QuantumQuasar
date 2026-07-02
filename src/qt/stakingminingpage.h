@@ -6,6 +6,7 @@
 #define BITCOIN_QT_STAKINGMININGPAGE_H
 
 #include <QPointer>
+#include <QSize>
 #include <QWidget>
 
 class ClientModel;
@@ -40,6 +41,8 @@ public:
     explicit StakingMiningPage(const PlatformStyle* platformStyle, QWidget* parent = nullptr);
     ~StakingMiningPage();
 
+    QSize minimumSizeHint() const override;
+
     void setClientModel(ClientModel* clientModel);
     void setWalletModel(WalletModel* walletModel);
 
@@ -57,6 +60,9 @@ private Q_SLOTS:
     void onCreateQuantumAddress();
     void onCopyQuantumAddress();
     void onCopyQuantumPubkey();
+    void onCreateOperatorKey();
+    void onCopyOperatorKey();
+    void onUseOperatorKeyForDelegation();
     void onCreateColdStakeAddress();
     void onCopyColdStakeAddress();
     void updateStatus();
@@ -109,6 +115,12 @@ private:
     QPushButton* m_quantum_new{nullptr};
     QPushButton* m_quantum_copy{nullptr};
     QPushButton* m_quantum_pubkey_copy{nullptr};
+    QLineEdit* m_operator_address{nullptr};
+    QLineEdit* m_operator_pubkey{nullptr};
+    QPushButton* m_operator_new{nullptr};
+    QPushButton* m_operator_copy{nullptr};
+    QPushButton* m_operator_use_for_delegation{nullptr};
+    QLabel* m_operator_status{nullptr};
     QLineEdit* m_coldstake_staker_pubkey{nullptr};
     QLineEdit* m_coldstake_address{nullptr};
     QPushButton* m_coldstake_new{nullptr};

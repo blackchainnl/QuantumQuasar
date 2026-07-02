@@ -24,12 +24,14 @@
 #include <util/strencodings.h>
 
 #include <QAction>
+#include <QAbstractScrollArea>
 #include <QFileDialog>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSizePolicy>
 #include <QVBoxLayout>
 
 WalletView::WalletView(WalletModel* wallet_model, const PlatformStyle* _platformStyle, QWidget* parent)
@@ -45,9 +47,14 @@ WalletView::WalletView(WalletModel* wallet_model, const PlatformStyle* _platform
 
     stakingMiningPage = new StakingMiningPage(platformStyle);
     stakingMiningPage->setWalletModel(walletModel);
+    stakingMiningPage->setMinimumWidth(0);
+    stakingMiningPage->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     auto* stakingScroll = new QScrollArea(this);
     stakingScroll->setObjectName(QStringLiteral("stakingMiningScrollPage"));
+    stakingScroll->setMinimumWidth(0);
+    stakingScroll->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     stakingScroll->setFrameShape(QFrame::NoFrame);
+    stakingScroll->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
     stakingScroll->setWidgetResizable(true);
     stakingScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     stakingScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
@@ -124,6 +131,11 @@ WalletView::WalletView(WalletModel* wallet_model, const PlatformStyle* _platform
 
     // Show progress dialog
     connect(walletModel, &WalletModel::showProgress, this, &WalletView::showProgress);
+}
+
+QSize WalletView::minimumSizeHint() const
+{
+    return QSize(0, 0);
 }
 
 WalletView::~WalletView() = default;
