@@ -181,6 +181,7 @@ private:
     QPushButton* m_operator_registry_use{nullptr};
     QLabel* m_operator_registry_status{nullptr};
     QLabel* m_coldstake_quantum_available{nullptr};
+    QLabel* m_coldstake_selection_summary{nullptr};
     QComboBox* m_coldstake_lock_period{nullptr};
     QComboBox* m_coldstake_operator_selector{nullptr};
     QComboBox* m_coldstake_existing_selector{nullptr};
@@ -200,6 +201,7 @@ private:
     bool requestStakingOnlyUnlock();
     bool requestNormalUnlock();
     QString selectedColdStakeOperatorPubKey() const;
+    QString selectedColdStakeOperatorHash() const;
     void setColdStakeOperatorSelection(const QString& pubkey, const QString& label);
 };
 

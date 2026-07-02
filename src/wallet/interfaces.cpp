@@ -133,6 +133,8 @@ WalletQuantumColdStakeInfo MakeWalletQuantumColdStakeInfo(const CWallet& wallet,
     if (const auto* entry = wallet.FindAddressBookEntry(info.destination)) {
         result.label = entry->GetLabel();
     }
+    result.staking_pubkey_hash = info.staker_pubkey_hash.GetHex();
+    result.owner_pubkey_hash = info.owner_pubkey_hash.GetHex();
     result.creation_time = info.creation_time;
     result.has_staker_key = info.has_staker_key;
     result.has_owner_key = info.has_owner_key;

@@ -600,6 +600,8 @@ struct WalletQuantumColdStakeInfo
 {
     std::string address;
     std::string label;
+    std::string staking_pubkey_hash;
+    std::string owner_pubkey_hash;
     int64_t creation_time{0};
     bool has_staker_key{false};
     bool has_owner_key{false};
