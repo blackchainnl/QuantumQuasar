@@ -21,6 +21,7 @@
 #include <validation.h>
 #include <wallet/coincontrol.h>
 #include <wallet/fees.h>
+#include <wallet/quantum_stake_ops.h>
 #include <wallet/rpc/util.h>
 #include <wallet/rpc/staking.h>
 #include <wallet/spend.h>
@@ -56,6 +57,154 @@ static bool IsDirectQuantumMigrationScript(const CScript& script_pub_key)
 {
     const auto tier = GetQuantumStakeTierProgram(script_pub_key);
     return tier && !tier->tiered && !tier->cold_stake;
+}
+
+static UniValue QuantumOperatorBondInfoToJSON(const interfaces::WalletQuantumOperatorBondInfo& info)
+{
+    UniValue obj(UniValue::VOBJ);
+    obj.pushKV("available", info.available);
+    obj.pushKV("valid_address", info.valid_operator_address);
+    obj.pushKV("current_height", info.current_height);
+    obj.pushKV("bonded_amount", ValueFromAmount(info.bonded_amount));
+    obj.pushKV("bonded_outputs", info.bonded_outputs);
+    obj.pushKV("unbonding_amount", ValueFromAmount(info.unbonding_amount));
+    obj.pushKV("unbonding_outputs", info.unbonding_outputs);
+    obj.pushKV("withdrawable_amount", ValueFromAmount(info.withdrawable_amount));
+    obj.pushKV("withdrawable_outputs", info.withdrawable_outputs);
+    obj.pushKV("next_unlock_height", info.next_unlock_height);
+    return obj;
+}
+
+static UniValue QuantumStakeOutputsToJSON(const std::vector<interfaces::WalletQuantumStakeOutputInfo>& outputs)
+{
+    UniValue arr(UniValue::VARR);
+    for (const auto& output : outputs) {
+        UniValue obj(UniValue::VOBJ);
+        obj.pushKV("txid", output.txid);
+        obj.pushKV("vout", output.vout);
+        obj.pushKV("address", output.address);
+        obj.pushKV("amount", ValueFromAmount(output.amount));
+        obj.pushKV("depth", output.depth);
+        obj.pushKV("state", output.state);
+        obj.pushKV("unlock_height", output.unlock_height);
+        obj.pushKV("spendable", output.spendable);
+        arr.push_back(std::move(obj));
+    }
+    return arr;
+}
+
+static UniValue QuantumColdStakeBalanceToJSON(const interfaces::WalletQuantumColdStakeBalanceInfo& info)
+{
+    UniValue obj(UniValue::VOBJ);
+    obj.pushKV("available", info.available);
+    obj.pushKV("valid_delegation_address", info.valid_delegation_address);
+    obj.pushKV("current_height", info.current_height);
+    obj.pushKV("amount", ValueFromAmount(info.amount));
+    obj.pushKV("outputs", info.outputs);
+    obj.pushKV("confirmed_amount", ValueFromAmount(info.confirmed_amount));
+    obj.pushKV("confirmed_outputs", info.confirmed_outputs);
+    obj.pushKV("unconfirmed_amount", ValueFromAmount(info.unconfirmed_amount));
+    obj.pushKV("unconfirmed_outputs", info.unconfirmed_outputs);
+    obj.pushKV("spendable_amount", ValueFromAmount(info.spendable_amount));
+    obj.pushKV("spendable_outputs", info.spendable_outputs);
+    return obj;
+}
+
+static UniValue QuantumStakeTxToJSON(const interfaces::WalletQuantumOperatorBondTx& tx)
+{
+    UniValue obj(UniValue::VOBJ);
+    if (!tx.txid.empty()) obj.pushKV("txid", tx.txid);
+    obj.pushKV("address", tx.address);
+    obj.pushKV("amount", ValueFromAmount(tx.amount));
+    obj.pushKV("fee", ValueFromAmount(tx.fee));
+    obj.pushKV("unlock_height", tx.unlock_height);
+    obj.pushKV("started_unbonding", tx.started_unbonding);
+    obj.pushKV("completed_withdrawal", tx.completed_withdrawal);
+    obj.pushKV("created_goldrush_migration", tx.created_migration);
+    obj.pushKV("completed_delegation", tx.completed_delegation);
+    if (!tx.migration_txid.empty()) obj.pushKV("migration_txid", tx.migration_txid);
+    if (!tx.migration_address.empty()) obj.pushKV("migration_address", tx.migration_address);
+    if (tx.migration_amount > 0) obj.pushKV("migration_amount", ValueFromAmount(tx.migration_amount));
+    if (tx.migration_fee > 0) obj.pushKV("migration_fee", ValueFromAmount(tx.migration_fee));
+    if (!tx.warning.empty()) obj.pushKV("warning", tx.warning);
+    return obj;
+}
+
+static COutPoint OutPointFromRPCOptions(const UniValue& options)
+{
+    if (!options.isObject()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "outpoint must be an object with txid and vout");
+    }
+    const UniValue& txid_v = options.find_value("txid");
+    const UniValue& vout_v = options.find_value("vout");
+    if (!txid_v.isStr() || !vout_v.isNum()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "outpoint must include string txid and numeric vout");
+    }
+    const int vout = vout_v.getInt<int>();
+    if (vout < 0) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "vout must be non-negative");
+    }
+    return COutPoint{ParseHashV(txid_v, "txid"), static_cast<uint32_t>(vout)};
+}
+
+static UniValue StakingDonationInfoToJSON(const CWallet& wallet)
+{
+    const unsigned int percentage = wallet.m_donation_percentage;
+    UniValue obj(UniValue::VOBJ);
+    obj.pushKV("enabled", percentage > 0);
+    obj.pushKV("percentage", percentage);
+    obj.pushKV("minimum_percentage", MIN_DONATION_PERCENTAGE);
+    obj.pushKV("maximum_percentage", MAX_DONATION_PERCENTAGE);
+    obj.pushKV("default_percentage", DEFAULT_DONATION_PERCENTAGE);
+    obj.pushKV("pre_migration_suggested_percentage", DEFAULT_DONATION_SUGGESTED_PERCENTAGE);
+    obj.pushKV("post_migration_default_percentage", DEFAULT_POST_MIGRATION_DONATION_PERCENTAGE);
+    obj.pushKV("target_address", Params().GetDevFundAddress());
+    obj.pushKV("note", "Set percentage to 0 to disable staking donations. Nonzero values are honored when the active staking reward format permits donation outputs.");
+    return obj;
+}
+
+static std::vector<RPCResult> QuantumOperatorBondInfoResult()
+{
+    return {
+        {RPCResult::Type::BOOL, "available", "false if wallet state could not be locked"},
+        {RPCResult::Type::BOOL, "valid_address", "true if the address is a wallet-backed staking/operator address"},
+        {RPCResult::Type::NUM, "current_height", "Wallet chain height"},
+        {RPCResult::Type::STR_AMOUNT, "bonded_amount", "Currently bonded amount"},
+        {RPCResult::Type::NUM, "bonded_outputs", "Number of bonded outputs"},
+        {RPCResult::Type::STR_AMOUNT, "unbonding_amount", "Amount in the unbonding state"},
+        {RPCResult::Type::NUM, "unbonding_outputs", "Number of unbonding outputs"},
+        {RPCResult::Type::STR_AMOUNT, "withdrawable_amount", "Amount matured enough to withdraw"},
+        {RPCResult::Type::NUM, "withdrawable_outputs", "Number of withdrawable outputs"},
+        {RPCResult::Type::NUM, "next_unlock_height", "Next unbonding output unlock height, or 0"},
+    };
+}
+
+static std::vector<RPCResult> QuantumStakeTxResult()
+{
+    return {
+        {RPCResult::Type::STR_HEX, "txid", /*optional=*/true, "Broadcast transaction id, when a transaction was completed"},
+        {RPCResult::Type::STR, "address", "Destination or staking address"},
+        {RPCResult::Type::STR_AMOUNT, "amount", "Transaction amount"},
+        {RPCResult::Type::STR_AMOUNT, "fee", "Transaction fee"},
+        {RPCResult::Type::NUM, "unlock_height", "Unlock height for newly unbonding funds, or 0"},
+        {RPCResult::Type::BOOL, "started_unbonding", "true if the transaction started an unbonding period"},
+        {RPCResult::Type::BOOL, "completed_withdrawal", "true if the transaction withdrew matured funds"},
+        {RPCResult::Type::BOOL, "created_goldrush_migration", "true if Gold Rush rewards were first moved to a fresh quantum address"},
+        {RPCResult::Type::BOOL, "completed_delegation", "true if the requested delegation/funding transaction completed"},
+        {RPCResult::Type::STR_HEX, "migration_txid", /*optional=*/true, "Gold Rush reward migration transaction id"},
+        {RPCResult::Type::STR, "migration_address", /*optional=*/true, "Fresh quantum migration address"},
+        {RPCResult::Type::STR_AMOUNT, "migration_amount", /*optional=*/true, "Amount moved by the Gold Rush migration"},
+        {RPCResult::Type::STR_AMOUNT, "migration_fee", /*optional=*/true, "Fee paid by the Gold Rush migration"},
+        {RPCResult::Type::STR, "warning", /*optional=*/true, "Follow-up warning"},
+    };
+}
+
+static UniValue ThrowOrReturnQuantumStakeTx(util::Result<interfaces::WalletQuantumOperatorBondTx>&& result)
+{
+    if (!result) {
+        throw JSONRPCError(RPC_WALLET_ERROR, util::ErrorString(result).original);
+    }
+    return QuantumStakeTxToJSON(*result);
 }
 
 static RPCHelpMan getstakinginfo()
@@ -239,6 +388,327 @@ static RPCHelpMan reservebalance()
     result.pushKV("reserve", (pwallet->m_reserve_balance > 0));
     result.pushKV("amount", ValueFromAmount(pwallet->m_reserve_balance));
     return result;
+},
+    };
+}
+
+static RPCHelpMan getstakingdonationinfo()
+{
+    return RPCHelpMan{"getstakingdonationinfo",
+        "\nReturns wallet staking donation settings used by coinstake creation.\n",
+        {},
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::BOOL, "enabled", "true when staking donations are enabled"},
+            {RPCResult::Type::NUM, "percentage", "Percentage of eligible stake rewards to donate"},
+            {RPCResult::Type::NUM, "minimum_percentage", "Minimum accepted donation percentage"},
+            {RPCResult::Type::NUM, "maximum_percentage", "Maximum accepted donation percentage"},
+            {RPCResult::Type::NUM, "default_percentage", "Startup default donation percentage"},
+            {RPCResult::Type::NUM, "pre_migration_suggested_percentage", "GUI suggested percentage before migration completes"},
+            {RPCResult::Type::NUM, "post_migration_default_percentage", "GUI default after migration completes when the user has not chosen otherwise"},
+            {RPCResult::Type::STR, "target_address", "Configured project donation address"},
+            {RPCResult::Type::STR, "note", "Operational note"},
+        }},
+        RPCExamples{HelpExampleCli("getstakingdonationinfo", "")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+
+    LOCK(pwallet->cs_wallet);
+    return StakingDonationInfoToJSON(*pwallet);
+},
+    };
+}
+
+static RPCHelpMan setstakingdonation()
+{
+    return RPCHelpMan{"setstakingdonation",
+        "\nSets the wallet staking donation percentage. Use 0 to turn donations off.\n",
+        {
+            {"percentage", RPCArg::Type::NUM, RPCArg::Optional::NO, "Donation percentage from 0 to 95."},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::BOOL, "enabled", "true when staking donations are enabled"},
+            {RPCResult::Type::NUM, "percentage", "Percentage of eligible stake rewards to donate"},
+            {RPCResult::Type::NUM, "minimum_percentage", "Minimum accepted donation percentage"},
+            {RPCResult::Type::NUM, "maximum_percentage", "Maximum accepted donation percentage"},
+            {RPCResult::Type::STR, "target_address", "Configured project donation address"},
+        }},
+        RPCExamples{
+            HelpExampleCli("setstakingdonation", "0") +
+            HelpExampleCli("setstakingdonation", "5")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+
+    int64_t percentage_signed{0};
+    if (!ParseInt64(request.params[0].getValStr(), &percentage_signed)) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "percentage must be an integer");
+    }
+    if (percentage_signed < MIN_DONATION_PERCENTAGE || percentage_signed > MAX_DONATION_PERCENTAGE) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("percentage must be between %u and %u", MIN_DONATION_PERCENTAGE, MAX_DONATION_PERCENTAGE));
+    }
+
+    LOCK(pwallet->cs_wallet);
+    pwallet->m_donation_percentage = static_cast<unsigned int>(percentage_signed);
+    return StakingDonationInfoToJSON(*pwallet);
+},
+    };
+}
+
+static RPCHelpMan getquantumstakeaddressinfo()
+{
+    return RPCHelpMan{"getquantumstakeaddressinfo",
+        "\nReturns wallet-owned bonded quantum staking balance state for a staking address.\n",
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed bonded quantum staking address."},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", QuantumOperatorBondInfoResult()},
+        RPCExamples{HelpExampleCli("getquantumstakeaddressinfo", "\"quantum_stake_address\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+
+    return QuantumOperatorBondInfoToJSON(MakeWalletTieredStakeBondInfo(*pwallet, request.params[0].get_str(), /*require_operator_lock=*/false));
+},
+    };
+}
+
+static RPCHelpMan listquantumstakeoutputs()
+{
+    return RPCHelpMan{"listquantumstakeoutputs",
+        "\nLists wallet-owned bonded, unbonding, and withdrawable quantum staking outputs for a staking address.\n",
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed bonded quantum staking address."},
+        },
+        RPCResult{RPCResult::Type::ARR, "", "", {
+            {RPCResult::Type::OBJ, "", "", {
+                {RPCResult::Type::STR_HEX, "txid", "Funding or unbonding transaction id"},
+                {RPCResult::Type::NUM, "vout", "Output index"},
+                {RPCResult::Type::STR, "address", "Staking address"},
+                {RPCResult::Type::STR_AMOUNT, "amount", "Output amount"},
+                {RPCResult::Type::NUM, "depth", "Confirmation depth"},
+                {RPCResult::Type::STR, "state", "bonded, unbonding, or withdrawable"},
+                {RPCResult::Type::NUM, "unlock_height", "Unlock height for unbonding outputs"},
+                {RPCResult::Type::BOOL, "spendable", "true if wallet can currently spend this output"},
+            }},
+        }},
+        RPCExamples{HelpExampleCli("listquantumstakeoutputs", "\"quantum_stake_address\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+
+    return QuantumStakeOutputsToJSON(ListTieredStakeOutputs(*pwallet, request.params[0].get_str(), /*require_operator_lock=*/false));
+},
+    };
+}
+
+static RPCHelpMan fundquantumstakeaddress()
+{
+    return RPCHelpMan{"fundquantumstakeaddress",
+        "\nFunds a wallet-backed bonded quantum staking address from legacy wallet coins.\n" + HELP_REQUIRING_PASSPHRASE,
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed bonded quantum staking address."},
+            {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "Amount to bond."},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", QuantumStakeTxResult()},
+        RPCExamples{HelpExampleCli("fundquantumstakeaddress", "\"quantum_stake_address\" 10000")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    return ThrowOrReturnQuantumStakeTx(FundTieredStakeAddress(
+        *pwallet,
+        request.params[0].get_str(),
+        AmountFromValue(request.params[1]),
+        /*require_operator_lock=*/false,
+        "Blackcoin quantum staking address funding"));
+},
+    };
+}
+
+static RPCHelpMan withdrawquantumstakeaddress()
+{
+    return RPCHelpMan{"withdrawquantumstakeaddress",
+        "\nStarts unbonding or withdraws matured quantum staking funds for a staking address.\n" + HELP_REQUIRING_PASSPHRASE,
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed bonded quantum staking address."},
+            {"outpoint", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "Optional single staking output to withdraw/unbond.", {
+                {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Transaction id."},
+                {"vout", RPCArg::Type::NUM, RPCArg::Optional::NO, "Output index."},
+            }},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", QuantumStakeTxResult()},
+        RPCExamples{HelpExampleCli("withdrawquantumstakeaddress", "\"quantum_stake_address\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    std::optional<COutPoint> outpoint;
+    if (request.params.size() > 1 && !request.params[1].isNull()) outpoint = OutPointFromRPCOptions(request.params[1]);
+    return ThrowOrReturnQuantumStakeTx(WithdrawTieredStakeAddress(
+        *pwallet,
+        request.params[0].get_str(),
+        /*require_operator_lock=*/false,
+        "quantum-stake-unbonding",
+        "quantum-stake-withdrawal",
+        "Blackcoin quantum staking address unbond",
+        "Blackcoin quantum staking address withdrawal",
+        outpoint));
+},
+    };
+}
+
+static RPCHelpMan getquantumoperatorbondinfo()
+{
+    return RPCHelpMan{"getquantumoperatorbondinfo",
+        "\nReturns wallet-owned operator bond state for a fixed 30-day cold-stake operator address.\n",
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed fixed 30-day cold-stake operator address."},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", QuantumOperatorBondInfoResult()},
+        RPCExamples{HelpExampleCli("getquantumoperatorbondinfo", "\"operator_address\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+
+    return QuantumOperatorBondInfoToJSON(MakeWalletOperatorBondInfo(*pwallet, request.params[0].get_str()));
+},
+    };
+}
+
+static RPCHelpMan fundquantumoperatorbond()
+{
+    return RPCHelpMan{"fundquantumoperatorbond",
+        "\nFunds a fixed 30-day cold-stake operator bond from legacy wallet coins.\n" + HELP_REQUIRING_PASSPHRASE,
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed fixed 30-day cold-stake operator address."},
+            {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "Amount to bond."},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", QuantumStakeTxResult()},
+        RPCExamples{HelpExampleCli("fundquantumoperatorbond", "\"operator_address\" 10000")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    return ThrowOrReturnQuantumStakeTx(FundTieredStakeAddress(
+        *pwallet,
+        request.params[0].get_str(),
+        AmountFromValue(request.params[1]),
+        /*require_operator_lock=*/true,
+        "Blackcoin cold-stake operator bond"));
+},
+    };
+}
+
+static RPCHelpMan withdrawquantumoperatorbond()
+{
+    return RPCHelpMan{"withdrawquantumoperatorbond",
+        "\nStarts unbonding or withdraws matured cold-stake operator bond funds.\n" + HELP_REQUIRING_PASSPHRASE,
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed fixed 30-day cold-stake operator address."},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", QuantumStakeTxResult()},
+        RPCExamples{HelpExampleCli("withdrawquantumoperatorbond", "\"operator_address\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    return ThrowOrReturnQuantumStakeTx(WithdrawTieredStakeAddress(
+        *pwallet,
+        request.params[0].get_str(),
+        /*require_operator_lock=*/true,
+        "coldstake-operator-unbonding",
+        "coldstake-operator-withdrawal",
+        "Blackcoin cold-stake operator unbond",
+        "Blackcoin cold-stake operator withdrawal"));
+},
+    };
+}
+
+static RPCHelpMan getquantumcoldstakebalance()
+{
+    return RPCHelpMan{"getquantumcoldstakebalance",
+        "\nReturns wallet-owned balance state for a quantum cold-stake delegation address.\n",
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed quantum cold-stake delegation address."},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::BOOL, "available", "false if wallet state could not be locked"},
+            {RPCResult::Type::BOOL, "valid_delegation_address", "true if this is a wallet-backed cold-stake delegation address"},
+            {RPCResult::Type::NUM, "current_height", "Wallet chain height"},
+            {RPCResult::Type::STR_AMOUNT, "amount", "Total delegated amount"},
+            {RPCResult::Type::NUM, "outputs", "Total delegation outputs"},
+            {RPCResult::Type::STR_AMOUNT, "confirmed_amount", "Confirmed delegated amount"},
+            {RPCResult::Type::NUM, "confirmed_outputs", "Confirmed delegation outputs"},
+            {RPCResult::Type::STR_AMOUNT, "unconfirmed_amount", "Unconfirmed delegated amount"},
+            {RPCResult::Type::NUM, "unconfirmed_outputs", "Unconfirmed delegation outputs"},
+            {RPCResult::Type::STR_AMOUNT, "spendable_amount", "Currently spendable delegated amount"},
+            {RPCResult::Type::NUM, "spendable_outputs", "Currently spendable delegation outputs"},
+        }},
+        RPCExamples{HelpExampleCli("getquantumcoldstakebalance", "\"coldstake_delegation_address\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+
+    return QuantumColdStakeBalanceToJSON(MakeWalletColdStakeBalanceInfo(*pwallet, request.params[0].get_str()));
+},
+    };
+}
+
+static RPCHelpMan fundquantumcoldstakeaddress()
+{
+    return RPCHelpMan{"fundquantumcoldstakeaddress",
+        "\nFunds a quantum cold-stake delegation address from direct quantum funds.\n"
+        "If only wallet-owned Gold Rush reward outputs are available, the wallet first moves them to a fresh quantum address and then funds the delegation.\n" +
+        HELP_REQUIRING_PASSPHRASE,
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed quantum cold-stake delegation address."},
+            {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "Amount to delegate."},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", QuantumStakeTxResult()},
+        RPCExamples{HelpExampleCli("fundquantumcoldstakeaddress", "\"coldstake_delegation_address\" 1000")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    return ThrowOrReturnQuantumStakeTx(FundColdStakeDelegationAddress(*pwallet, request.params[0].get_str(), AmountFromValue(request.params[1])));
+},
+    };
+}
+
+static RPCHelpMan withdrawquantumcoldstakeaddress()
+{
+    return RPCHelpMan{"withdrawquantumcoldstakeaddress",
+        "\nStarts unbonding or withdraws matured funds from a quantum cold-stake delegation address.\n" + HELP_REQUIRING_PASSPHRASE,
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed quantum cold-stake delegation address."},
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "", QuantumStakeTxResult()},
+        RPCExamples{HelpExampleCli("withdrawquantumcoldstakeaddress", "\"coldstake_delegation_address\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    return ThrowOrReturnQuantumStakeTx(WithdrawColdStakeDelegationAddress(*pwallet, request.params[0].get_str()));
 },
     };
 }
@@ -1936,12 +2406,24 @@ static const CRPCCommand commands[] =
 { //  category              actor (function)
   //  ------------------    ------------------------
     { "staking",            &getstakinginfo,                 },
+    { "staking",            &getstakingdonationinfo,         },
+    { "staking",            &setstakingdonation,             },
     { "staking",            &getgoldrushinfo,                },
     { "staking",            &reservebalance,                 },
     { "staking",            &sendshadowsignal,               },
     { "staking",            &sendshadowpowclaim,             },
     { "staking",            &setpowmining,                   },
     { "staking",            &getpowmininginfo,               },
+    { "staking",            &getquantumstakeaddressinfo,     },
+    { "staking",            &listquantumstakeoutputs,        },
+    { "staking",            &fundquantumstakeaddress,        },
+    { "staking",            &withdrawquantumstakeaddress,    },
+    { "staking",            &getquantumoperatorbondinfo,     },
+    { "staking",            &fundquantumoperatorbond,        },
+    { "staking",            &withdrawquantumoperatorbond,    },
+    { "staking",            &getquantumcoldstakebalance,     },
+    { "staking",            &fundquantumcoldstakeaddress,    },
+    { "staking",            &withdrawquantumcoldstakeaddress,},
     { "staking",            &getquantumredelegationinfo,     },
     { "staking",            &redelegatequantumcoldstake,     },
     { "staking",            &senddemurrageattestation,       },

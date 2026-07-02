@@ -38,6 +38,7 @@
 #include <wallet/fees.h>
 #include <wallet/types.h>
 #include <wallet/load.h>
+#include <wallet/quantum_stake_ops.h>
 #include <wallet/receive.h>
 #include <wallet/rpc/wallet.h>
 #include <wallet/spend.h>
@@ -143,6 +144,8 @@ WalletQuantumColdStakeInfo MakeWalletQuantumColdStakeInfo(const CWallet& wallet,
     result.unlock_height = info.unlock_height;
     return result;
 }
+
+} // namespace
 
 struct ColdStakeDelegationOutputs
 {
@@ -668,7 +671,7 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
     const std::string& withdrawal_label,
     std::string unbonding_comment,
     std::string withdrawal_comment,
-    std::optional<COutPoint> selected_outpoint = std::nullopt)
+    std::optional<COutPoint> selected_outpoint)
 {
     CTxDestination dest;
     const auto tier = DecodeTieredStakeAddress(address, dest, require_operator_lock);
@@ -994,6 +997,8 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawColdStakeDelegationAddress(
     return result;
 }
 
+namespace {
+
 std::vector<WalletRGBAssetInfo> ListWalletRGBAssets(CWallet& wallet, bool include_spent)
 {
     std::vector<WalletRGBAssetInfo> result;
@@ -1188,12 +1193,14 @@ WalletDemurrageInfo GetWalletDemurrageInfo(CWallet& wallet)
     return info;
 }
 
+} // namespace
+
 util::Result<WalletQuantumActionTx> CreateQuantumMigrationSweep(
     CWallet& wallet,
     bool goldrush_rewards_only,
-    bool allow_goldrush_epoch = false,
-    const std::string& destination_label = "",
-    const std::string& comment_override = "")
+    bool allow_goldrush_epoch,
+    const std::string& destination_label,
+    const std::string& comment_override)
 {
     const std::string label = !destination_label.empty()
         ? destination_label
@@ -1312,6 +1319,8 @@ util::Result<WalletQuantumActionTx> CreateGoldRushColdStakeMigration(CWallet& wa
         "goldrush-coldstake-migration-gui",
         "Blackcoin Gold Rush reward migration before cold-stake delegation");
 }
+
+namespace {
 
 util::Result<WalletQuantumActionTx> CreateWalletDemurrageAttestation(CWallet& wallet, const std::string& address)
 {
