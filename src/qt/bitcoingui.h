@@ -141,6 +141,7 @@ private:
     QAction* overviewAction = nullptr;
     QAction* stakingMiningAction = nullptr;
     QAction* historyAction = nullptr;
+    QAction* accountAction = nullptr;
     QAction* quitAction = nullptr;
     QAction* sendCoinsAction = nullptr;
     QAction* usedSendingAddressesAction = nullptr;
@@ -295,6 +296,8 @@ public Q_SLOTS:
     void gotoStakingMiningPage();
     /** Switch to history (transactions) page */
     void gotoHistoryPage();
+    /** Switch to account detail page */
+    void gotoAccountPage();
     /** Switch to receive coins page */
     void gotoReceiveCoinsPage();
     /** Switch to send coins page */

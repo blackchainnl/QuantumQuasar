@@ -10,6 +10,7 @@
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>
 #include <qt/platformstyle.h>
+#include <qt/quantumguides.h>
 #include <qt/walletmodel.h>
 
 #include <addresstype.h>
@@ -2839,8 +2840,8 @@ void StakingMiningPage::showHelpDialog(const QString& title, const QString& html
 {
     QDialog dialog(this);
     dialog.setWindowTitle(title);
-    dialog.resize(760, 560);
-    dialog.setMinimumSize(520, 360);
+    dialog.resize(920, 720);
+    dialog.setMinimumSize(620, 440);
 
     auto* layout = new QVBoxLayout(&dialog);
     auto* browser = new QTextBrowser(&dialog);
@@ -2849,13 +2850,14 @@ void StakingMiningPage::showHelpDialog(const QString& title, const QString& html
     browser->setHtml(tr(
         "<html><body style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; line-height: 1.45;\">"
         "<style>"
+        "h2 { margin-top: 20px; margin-bottom: 8px; }"
         "h3 { margin-top: 16px; margin-bottom: 6px; }"
         "p { margin-top: 4px; margin-bottom: 10px; }"
         "li { margin-bottom: 5px; }"
         "ol, ul { margin-top: 4px; }"
         "</style>"
         "%1"
-        "</body></html>").arg(html));
+        "</body></html>").arg(html + QuantumGuides::DetailedAppendixForTitle(title)));
     layout->addWidget(browser);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);

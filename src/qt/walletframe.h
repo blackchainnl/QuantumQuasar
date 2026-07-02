@@ -73,6 +73,8 @@ public Q_SLOTS:
     void gotoStakingMiningPage();
     /** Switch to history (transactions) page */
     void gotoHistoryPage();
+    /** Switch to account detail page */
+    void gotoAccountPage();
     /** Switch to receive coins page */
     void gotoReceiveCoinsPage();
     /** Switch to send coins page */

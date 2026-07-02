@@ -12,6 +12,7 @@
 #include <QStackedWidget>
 
 class ClientModel;
+class AccountPage;
 class OverviewPage;
 class PlatformStyle;
 class StakingMiningPage;
@@ -66,6 +67,7 @@ private:
     StakingMiningPage *stakingMiningPage;
     QWidget *stakingMiningScrollPage;
     QWidget *transactionsPage;
+    AccountPage *accountPage;
     ReceiveCoinsDialog *receiveCoinsPage;
     SendCoinsDialog *sendCoinsPage;
     AddressBookPage *usedSendingAddressesPage;
@@ -81,6 +83,8 @@ public Q_SLOTS:
     void gotoOverviewPage();
     /** Switch to history (transactions) page */
     void gotoHistoryPage();
+    /** Switch to account detail page */
+    void gotoAccountPage();
     /** Switch to receive coins page */
     void gotoReceiveCoinsPage();
     /** Switch to send coins page */

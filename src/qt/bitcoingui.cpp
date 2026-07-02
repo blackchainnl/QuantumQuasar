@@ -300,6 +300,13 @@ void BitcoinGUI::createActions()
     historyAction->setShortcut(QKeySequence(QStringLiteral("Alt+4")));
     tabGroup->addAction(historyAction);
 
+    accountAction = new QAction(platformStyle->SingleColorIcon(":/icons/address-book"), tr("&Account"), this);
+    accountAction->setStatusTip(tr("Inspect wallet balances by address and output"));
+    accountAction->setToolTip(accountAction->statusTip());
+    accountAction->setCheckable(true);
+    accountAction->setShortcut(QKeySequence(QStringLiteral("Alt+6")));
+    tabGroup->addAction(accountAction);
+
 #ifdef ENABLE_WALLET
     // These showNormalIfMinimized are needed because Send Coins and Receive Coins
     // can be triggered from the tray menu, and need to show the GUI to be useful.
@@ -313,6 +320,8 @@ void BitcoinGUI::createActions()
     connect(receiveCoinsAction, &QAction::triggered, this, &BitcoinGUI::gotoReceiveCoinsPage);
     connect(historyAction, &QAction::triggered, [this]{ showNormalIfMinimized(); });
     connect(historyAction, &QAction::triggered, this, &BitcoinGUI::gotoHistoryPage);
+    connect(accountAction, &QAction::triggered, [this]{ showNormalIfMinimized(); });
+    connect(accountAction, &QAction::triggered, this, &BitcoinGUI::gotoAccountPage);
 #endif // ENABLE_WALLET
 
     quitAction = new QAction(tr("E&xit"), this);
@@ -611,6 +620,7 @@ void BitcoinGUI::createToolBars()
         toolbar->addAction(sendCoinsAction);
         toolbar->addAction(receiveCoinsAction);
         toolbar->addAction(historyAction);
+        toolbar->addAction(accountAction);
         overviewAction->setChecked(true);
 
 #ifdef ENABLE_WALLET
@@ -712,7 +722,8 @@ void BitcoinGUI::setClientModel(ClientModel *_clientModel, interfaces::BlockAndH
 void BitcoinGUI::enableHistoryAction(bool privacy)
 {
     historyAction->setEnabled(!privacy);
-    if (historyAction->isChecked()) gotoOverviewPage();
+    accountAction->setEnabled(!privacy);
+    if (historyAction->isChecked() || accountAction->isChecked()) gotoOverviewPage();
 }
 
 void BitcoinGUI::setWalletController(WalletController* wallet_controller, bool show_loading_minimized)
@@ -831,6 +842,7 @@ void BitcoinGUI::setWalletActionsEnabled(bool enabled)
     sendCoinsAction->setEnabled(enabled);
     receiveCoinsAction->setEnabled(enabled);
     historyAction->setEnabled(enabled);
+    accountAction->setEnabled(enabled);
     encryptWalletAction->setEnabled(enabled);
     backupWalletAction->setEnabled(enabled);
     changePassphraseAction->setEnabled(enabled);
@@ -999,6 +1011,13 @@ void BitcoinGUI::gotoHistoryPage()
 {
     historyAction->setChecked(true);
     if (walletFrame) walletFrame->gotoHistoryPage();
+    QTimer::singleShot(0, this, [this] { fitToScreen(); });
+}
+
+void BitcoinGUI::gotoAccountPage()
+{
+    accountAction->setChecked(true);
+    if (walletFrame) walletFrame->gotoAccountPage();
     QTimer::singleShot(0, this, [this] { fitToScreen(); });
 }
 
@@ -1317,6 +1336,7 @@ void BitcoinGUI::changeEvent(QEvent *e)
         sendCoinsAction->setIcon(platformStyle->SingleColorIcon(QStringLiteral(":/icons/send")));
         receiveCoinsAction->setIcon(platformStyle->SingleColorIcon(QStringLiteral(":/icons/receiving_addresses")));
         historyAction->setIcon(platformStyle->SingleColorIcon(QStringLiteral(":/icons/history")));
+        accountAction->setIcon(platformStyle->SingleColorIcon(QStringLiteral(":/icons/address-book")));
     }
 
     QMainWindow::changeEvent(e);

@@ -4,6 +4,7 @@
 
 #include <qt/walletview.h>
 
+#include <qt/accountpage.h>
 #include <qt/addressbookpage.h>
 #include <qt/askpassphrasedialog.h>
 #include <qt/clientmodel.h>
@@ -78,6 +79,9 @@ WalletView::WalletView(WalletModel* wallet_model, const PlatformStyle* _platform
     vbox->addLayout(hbox_buttons);
     transactionsPage->setLayout(vbox);
 
+    accountPage = new AccountPage(platformStyle);
+    accountPage->setWalletModel(walletModel);
+
     receiveCoinsPage = new ReceiveCoinsDialog(platformStyle);
     receiveCoinsPage->setModel(walletModel);
 
@@ -93,6 +97,7 @@ WalletView::WalletView(WalletModel* wallet_model, const PlatformStyle* _platform
     addWidget(overviewPage);
     addWidget(stakingMiningScrollPage);
     addWidget(transactionsPage);
+    addWidget(accountPage);
     addWidget(receiveCoinsPage);
     addWidget(sendCoinsPage);
 
@@ -116,6 +121,7 @@ WalletView::WalletView(WalletModel* wallet_model, const PlatformStyle* _platform
 
     connect(this, &WalletView::setPrivacy, overviewPage, &OverviewPage::setPrivacy);
     connect(this, &WalletView::setPrivacy, this, &WalletView::disableTransactionView);
+    connect(this, &WalletView::setPrivacy, accountPage, &AccountPage::setPrivacy);
 
     // Receive and pass through messages from wallet model
     connect(walletModel, &WalletModel::message, this, &WalletView::message);
@@ -184,6 +190,11 @@ void WalletView::gotoStakingMiningPage()
 void WalletView::gotoHistoryPage()
 {
     setCurrentWidget(transactionsPage);
+}
+
+void WalletView::gotoAccountPage()
+{
+    setCurrentWidget(accountPage);
 }
 
 void WalletView::gotoReceiveCoinsPage()
