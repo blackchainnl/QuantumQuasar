@@ -11,7 +11,30 @@
 
 #include <stdint.h>
 
+#include <map>
+#include <string>
+
 #include <QDateTime>
+
+namespace {
+bool IsGoldRushWalletControlTx(const std::map<std::string, std::string>& map_value)
+{
+    const auto it = map_value.find("comment");
+    if (it == map_value.end()) return false;
+    return it->second == "Quantum Quasar built-in shadow PoW claim" ||
+           it->second == "Blackcoin shadow PoW claim" ||
+           it->second == "Blackcoin shadow signal";
+}
+
+std::string GoldRushWalletControlLabel(const std::map<std::string, std::string>& map_value)
+{
+    const auto it = map_value.find("comment");
+    if (it == map_value.end()) return {};
+    if (it->second.find("signal") != std::string::npos) return "Gold Rush signal";
+    if (it->second.find("PoW claim") != std::string::npos || it->second.find("shadow PoW") != std::string::npos) return "Gold Rush PoW claim";
+    return "Gold Rush";
+}
+} // namespace
 
 using wallet::ISMINE_NO;
 using wallet::ISMINE_SPENDABLE;
@@ -37,6 +60,14 @@ QList<TransactionRecord> TransactionRecord::decomposeTransaction(const interface
     CAmount nNet = nCredit - nDebit;
     uint256 hash = wtx.tx->GetHash();
     std::map<std::string, std::string> mapValue = wtx.value_map;
+
+    if (IsGoldRushWalletControlTx(mapValue)) {
+        TransactionRecord sub(hash, nTime, TransactionRecord::Other, GoldRushWalletControlLabel(mapValue), nNet, 0);
+        sub.idx = 0;
+        sub.involvesWatchAddress = false;
+        parts.append(sub);
+        return parts;
+    }
 
     bool involvesWatchAddress = false;
     isminetype fAllFromMe = ISMINE_SPENDABLE;
