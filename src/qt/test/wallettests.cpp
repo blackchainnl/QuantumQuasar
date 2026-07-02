@@ -14,6 +14,7 @@
 #include <key_io.h>
 #include <qt/bitcoinamountfield.h>
 #include <qt/bitcoinunits.h>
+#include <qt/bitcoinamountfield.h>
 #include <qt/clientmodel.h>
 #include <qt/optionsmodel.h>
 #include <qt/overviewpage.h>
@@ -332,6 +333,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QPushButton* coldstake_operator_new = page.findChild<QPushButton*>("newColdstakeOperatorKey");
     QPushButton* coldstake_operator_copy = page.findChild<QPushButton*>("coldstakeOperatorCopy");
     QPushButton* coldstake_operator_use = page.findChild<QPushButton*>("coldstakeOperatorUseForDelegation");
+    BitcoinAmountField* coldstake_operator_bond_amount = page.findChild<BitcoinAmountField*>("coldstakeOperatorBondAmount");
+    QPushButton* coldstake_operator_fund = page.findChild<QPushButton*>("coldstakeOperatorFund");
+    QPushButton* coldstake_operator_withdraw = page.findChild<QPushButton*>("coldstakeOperatorWithdraw");
     QLabel* coldstake_operator_status = page.findChild<QLabel*>("coldstakeOperatorStatus");
     QTableWidget* coldstake_operator_registry = page.findChild<QTableWidget*>("coldstakeOperatorRegistry");
     QPushButton* coldstake_operator_refresh = page.findChild<QPushButton*>("coldstakeOperatorRefresh");
@@ -381,6 +385,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(coldstake_operator_new);
     QVERIFY(coldstake_operator_copy);
     QVERIFY(coldstake_operator_use);
+    QVERIFY(coldstake_operator_bond_amount);
+    QVERIFY(coldstake_operator_fund);
+    QVERIFY(coldstake_operator_withdraw);
     QVERIFY(coldstake_operator_status);
     QVERIFY(coldstake_operator_registry);
     QVERIFY(coldstake_operator_refresh);
@@ -419,6 +426,9 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(coldstake_operator_new->isEnabled());
     QVERIFY(!coldstake_operator_copy->isEnabled());
     QVERIFY(!coldstake_operator_use->isEnabled());
+    QVERIFY(!coldstake_operator_bond_amount->isEnabled());
+    QVERIFY(!coldstake_operator_fund->isEnabled());
+    QVERIFY(!coldstake_operator_withdraw->isEnabled());
     QVERIFY(coldstake_operator_refresh->isEnabled());
     QVERIFY(!coldstake_operator_select->isEnabled());
     QCOMPARE(coldstake_operator_registry->rowCount(), 0);

@@ -7,11 +7,13 @@
 
 #include <QPointer>
 #include <QSize>
+#include <QString>
 #include <QWidget>
 
 class ClientModel;
 class WalletModel;
 class PlatformStyle;
+class BitcoinAmountField;
 
 QT_BEGIN_NAMESPACE
 class QCheckBox;
@@ -67,6 +69,8 @@ private Q_SLOTS:
     void onCreateOperatorKey();
     void onCopyOperatorKey();
     void onUseOperatorKeyForDelegation();
+    void onFundOperatorBond();
+    void onWithdrawOperatorBond();
     void onRefreshOperatorRegistry();
     void onUseRegistryOperatorForDelegation();
     void onCreateColdStakeAddress();
@@ -82,6 +86,7 @@ private:
     bool m_pow_apply_pending{false};
     bool m_pow_pending_enabled{false};
     bool m_pow_settings_dirty{false};
+    QString m_operator_last_action_status;
 
     // Staking section
     QCheckBox* m_staking_enable{nullptr};
@@ -131,6 +136,9 @@ private:
     QPushButton* m_operator_new{nullptr};
     QPushButton* m_operator_copy{nullptr};
     QPushButton* m_operator_use_for_delegation{nullptr};
+    BitcoinAmountField* m_operator_bond_amount{nullptr};
+    QPushButton* m_operator_fund{nullptr};
+    QPushButton* m_operator_withdraw{nullptr};
     QLabel* m_operator_status{nullptr};
     QTableWidget* m_operator_registry{nullptr};
     QPushButton* m_operator_registry_refresh{nullptr};

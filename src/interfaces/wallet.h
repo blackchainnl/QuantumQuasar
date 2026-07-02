@@ -57,6 +57,8 @@ struct WalletMigrationResult;
 struct WalletPowMiningInfo;
 struct WalletQuantumAddressInfo;
 struct WalletQuantumColdStakeInfo;
+struct WalletQuantumOperatorBondInfo;
+struct WalletQuantumOperatorBondTx;
 struct WalletQuantumPoolInfo;
 struct WalletQuantumPoolOperatorInfo;
 struct WalletMigrationStatus;
@@ -313,6 +315,15 @@ public:
     //! Return verified local Quantum Cold-Stake operator registry state.
     virtual WalletQuantumPoolInfo getQuantumPoolInfo() = 0;
 
+    //! Return wallet-owned operator bond status for a 30-day operator address.
+    virtual WalletQuantumOperatorBondInfo getQuantumOperatorBondInfo(const std::string& operator_address) = 0;
+
+    //! Fund this wallet's 30-day operator bond address from spendable wallet funds.
+    virtual util::Result<WalletQuantumOperatorBondTx> fundQuantumOperatorBond(const std::string& operator_address, CAmount amount) = 0;
+
+    //! Stop operating: start unbonding if bonded, or complete withdrawal if already mature.
+    virtual util::Result<WalletQuantumOperatorBondTx> withdrawQuantumOperatorBond(const std::string& operator_address) = 0;
+
     //! Create a Quantum Cold-Stake deposit address using a hex ML-DSA staking public key.
     virtual util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label, uint16_t unbonding_blocks) = 0;
 
@@ -556,6 +567,33 @@ struct WalletQuantumPoolInfo
     CAmount total_coldstake{0};
     int64_t cap_bps{0};
     std::vector<WalletQuantumPoolOperatorInfo> operators;
+};
+
+//! Wallet-owned Quantum Cold-Stake operator bond state.
+struct WalletQuantumOperatorBondInfo
+{
+    bool available{true};
+    bool valid_operator_address{false};
+    CAmount bonded_amount{0};
+    int bonded_outputs{0};
+    CAmount unbonding_amount{0};
+    int unbonding_outputs{0};
+    CAmount withdrawable_amount{0};
+    int withdrawable_outputs{0};
+    uint32_t next_unlock_height{0};
+    int current_height{0};
+};
+
+//! Result from a wallet-created operator bond transaction.
+struct WalletQuantumOperatorBondTx
+{
+    std::string txid;
+    std::string address;
+    CAmount amount{0};
+    CAmount fee{0};
+    uint32_t unlock_height{0};
+    bool started_unbonding{false};
+    bool completed_withdrawal{false};
 };
 
 //! Wallet migration progress and deadline state.

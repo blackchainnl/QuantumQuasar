@@ -254,6 +254,7 @@ void BitcoinAmountField::clear()
 
 void BitcoinAmountField::setEnabled(bool fEnabled)
 {
+    QWidget::setEnabled(fEnabled);
     amount->setEnabled(fEnabled);
     unit->setEnabled(fEnabled);
 }

@@ -5,6 +5,7 @@
 #include <qt/stakingminingpage.h>
 
 #include <qt/askpassphrasedialog.h>
+#include <qt/bitcoinamountfield.h>
 #include <qt/clientmodel.h>
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>
@@ -123,6 +124,8 @@ StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget
     connect(m_operator_new, &QPushButton::clicked, this, &StakingMiningPage::onCreateOperatorKey);
     connect(m_operator_copy, &QPushButton::clicked, this, &StakingMiningPage::onCopyOperatorKey);
     connect(m_operator_use_for_delegation, &QPushButton::clicked, this, &StakingMiningPage::onUseOperatorKeyForDelegation);
+    connect(m_operator_fund, &QPushButton::clicked, this, &StakingMiningPage::onFundOperatorBond);
+    connect(m_operator_withdraw, &QPushButton::clicked, this, &StakingMiningPage::onWithdrawOperatorBond);
     connect(m_operator_registry_refresh, &QPushButton::clicked, this, &StakingMiningPage::onRefreshOperatorRegistry);
     connect(m_operator_registry_use, &QPushButton::clicked, this, &StakingMiningPage::onUseRegistryOperatorForDelegation);
     connect(m_operator_registry, &QTableWidget::itemSelectionChanged, this, [this]() { refreshControlsEnabled(); });
@@ -319,6 +322,17 @@ void StakingMiningPage::setupUi()
     m_operator_copy->setObjectName(QStringLiteral("coldstakeOperatorCopy"));
     m_operator_use_for_delegation = new QPushButton(tr("Use for delegation"), coldstakeBox);
     m_operator_use_for_delegation->setObjectName(QStringLiteral("coldstakeOperatorUseForDelegation"));
+    m_operator_bond_amount = new BitcoinAmountField(coldstakeBox);
+    m_operator_bond_amount->setObjectName(QStringLiteral("coldstakeOperatorBondAmount"));
+    m_operator_bond_amount->SetMinValue(CENT);
+    m_operator_bond_amount->setValue(COIN);
+    m_operator_bond_amount->setToolTip(tr("Amount to send to this wallet-backed 30-day operator bond address. The protocol only requires a nonzero live bond output."));
+    m_operator_fund = new QPushButton(tr("Fund operator bond"), coldstakeBox);
+    m_operator_fund->setObjectName(QStringLiteral("coldstakeOperatorFund"));
+    m_operator_fund->setToolTip(tr("Create, sign, and broadcast a wallet transaction funding this operator bond address."));
+    m_operator_withdraw = new QPushButton(tr("Stop / withdraw operator bond"), coldstakeBox);
+    m_operator_withdraw->setObjectName(QStringLiteral("coldstakeOperatorWithdraw"));
+    m_operator_withdraw->setToolTip(tr("If bonded, starts the 30-day unbonding spend. If already unbonded and mature, withdraws to a fresh quantum address."));
     m_operator_status = new QLabel(tr("No operator key selected. Operators must fund a 30-day bonded staking address before delegators can verify them."), coldstakeBox);
     m_operator_status->setObjectName(QStringLiteral("coldstakeOperatorStatus"));
     m_operator_status->setWordWrap(true);
@@ -386,8 +400,12 @@ void StakingMiningPage::setupUi()
     cgrid->addWidget(new QLabel(tr("Operator public key:"), coldstakeBox), r, 0);
     cgrid->addWidget(m_operator_pubkey, r, 1, 1, 2);
     cgrid->addWidget(m_operator_copy, r++, 3);
-    cgrid->addWidget(m_operator_use_for_delegation, r, 1);
-    cgrid->addWidget(m_operator_status, r++, 2, 1, 2);
+    cgrid->addWidget(m_operator_use_for_delegation, r++, 1);
+    cgrid->addWidget(new QLabel(tr("Bond amount:"), coldstakeBox), r, 0);
+    cgrid->addWidget(m_operator_bond_amount, r, 1);
+    cgrid->addWidget(m_operator_fund, r, 2);
+    cgrid->addWidget(m_operator_withdraw, r++, 3);
+    cgrid->addWidget(m_operator_status, r++, 0, 1, 4);
     cgrid->addWidget(new QLabel(tr("Available operators:"), coldstakeBox), r, 0);
     cgrid->addWidget(m_operator_registry_refresh, r, 1);
     cgrid->addWidget(m_operator_registry_use, r++, 2, 1, 2);
@@ -487,6 +505,7 @@ void StakingMiningPage::setWalletModel(WalletModel* walletModel)
     m_updating = false;
     m_pow_apply_pending = false;
     m_pow_settings_dirty = false;
+    m_operator_last_action_status.clear();
 
     if (m_wallet_model) {
         connect(m_wallet_model, &QObject::destroyed, this, [this] {
@@ -739,6 +758,7 @@ void StakingMiningPage::onCreateOperatorKey()
     }
     m_operator_address->setText(QString::fromStdString(result->address));
     m_operator_pubkey->setText(QString::fromStdString(result->public_key));
+    m_operator_last_action_status.clear();
     m_operator_status->setText(tr("30-day operator bond key ready. Fund this address so delegators can verify your operator commitment."));
     QApplication::clipboard()->setText(m_operator_pubkey->text());
     updateStatus();
@@ -756,6 +776,89 @@ void StakingMiningPage::onUseOperatorKeyForDelegation()
     if (m_operator_pubkey && !m_operator_pubkey->text().isEmpty()) {
         setColdStakeOperatorSelection(m_operator_pubkey->text(), tr("This wallet operator key"));
     }
+}
+
+void StakingMiningPage::onFundOperatorBond()
+{
+    if (!m_wallet_model || !m_operator_bond_amount) return;
+    if (m_operator_address->text().isEmpty()) {
+        m_operator_status->setText(tr("Create or select an operator bond key first."));
+        return;
+    }
+    if (!m_operator_bond_amount->validate()) {
+        m_operator_status->setText(tr("Enter a valid operator bond amount."));
+        return;
+    }
+    const CAmount amount = m_operator_bond_amount->value();
+    if (amount <= 0) {
+        m_operator_status->setText(tr("Operator bond amount must be positive."));
+        return;
+    }
+
+    WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
+    if (!ctx.isValid()) return;
+
+    auto result = m_wallet_model->wallet().fundQuantumOperatorBond(m_operator_address->text().toStdString(), amount);
+    if (!result) {
+        const QString msg = QString::fromStdString(util::ErrorString(result).original);
+        m_operator_status->setText(msg);
+        QMessageBox::warning(this, tr("Fund operator bond"), msg);
+        return;
+    }
+
+    m_operator_last_action_status = tr("Operator bond funding broadcast: %1. Amount: %2. Fee: %3.")
+        .arg(QString::fromStdString(result->txid))
+        .arg(formatBLK(result->amount))
+        .arg(formatBLK(result->fee));
+    m_operator_status->setText(m_operator_last_action_status);
+    updateStatus();
+}
+
+void StakingMiningPage::onWithdrawOperatorBond()
+{
+    if (!m_wallet_model) return;
+    if (m_operator_address->text().isEmpty()) {
+        m_operator_status->setText(tr("Create or select an operator bond key first."));
+        return;
+    }
+
+    const interfaces::WalletQuantumOperatorBondInfo info =
+        m_wallet_model->wallet().getQuantumOperatorBondInfo(m_operator_address->text().toStdString());
+    if (info.valid_operator_address && info.bonded_outputs > 0) {
+        const int rc = QMessageBox::question(
+            this,
+            tr("Stop cold-stake operator"),
+            tr("This will start the 30-day unbonding period for %1. The principal remains locked until the unbonding height. Continue?")
+                .arg(formatBLK(info.bonded_amount)));
+        if (rc != QMessageBox::Yes) return;
+    }
+
+    WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
+    if (!ctx.isValid()) return;
+
+    auto result = m_wallet_model->wallet().withdrawQuantumOperatorBond(m_operator_address->text().toStdString());
+    if (!result) {
+        const QString msg = QString::fromStdString(util::ErrorString(result).original);
+        m_operator_status->setText(msg);
+        QMessageBox::warning(this, tr("Stop operator"), msg);
+        return;
+    }
+
+    if (result->started_unbonding) {
+        m_operator_last_action_status = tr("Operator unbonding started: %1. Amount: %2. Unlock height: %3. Fee: %4.")
+            .arg(QString::fromStdString(result->txid))
+            .arg(formatBLK(result->amount))
+            .arg(result->unlock_height)
+            .arg(formatBLK(result->fee));
+    } else {
+        m_operator_last_action_status = tr("Operator funds withdrawn: %1. Amount: %2. Destination: %3. Fee: %4.")
+            .arg(QString::fromStdString(result->txid))
+            .arg(formatBLK(result->amount))
+            .arg(QString::fromStdString(result->address))
+            .arg(formatBLK(result->fee));
+    }
+    m_operator_status->setText(m_operator_last_action_status);
+    updateStatus();
 }
 
 void StakingMiningPage::onRefreshOperatorRegistry()
@@ -1002,10 +1105,42 @@ void StakingMiningPage::updateStatus()
         if (operator_it != quantum_addresses.end()) {
             m_operator_address->setText(QString::fromStdString(operator_it->address));
             m_operator_pubkey->setText(QString::fromStdString(operator_it->public_key));
-            m_operator_status->setText(tr("30-day operator bond key ready. Fund this address so delegators can verify your operator commitment."));
         } else {
             m_operator_status->setText(tr("No operator key selected. Operators must fund a 30-day bonded staking address before delegators can verify them."));
         }
+    }
+    if (!m_operator_address->text().isEmpty()) {
+        const interfaces::WalletQuantumOperatorBondInfo bond_info =
+            w.getQuantumOperatorBondInfo(m_operator_address->text().toStdString());
+        if (bond_info.valid_operator_address) {
+            if (bond_info.bonded_outputs > 0) {
+                m_operator_status->setText(tr("Operator bond active: %1 across %2 output(s). Delegators can verify this operator. Stop/withdraw starts the 30-day unbonding period.")
+                    .arg(formatBLK(bond_info.bonded_amount))
+                    .arg(bond_info.bonded_outputs));
+                m_operator_withdraw->setText(tr("Start withdrawal"));
+            } else if (bond_info.withdrawable_outputs > 0) {
+                m_operator_status->setText(tr("Operator bond is unbonded and withdrawable: %1 across %2 output(s).")
+                    .arg(formatBLK(bond_info.withdrawable_amount))
+                    .arg(bond_info.withdrawable_outputs));
+                m_operator_withdraw->setText(tr("Complete withdrawal"));
+            } else if (bond_info.unbonding_outputs > 0) {
+                m_operator_status->setText(tr("Operator bond is unbonding: %1 across %2 output(s). Next unlock height: %3.")
+                    .arg(formatBLK(bond_info.unbonding_amount))
+                    .arg(bond_info.unbonding_outputs)
+                    .arg(bond_info.next_unlock_height));
+                m_operator_withdraw->setText(tr("Withdrawal pending"));
+            } else {
+                m_operator_status->setText(tr("30-day operator bond key ready. Click Fund operator bond to create and sign the funding transaction."));
+                m_operator_withdraw->setText(tr("Stop / withdraw operator bond"));
+            }
+        }
+    } else {
+        m_operator_withdraw->setText(tr("Stop / withdraw operator bond"));
+        m_operator_last_action_status.clear();
+    }
+    if (!m_operator_last_action_status.isEmpty() &&
+        !m_operator_status->text().startsWith(m_operator_last_action_status)) {
+        m_operator_status->setText(m_operator_last_action_status + QStringLiteral("\n") + m_operator_status->text());
     }
     if (m_coldstake_address->text().isEmpty() && !coldstake_delegations.empty()) {
         m_coldstake_address->setText(QString::fromStdString(coldstake_delegations.back().address));
@@ -1055,7 +1190,10 @@ void StakingMiningPage::resetStatusForNoWallet()
     m_selfstake_status->setText(QStringLiteral("-"));
     m_operator_address->clear();
     m_operator_pubkey->clear();
+    if (m_operator_bond_amount) m_operator_bond_amount->setValue(COIN);
+    m_operator_last_action_status.clear();
     m_operator_status->setText(tr("No operator key selected. Operators must fund a 30-day bonded staking address before delegators can verify them."));
+    m_operator_withdraw->setText(tr("Stop / withdraw operator bond"));
     m_operator_registry->setRowCount(0);
     m_operator_registry_status->setText(tr("Load a wallet to view cold-staking operators."));
     {
@@ -1103,6 +1241,10 @@ void StakingMiningPage::refreshControlsEnabled()
     m_operator_new->setEnabled(can_create_quantum);
     m_operator_copy->setEnabled(m_operator_pubkey && !m_operator_pubkey->text().isEmpty());
     m_operator_use_for_delegation->setEnabled(m_operator_pubkey && !m_operator_pubkey->text().isEmpty());
+    const bool has_operator_address = m_operator_address && !m_operator_address->text().isEmpty();
+    m_operator_bond_amount->setEnabled(can_create_quantum && has_operator_address);
+    m_operator_fund->setEnabled(can_create_quantum && has_operator_address);
+    m_operator_withdraw->setEnabled(can_create_quantum && has_operator_address);
     m_operator_registry_refresh->setEnabled(has_wallet);
     bool registry_selection_has_pubkey{false};
     if (m_operator_registry && !m_operator_registry->selectedItems().empty()) {
