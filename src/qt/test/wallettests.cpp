@@ -52,6 +52,7 @@
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QTableView>
+#include <QTableWidget>
 #include <QTest>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -332,8 +333,12 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QPushButton* coldstake_operator_copy = page.findChild<QPushButton*>("coldstakeOperatorCopy");
     QPushButton* coldstake_operator_use = page.findChild<QPushButton*>("coldstakeOperatorUseForDelegation");
     QLabel* coldstake_operator_status = page.findChild<QLabel*>("coldstakeOperatorStatus");
+    QTableWidget* coldstake_operator_registry = page.findChild<QTableWidget*>("coldstakeOperatorRegistry");
+    QPushButton* coldstake_operator_refresh = page.findChild<QPushButton*>("coldstakeOperatorRefresh");
+    QPushButton* coldstake_operator_select = page.findChild<QPushButton*>("coldstakeOperatorSelect");
+    QLabel* coldstake_operator_registry_status = page.findChild<QLabel*>("coldstakeOperatorRegistryStatus");
     QComboBox* coldstake_lock_period = page.findChild<QComboBox*>("coldstakeLockPeriod");
-    QLineEdit* coldstake_staker_pubkey = page.findChild<QLineEdit*>("coldstakeStakerPubkey");
+    QComboBox* coldstake_operator_selector = page.findChild<QComboBox*>("coldstakeOperatorSelector");
     QLineEdit* coldstake_address = page.findChild<QLineEdit*>("coldstakeAddress");
     QPushButton* coldstake_new = page.findChild<QPushButton*>("newColdstakeAddress");
     QPushButton* coldstake_copy = page.findChild<QPushButton*>("coldstakeCopy");
@@ -377,8 +382,12 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(coldstake_operator_copy);
     QVERIFY(coldstake_operator_use);
     QVERIFY(coldstake_operator_status);
+    QVERIFY(coldstake_operator_registry);
+    QVERIFY(coldstake_operator_refresh);
+    QVERIFY(coldstake_operator_select);
+    QVERIFY(coldstake_operator_registry_status);
     QVERIFY(coldstake_lock_period);
-    QVERIFY(coldstake_staker_pubkey);
+    QVERIFY(coldstake_operator_selector);
     QVERIFY(coldstake_address);
     QVERIFY(coldstake_new);
     QVERIFY(coldstake_copy);
@@ -410,6 +419,10 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(coldstake_operator_new->isEnabled());
     QVERIFY(!coldstake_operator_copy->isEnabled());
     QVERIFY(!coldstake_operator_use->isEnabled());
+    QVERIFY(coldstake_operator_refresh->isEnabled());
+    QVERIFY(!coldstake_operator_select->isEnabled());
+    QCOMPARE(coldstake_operator_registry->rowCount(), 0);
+    QVERIFY(!coldstake_operator_selector->currentData().toString().size());
     QVERIFY(!coldstake_new->isEnabled());
     QVERIFY(!coldstake_copy->isEnabled());
 
@@ -455,7 +468,8 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     coldstake_operator_copy->click();
     QCOMPARE(QApplication::clipboard()->text(), coldstake_operator_pubkey->text());
     coldstake_operator_use->click();
-    QCOMPARE(coldstake_staker_pubkey->text(), coldstake_operator_pubkey->text());
+    QCOMPARE(coldstake_operator_selector->currentData().toString(), coldstake_operator_pubkey->text());
+    QVERIFY(coldstake_operator_selector->currentText().contains(QString("operator")));
 
     coldstake_lock_period->setCurrentIndex(5);
     QVERIFY(coldstake_new->isEnabled());

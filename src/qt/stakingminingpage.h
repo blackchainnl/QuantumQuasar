@@ -20,6 +20,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QSpinBox;
+class QTableWidget;
 class QTimer;
 QT_END_NAMESPACE
 
@@ -66,6 +67,8 @@ private Q_SLOTS:
     void onCreateOperatorKey();
     void onCopyOperatorKey();
     void onUseOperatorKeyForDelegation();
+    void onRefreshOperatorRegistry();
+    void onUseRegistryOperatorForDelegation();
     void onCreateColdStakeAddress();
     void onCopyColdStakeAddress();
     void updateStatus();
@@ -129,8 +132,12 @@ private:
     QPushButton* m_operator_copy{nullptr};
     QPushButton* m_operator_use_for_delegation{nullptr};
     QLabel* m_operator_status{nullptr};
+    QTableWidget* m_operator_registry{nullptr};
+    QPushButton* m_operator_registry_refresh{nullptr};
+    QPushButton* m_operator_registry_use{nullptr};
+    QLabel* m_operator_registry_status{nullptr};
     QComboBox* m_coldstake_lock_period{nullptr};
-    QLineEdit* m_coldstake_staker_pubkey{nullptr};
+    QComboBox* m_coldstake_operator_selector{nullptr};
     QLineEdit* m_coldstake_address{nullptr};
     QPushButton* m_coldstake_new{nullptr};
     QPushButton* m_coldstake_copy{nullptr};
@@ -138,10 +145,13 @@ private:
 
     void setupUi();
     void refreshControlsEnabled();
+    void refreshOperatorRegistry();
     void resetStatusForNoWallet();
     void applyDonationPercentage(unsigned int percentage);
     bool requestStakingOnlyUnlock();
     bool requestNormalUnlock();
+    QString selectedColdStakeOperatorPubKey() const;
+    void setColdStakeOperatorSelection(const QString& pubkey, const QString& label);
 };
 
 #endif // BITCOIN_QT_STAKINGMININGPAGE_H

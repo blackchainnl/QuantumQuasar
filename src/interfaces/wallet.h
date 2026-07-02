@@ -57,6 +57,8 @@ struct WalletMigrationResult;
 struct WalletPowMiningInfo;
 struct WalletQuantumAddressInfo;
 struct WalletQuantumColdStakeInfo;
+struct WalletQuantumPoolInfo;
+struct WalletQuantumPoolOperatorInfo;
 struct WalletMigrationStatus;
 
 using WalletOrderForm = std::vector<std::pair<std::string, std::string>>;
@@ -308,6 +310,9 @@ public:
     //! List wallet-known Quantum Cold-Stake delegations.
     virtual std::vector<WalletQuantumColdStakeInfo> listQuantumColdStakeDelegations() = 0;
 
+    //! Return verified local Quantum Cold-Stake operator registry state.
+    virtual WalletQuantumPoolInfo getQuantumPoolInfo() = 0;
+
     //! Create a Quantum Cold-Stake deposit address using a hex ML-DSA staking public key.
     virtual util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label, uint16_t unbonding_blocks) = 0;
 
@@ -529,6 +534,28 @@ struct WalletQuantumColdStakeInfo
     bool tiered{false};
     uint16_t unbonding_blocks{0};
     uint32_t unlock_height{0};
+};
+
+//! Verified local Quantum Cold-Stake operator registry entry.
+struct WalletQuantumPoolOperatorInfo
+{
+    std::string staking_pubkey_hash;
+    std::string staking_pubkey;
+    CAmount verified_value{0};
+    int64_t share_bps{0};
+    int verified_claims{0};
+    int invalid_claims{0};
+    bool operator_commitment_verified{false};
+    bool over_cap{false};
+};
+
+//! Verified local Quantum Cold-Stake operator registry state.
+struct WalletQuantumPoolInfo
+{
+    bool available{true};
+    CAmount total_coldstake{0};
+    int64_t cap_bps{0};
+    std::vector<WalletQuantumPoolOperatorInfo> operators;
 };
 
 //! Wallet migration progress and deadline state.
