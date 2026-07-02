@@ -66,6 +66,8 @@ private Q_SLOTS:
     void onCopyQuantumPubkey();
     void onCreateSelfStakeAddress();
     void onCopySelfStakeAddress();
+    void onFundSelfStakeAddress();
+    void onWithdrawSelfStakeAddress();
     void onCreateOperatorKey();
     void onCopyOperatorKey();
     void onUseOperatorKeyForDelegation();
@@ -86,6 +88,7 @@ private:
     bool m_pow_apply_pending{false};
     bool m_pow_pending_enabled{false};
     bool m_pow_settings_dirty{false};
+    QString m_selfstake_last_action_status;
     QString m_operator_last_action_status;
 
     // Staking section
@@ -130,6 +133,9 @@ private:
     QLineEdit* m_selfstake_address{nullptr};
     QPushButton* m_selfstake_new{nullptr};
     QPushButton* m_selfstake_copy{nullptr};
+    BitcoinAmountField* m_selfstake_fund_amount{nullptr};
+    QPushButton* m_selfstake_fund{nullptr};
+    QPushButton* m_selfstake_withdraw{nullptr};
     QLabel* m_selfstake_status{nullptr};
     QLineEdit* m_operator_address{nullptr};
     QLineEdit* m_operator_pubkey{nullptr};

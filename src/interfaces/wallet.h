@@ -324,6 +324,15 @@ public:
     //! Stop operating: start unbonding if bonded, or complete withdrawal if already mature.
     virtual util::Result<WalletQuantumOperatorBondTx> withdrawQuantumOperatorBond(const std::string& operator_address) = 0;
 
+    //! Return wallet-owned tiered self-staking address status.
+    virtual WalletQuantumOperatorBondInfo getQuantumStakeAddressBondInfo(const std::string& stake_address) = 0;
+
+    //! Fund this wallet's tiered self-staking address from spendable wallet funds.
+    virtual util::Result<WalletQuantumOperatorBondTx> fundQuantumStakeAddress(const std::string& stake_address, CAmount amount) = 0;
+
+    //! Stop self-staking: start unbonding if bonded, or complete withdrawal if already mature.
+    virtual util::Result<WalletQuantumOperatorBondTx> withdrawQuantumStakeAddress(const std::string& stake_address) = 0;
+
     //! Create a Quantum Cold-Stake deposit address using a hex ML-DSA staking public key.
     virtual util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label, uint16_t unbonding_blocks) = 0;
 

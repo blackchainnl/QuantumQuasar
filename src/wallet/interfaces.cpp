@@ -124,22 +124,25 @@ WalletQuantumColdStakeInfo MakeWalletQuantumColdStakeInfo(const CWallet& wallet,
 static constexpr uint16_t OPERATOR_COMMITMENT_BLOCKS = 40500;
 static constexpr int RANDOM_CHANGE_POSITION = -1;
 
-util::Result<QuantumStakeTierProgram> DecodeOperatorBondAddress(const std::string& operator_address, CTxDestination& operator_dest)
+util::Result<QuantumStakeTierProgram> DecodeTieredStakeAddress(const std::string& address, CTxDestination& dest, bool require_operator_lock)
 {
     std::string error_msg;
-    operator_dest = DecodeDestination(operator_address, error_msg);
-    if (!IsValidDestination(operator_dest)) {
-        return util::Error{Untranslated(error_msg.empty() ? "Error: Invalid operator address" : error_msg)};
+    dest = DecodeDestination(address, error_msg);
+    if (!IsValidDestination(dest)) {
+        return util::Error{Untranslated(error_msg.empty() ? "Error: Invalid quantum staking address" : error_msg)};
     }
 
-    const auto* witness = std::get_if<WitnessUnknown>(&operator_dest);
+    const auto* witness = std::get_if<WitnessUnknown>(&dest);
     if (!witness) {
-        return util::Error{_("Error: Operator address must be a 30-day bonded quantum staking address")};
+        return util::Error{_("Error: Address must be a bonded quantum staking address")};
     }
 
     QuantumStakeTierProgram tier;
     if (!DecodeQuantumStakeTierProgram(witness->GetWitnessVersion(), witness->GetWitnessProgram(), tier) ||
-        tier.cold_stake || !tier.IsBonded() || tier.unbonding_blocks < OPERATOR_COMMITMENT_BLOCKS) {
+        tier.cold_stake || !tier.IsBonded()) {
+        return util::Error{_("Error: Address must be a wallet-backed bonded quantum staking address")};
+    }
+    if (require_operator_lock && tier.unbonding_blocks < OPERATOR_COMMITMENT_BLOCKS) {
         return util::Error{_("Error: Operator address must be a wallet-backed 30-day bonded quantum staking address")};
     }
     return tier;
@@ -218,22 +221,22 @@ OperatorBondOutputs ScanOperatorBondOutputs(
     return outputs;
 }
 
-WalletQuantumOperatorBondInfo MakeWalletOperatorBondInfo(const CWallet& wallet, const std::string& operator_address)
+WalletQuantumOperatorBondInfo MakeWalletTieredStakeBondInfo(const CWallet& wallet, const std::string& address, bool require_operator_lock)
 {
     WalletQuantumOperatorBondInfo result;
-    CTxDestination operator_dest;
-    const auto tier = DecodeOperatorBondAddress(operator_address, operator_dest);
+    CTxDestination dest;
+    const auto tier = DecodeTieredStakeAddress(address, dest, require_operator_lock);
     if (!tier) return result;
 
     LOCK(wallet.cs_wallet);
-    const auto key_info = wallet.GetQuantumKeyInfo(operator_dest);
+    const auto key_info = wallet.GetQuantumKeyInfo(dest);
     if (!key_info) return result;
 
     const int current_height = wallet.GetLastBlockHeight();
     const int spend_height = current_height + 1;
     const OperatorBondOutputs outputs = ScanOperatorBondOutputs(
         wallet,
-        GetScriptForDestination(operator_dest),
+        GetScriptForDestination(dest),
         tier->commitment,
         spend_height,
         /*spendable_only=*/false);
@@ -247,6 +250,169 @@ WalletQuantumOperatorBondInfo MakeWalletOperatorBondInfo(const CWallet& wallet, 
     result.withdrawable_amount = outputs.withdrawable_amount;
     result.withdrawable_outputs = outputs.withdrawable_outputs;
     result.next_unlock_height = outputs.next_unlock_height;
+    return result;
+}
+
+WalletQuantumOperatorBondInfo MakeWalletOperatorBondInfo(const CWallet& wallet, const std::string& operator_address)
+{
+    return MakeWalletTieredStakeBondInfo(wallet, operator_address, /*require_operator_lock=*/true);
+}
+
+util::Result<WalletQuantumOperatorBondTx> FundTieredStakeAddress(
+    CWallet& wallet,
+    const std::string& address,
+    CAmount amount,
+    bool require_operator_lock,
+    std::string comment)
+{
+    if (!MoneyRange(amount) || amount <= 0) {
+        return util::Error{_("Error: Funding amount must be positive")};
+    }
+
+    CTxDestination dest;
+    const auto tier = DecodeTieredStakeAddress(address, dest, require_operator_lock);
+    if (!tier) return util::Error{util::ErrorString(tier)};
+
+    CTransactionRef tx;
+    CAmount fee{0};
+    {
+        LOCK(wallet.cs_wallet);
+        bilingual_str spend_error;
+        if (!CanCreateSignedSpend(wallet, spend_error)) return util::Error{spend_error};
+        if (!wallet.GetQuantumKeyInfo(dest)) {
+            return util::Error{_("Error: Staking address is not backed by this wallet")};
+        }
+
+        std::vector<CRecipient> recipients{{dest, amount, /*fSubtractFeeFromAmount=*/false}};
+        CCoinControl coin_control;
+        coin_control.m_input_family = CCoinControl::InputFamily::LEGACY;
+        coin_control.m_allow_other_inputs = true;
+        int change_pos = RANDOM_CHANGE_POSITION;
+        auto res = CreateTransaction(wallet, recipients, change_pos, coin_control, /*sign=*/true);
+        if (!res) return util::Error{util::ErrorString(res)};
+        tx = res->tx;
+        fee = res->fee;
+    }
+
+    mapValue_t map_value;
+    map_value["comment"] = std::move(comment);
+    wallet.CommitTransaction(tx, std::move(map_value), {});
+
+    WalletQuantumOperatorBondTx result;
+    result.txid = tx->GetHash().GetHex();
+    result.address = address;
+    result.amount = amount;
+    result.fee = fee;
+    return result;
+}
+
+util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
+    CWallet& wallet,
+    const std::string& address,
+    bool require_operator_lock,
+    const std::string& unbonding_label,
+    const std::string& withdrawal_label,
+    std::string unbonding_comment,
+    std::string withdrawal_comment)
+{
+    CTxDestination dest;
+    const auto tier = DecodeTieredStakeAddress(address, dest, require_operator_lock);
+    if (!tier) return util::Error{util::ErrorString(tier)};
+
+    CTransactionRef tx;
+    CAmount amount{0};
+    CAmount fee{0};
+    uint32_t unlock_height{0};
+    std::string destination_address;
+    std::string comment;
+    bool started_unbonding{false};
+    bool completed_withdrawal{false};
+    {
+        LOCK(wallet.cs_wallet);
+        bilingual_str spend_error;
+        if (!CanCreateSignedSpend(wallet, spend_error)) return util::Error{spend_error};
+
+        const auto stake_key = wallet.GetQuantumKeyInfo(dest);
+        if (!stake_key) {
+            return util::Error{_("Error: Staking address is not backed by this wallet")};
+        }
+
+        const int current_height = wallet.GetLastBlockHeight();
+        const int spend_height = current_height + 1;
+        const OperatorBondOutputs outputs = ScanOperatorBondOutputs(
+            wallet,
+            GetScriptForDestination(dest),
+            tier->commitment,
+            spend_height,
+            /*spendable_only=*/true);
+
+        CCoinControl coin_control;
+        int change_pos = RANDOM_CHANGE_POSITION;
+        std::vector<CRecipient> recipients;
+
+        if (!outputs.bonded_outpoints.empty()) {
+            for (const COutPoint& outpoint : outputs.bonded_outpoints) {
+                coin_control.Select(outpoint);
+            }
+            coin_control.m_allow_other_inputs = true;
+
+            auto change_dest = wallet.GetNewQuantumChangeDestination();
+            if (!change_dest) return util::Error{util::ErrorString(change_dest)};
+            coin_control.destChange = *change_dest;
+
+            unlock_height = static_cast<uint32_t>(std::max(0, spend_height + int{tier->unbonding_blocks}));
+            const std::vector<unsigned char> unbonding_program = QuantumTieredMigrationProgramForPubkey(
+                stake_key->public_key,
+                QUANTUM_TIERED_STATE_UNBONDING,
+                tier->unbonding_blocks,
+                unlock_height);
+            const CTxDestination unbonding_dest = WitnessUnknown{QUANTUM_MIGRATION_WITNESS_VERSION, unbonding_program};
+            wallet.SetAddressBook(unbonding_dest, unbonding_label, AddressPurpose::RECEIVE);
+
+            amount = outputs.bonded_amount;
+            destination_address = EncodeDestination(unbonding_dest);
+            recipients.push_back({unbonding_dest, amount, /*fSubtractFeeFromAmount=*/false});
+            comment = std::move(unbonding_comment);
+            started_unbonding = true;
+        } else if (!outputs.withdrawable_outpoints.empty()) {
+            for (const COutPoint& outpoint : outputs.withdrawable_outpoints) {
+                coin_control.Select(outpoint);
+            }
+            coin_control.m_allow_other_inputs = false;
+            coin_control.m_input_family = CCoinControl::InputFamily::QUANTUM;
+
+            auto withdraw_dest = wallet.GetNewQuantumDestination(withdrawal_label);
+            if (!withdraw_dest) return util::Error{util::ErrorString(withdraw_dest)};
+
+            amount = outputs.withdrawable_amount;
+            destination_address = EncodeDestination(*withdraw_dest);
+            recipients.push_back({*withdraw_dest, amount, /*fSubtractFeeFromAmount=*/true});
+            comment = std::move(withdrawal_comment);
+            completed_withdrawal = true;
+        } else if (outputs.unbonding_outputs > 0 && outputs.next_unlock_height > 0) {
+            return util::Error{strprintf(_("Error: Staking funds are unbonding and cannot be withdrawn until block %u"), outputs.next_unlock_height)};
+        } else {
+            return util::Error{_("Error: No spendable bonded or matured unbonding staking funds found for this address")};
+        }
+
+        auto res = CreateTransaction(wallet, recipients, change_pos, coin_control, /*sign=*/true);
+        if (!res) return util::Error{util::ErrorString(res)};
+        tx = res->tx;
+        fee = res->fee;
+    }
+
+    mapValue_t map_value;
+    map_value["comment"] = std::move(comment);
+    wallet.CommitTransaction(tx, std::move(map_value), {});
+
+    WalletQuantumOperatorBondTx result;
+    result.txid = tx->GetHash().GetHex();
+    result.address = destination_address;
+    result.amount = amount;
+    result.fee = fee;
+    result.unlock_height = unlock_height;
+    result.started_unbonding = started_unbonding;
+    result.completed_withdrawal = completed_withdrawal;
     return result;
 }
 
@@ -889,147 +1055,47 @@ public:
     }
     util::Result<WalletQuantumOperatorBondTx> fundQuantumOperatorBond(const std::string& operator_address, CAmount amount) override
     {
-        if (!MoneyRange(amount) || amount <= 0) {
-            return util::Error{_("Error: Operator bond amount must be positive")};
-        }
-
-        CTxDestination operator_dest;
-        const auto tier = DecodeOperatorBondAddress(operator_address, operator_dest);
-        if (!tier) return util::Error{util::ErrorString(tier)};
-
-        CTransactionRef tx;
-        CAmount fee{0};
-        {
-            LOCK(m_wallet->cs_wallet);
-            bilingual_str spend_error;
-            if (!CanCreateSignedSpend(*m_wallet, spend_error)) return util::Error{spend_error};
-            if (!m_wallet->GetQuantumKeyInfo(operator_dest)) {
-                return util::Error{_("Error: Operator address is not backed by this wallet")};
-            }
-
-            std::vector<CRecipient> recipients{{operator_dest, amount, /*fSubtractFeeFromAmount=*/false}};
-            CCoinControl coin_control;
-            coin_control.m_input_family = CCoinControl::InputFamily::LEGACY;
-            coin_control.m_allow_other_inputs = true;
-            int change_pos = RANDOM_CHANGE_POSITION;
-            auto res = CreateTransaction(*m_wallet, recipients, change_pos, coin_control, /*sign=*/true);
-            if (!res) return util::Error{util::ErrorString(res)};
-            tx = res->tx;
-            fee = res->fee;
-        }
-
-        mapValue_t map_value;
-        map_value["comment"] = "Blackcoin cold-stake operator bond";
-        m_wallet->CommitTransaction(tx, std::move(map_value), {});
-
-        WalletQuantumOperatorBondTx result;
-        result.txid = tx->GetHash().GetHex();
-        result.address = operator_address;
-        result.amount = amount;
-        result.fee = fee;
-        return result;
+        return FundTieredStakeAddress(
+            *m_wallet,
+            operator_address,
+            amount,
+            /*require_operator_lock=*/true,
+            "Blackcoin cold-stake operator bond");
     }
     util::Result<WalletQuantumOperatorBondTx> withdrawQuantumOperatorBond(const std::string& operator_address) override
     {
-        CTxDestination operator_dest;
-        const auto tier = DecodeOperatorBondAddress(operator_address, operator_dest);
-        if (!tier) return util::Error{util::ErrorString(tier)};
-
-        CTransactionRef tx;
-        CAmount amount{0};
-        CAmount fee{0};
-        uint32_t unlock_height{0};
-        std::string destination_address;
-        std::string comment;
-        bool started_unbonding{false};
-        bool completed_withdrawal{false};
-        {
-            LOCK(m_wallet->cs_wallet);
-            bilingual_str spend_error;
-            if (!CanCreateSignedSpend(*m_wallet, spend_error)) return util::Error{spend_error};
-
-            const auto operator_key = m_wallet->GetQuantumKeyInfo(operator_dest);
-            if (!operator_key) {
-                return util::Error{_("Error: Operator address is not backed by this wallet")};
-            }
-
-            const int current_height = m_wallet->GetLastBlockHeight();
-            const int spend_height = current_height + 1;
-            const OperatorBondOutputs outputs = ScanOperatorBondOutputs(
-                *m_wallet,
-                GetScriptForDestination(operator_dest),
-                tier->commitment,
-                spend_height,
-                /*spendable_only=*/true);
-
-            CCoinControl coin_control;
-            int change_pos = RANDOM_CHANGE_POSITION;
-            std::vector<CRecipient> recipients;
-
-            if (!outputs.bonded_outpoints.empty()) {
-                for (const COutPoint& outpoint : outputs.bonded_outpoints) {
-                    coin_control.Select(outpoint);
-                }
-                coin_control.m_allow_other_inputs = true;
-
-                auto change_dest = m_wallet->GetNewQuantumChangeDestination();
-                if (!change_dest) return util::Error{util::ErrorString(change_dest)};
-                coin_control.destChange = *change_dest;
-
-                unlock_height = static_cast<uint32_t>(std::max(0, spend_height + int{OPERATOR_COMMITMENT_BLOCKS}));
-                const std::vector<unsigned char> unbonding_program = QuantumTieredMigrationProgramForPubkey(
-                    operator_key->public_key,
-                    QUANTUM_TIERED_STATE_UNBONDING,
-                    OPERATOR_COMMITMENT_BLOCKS,
-                    unlock_height);
-                const CTxDestination unbonding_dest = WitnessUnknown{QUANTUM_MIGRATION_WITNESS_VERSION, unbonding_program};
-                m_wallet->SetAddressBook(unbonding_dest, "coldstake-operator-unbonding", AddressPurpose::RECEIVE);
-
-                amount = outputs.bonded_amount;
-                destination_address = EncodeDestination(unbonding_dest);
-                recipients.push_back({unbonding_dest, amount, /*fSubtractFeeFromAmount=*/false});
-                comment = "Blackcoin cold-stake operator unbond";
-                started_unbonding = true;
-            } else if (!outputs.withdrawable_outpoints.empty()) {
-                for (const COutPoint& outpoint : outputs.withdrawable_outpoints) {
-                    coin_control.Select(outpoint);
-                }
-                coin_control.m_allow_other_inputs = false;
-                coin_control.m_input_family = CCoinControl::InputFamily::QUANTUM;
-
-                auto withdraw_dest = m_wallet->GetNewQuantumDestination("coldstake-operator-withdrawal");
-                if (!withdraw_dest) return util::Error{util::ErrorString(withdraw_dest)};
-
-                amount = outputs.withdrawable_amount;
-                destination_address = EncodeDestination(*withdraw_dest);
-                recipients.push_back({*withdraw_dest, amount, /*fSubtractFeeFromAmount=*/true});
-                comment = "Blackcoin cold-stake operator withdrawal";
-                completed_withdrawal = true;
-            } else if (outputs.unbonding_outputs > 0 && outputs.next_unlock_height > 0) {
-                return util::Error{strprintf(_("Error: Operator bond is unbonding and cannot be withdrawn until block %u"), outputs.next_unlock_height)};
-            } else {
-                return util::Error{_("Error: No spendable bonded or matured unbonding operator funds found for this address")};
-            }
-
-            auto res = CreateTransaction(*m_wallet, recipients, change_pos, coin_control, /*sign=*/true);
-            if (!res) return util::Error{util::ErrorString(res)};
-            tx = res->tx;
-            fee = res->fee;
-        }
-
-        mapValue_t map_value;
-        map_value["comment"] = std::move(comment);
-        m_wallet->CommitTransaction(tx, std::move(map_value), {});
-
-        WalletQuantumOperatorBondTx result;
-        result.txid = tx->GetHash().GetHex();
-        result.address = destination_address;
-        result.amount = amount;
-        result.fee = fee;
-        result.unlock_height = unlock_height;
-        result.started_unbonding = started_unbonding;
-        result.completed_withdrawal = completed_withdrawal;
-        return result;
+        return WithdrawTieredStakeAddress(
+            *m_wallet,
+            operator_address,
+            /*require_operator_lock=*/true,
+            "coldstake-operator-unbonding",
+            "coldstake-operator-withdrawal",
+            "Blackcoin cold-stake operator unbond",
+            "Blackcoin cold-stake operator withdrawal");
+    }
+    WalletQuantumOperatorBondInfo getQuantumStakeAddressBondInfo(const std::string& stake_address) override
+    {
+        return MakeWalletTieredStakeBondInfo(*m_wallet, stake_address, /*require_operator_lock=*/false);
+    }
+    util::Result<WalletQuantumOperatorBondTx> fundQuantumStakeAddress(const std::string& stake_address, CAmount amount) override
+    {
+        return FundTieredStakeAddress(
+            *m_wallet,
+            stake_address,
+            amount,
+            /*require_operator_lock=*/false,
+            "Blackcoin quantum staking address funding");
+    }
+    util::Result<WalletQuantumOperatorBondTx> withdrawQuantumStakeAddress(const std::string& stake_address) override
+    {
+        return WithdrawTieredStakeAddress(
+            *m_wallet,
+            stake_address,
+            /*require_operator_lock=*/false,
+            "quantum-stake-unbonding",
+            "quantum-stake-withdrawal",
+            "Blackcoin quantum staking address unbond",
+            "Blackcoin quantum staking address withdrawal");
     }
     util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label, uint16_t unbonding_blocks) override
     {
