@@ -106,6 +106,23 @@ bool IsDirectQuantumMigrationScript(const CScript& script_pub_key)
     return tier && !tier->tiered && !tier->cold_stake;
 }
 
+util::Result<void> CommitWalletTransactionOrError(CWallet& wallet, const CTransactionRef& tx, mapValue_t map_value, const std::string& action)
+{
+    try {
+        std::string broadcast_error;
+        if (!wallet.CommitTransaction(tx, std::move(map_value), {}, &broadcast_error)) {
+            const std::string reason = broadcast_error.empty() ? "transaction was not accepted into the mempool" : broadcast_error;
+            if (!wallet.AbandonTransaction(tx->GetHash())) {
+                wallet.WalletLogPrintf("%s transaction could not be abandoned after broadcast failure: txid=%s\n", action, tx->GetHash().ToString());
+            }
+            return util::Error{Untranslated(strprintf("Error: %s transaction was created but could not be broadcast: %s", action, reason))};
+        }
+    } catch (const std::exception& e) {
+        return util::Error{Untranslated(strprintf("Error: %s transaction could not be committed: %s", action, e.what()))};
+    }
+    return {};
+}
+
 WalletQuantumAddressInfo MakeWalletQuantumAddressInfo(const CWallet& wallet, const QuantumKeyInfo& info)
     EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
 {
@@ -334,6 +351,55 @@ ColdStakeFundingInputs SelectColdStakeFundingInputs(
     return summary;
 }
 
+struct SafeFeeInputSummary {
+    CAmount amount{0};
+    unsigned int inputs{0};
+};
+
+SafeFeeInputSummary SelectSafeUnbondingFeeInputs(
+    CWallet& wallet,
+    const CCoinsViewCache& view,
+    CCoinControl& coin_control,
+    CAmount target_amount,
+    bool allow_legacy) EXCLUSIVE_LOCKS_REQUIRED(::cs_main, wallet.cs_wallet)
+{
+    SafeFeeInputSummary summary;
+
+    CoinFilterParams filter;
+    filter.only_spendable = true;
+    filter.skip_locked = true;
+    filter.include_immature_coinbase = false;
+
+    CCoinControl scan_control;
+    scan_control.m_exclude_generated_quantum_inputs = true;
+
+    std::vector<COutput> outputs = AvailableCoins(wallet, &scan_control, std::nullopt, filter).All();
+    std::sort(outputs.begin(), outputs.end(), [](const COutput& a, const COutput& b) {
+        if (a.txout.nValue != b.txout.nValue) return a.txout.nValue < b.txout.nValue;
+        return a.outpoint < b.outpoint;
+    });
+
+    for (const COutput& out : outputs) {
+        if (coin_control.IsSelected(out.outpoint) || out.txout.nValue <= 0) continue;
+
+        const CScript& spk = out.txout.scriptPubKey;
+        CScript marker_script;
+        if (IsGoldRushDirectPayoutOutput(view, out.outpoint, &marker_script) && marker_script == spk) continue;
+
+        const bool direct_quantum = IsDirectQuantumMigrationScript(spk);
+        const bool legacy = allow_legacy && !IsQuantumMigrationScript(spk) && !IsQuantumColdStakeScript(spk) && !IsEUTXOScript(spk);
+        if (!direct_quantum && !legacy) continue;
+
+        if (!MoneyRange(out.txout.nValue) || summary.amount > MAX_MONEY - out.txout.nValue) break;
+        coin_control.Select(out.outpoint);
+        summary.amount += out.txout.nValue;
+        ++summary.inputs;
+        if (summary.amount >= target_amount) break;
+    }
+
+    return summary;
+}
+
 struct OperatorBondOutputs
 {
     struct Record
@@ -464,7 +530,7 @@ std::vector<LocalOperatorBondCandidate> FindWalletOperatorBondCandidates(const C
 
     std::vector<OperatorAddress> operator_addresses;
     {
-        LOCK(wallet.cs_wallet);
+        LOCK2(::cs_main, wallet.cs_wallet);
         const auto infos = wallet.ListQuantumKeyInfos();
         operator_addresses.reserve(infos.size());
         for (const QuantumKeyInfo& info : infos) {
@@ -633,7 +699,7 @@ util::Result<WalletQuantumOperatorBondTx> FundTieredStakeAddress(
     CTransactionRef tx;
     CAmount fee{0};
     {
-        LOCK(wallet.cs_wallet);
+        LOCK2(::cs_main, wallet.cs_wallet);
         bilingual_str spend_error;
         if (!CanCreateSignedSpend(wallet, spend_error)) return util::Error{spend_error};
         if (!wallet.GetQuantumKeyInfo(dest)) {
@@ -653,7 +719,9 @@ util::Result<WalletQuantumOperatorBondTx> FundTieredStakeAddress(
 
     mapValue_t map_value;
     map_value["comment"] = std::move(comment);
-    wallet.CommitTransaction(tx, std::move(map_value), {});
+    if (auto committed = CommitWalletTransactionOrError(wallet, tx, std::move(map_value), "staking address funding"); !committed) {
+        return util::Error{util::ErrorString(committed)};
+    }
 
     WalletQuantumOperatorBondTx result;
     result.txid = tx->GetHash().GetHex();
@@ -686,7 +754,7 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
     bool started_unbonding{false};
     bool completed_withdrawal{false};
     {
-        LOCK(wallet.cs_wallet);
+        LOCK2(::cs_main, wallet.cs_wallet);
         bilingual_str spend_error;
         if (!CanCreateSignedSpend(wallet, spend_error)) return util::Error{spend_error};
 
@@ -729,8 +797,18 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
             for (const COutPoint& outpoint : outputs.bonded_outpoints) {
                 coin_control.Select(outpoint);
             }
-            coin_control.m_allow_other_inputs = true;
+            coin_control.m_allow_other_inputs = false;
             coin_control.m_exclude_generated_quantum_inputs = true;
+            const CCoinsViewCache& view = wallet.chain().chainman().ActiveChainstate().CoinsTip();
+            const SafeFeeInputSummary fee_inputs = SelectSafeUnbondingFeeInputs(
+                wallet,
+                view,
+                coin_control,
+                wallet.m_default_max_tx_fee,
+                /*allow_legacy=*/true);
+            if (fee_inputs.inputs == 0) {
+                return util::Error{_("Error: No safe fee input is available to start unbonding. Add a small ordinary legacy or direct quantum UTXO, then try again.")};
+            }
 
             auto change_dest = wallet.GetNewQuantumChangeDestination();
             if (!change_dest) return util::Error{util::ErrorString(change_dest)};
@@ -779,7 +857,9 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
 
     mapValue_t map_value;
     map_value["comment"] = std::move(comment);
-    wallet.CommitTransaction(tx, std::move(map_value), {});
+    if (auto committed = CommitWalletTransactionOrError(wallet, tx, std::move(map_value), "staking address withdrawal"); !committed) {
+        return util::Error{util::ErrorString(committed)};
+    }
 
     WalletQuantumOperatorBondTx result;
     result.txid = tx->GetHash().GetHex();
@@ -889,7 +969,9 @@ util::Result<WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
 
     mapValue_t map_value;
     map_value["comment"] = "Blackcoin quantum cold-stake delegation funding";
-    wallet.CommitTransaction(tx, std::move(map_value), {});
+    if (auto committed = CommitWalletTransactionOrError(wallet, tx, std::move(map_value), "cold-stake delegation funding"); !committed) {
+        return util::Error{util::ErrorString(committed)};
+    }
 
     WalletQuantumOperatorBondTx result;
     result.txid = tx->GetHash().GetHex();
@@ -911,7 +993,7 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawColdStakeDelegationAddress(
     bool started_unbonding{false};
     bool completed_withdrawal{false};
     {
-        LOCK(wallet.cs_wallet);
+        LOCK2(::cs_main, wallet.cs_wallet);
         bilingual_str spend_error;
         if (!CanCreateSignedSpend(wallet, spend_error)) return util::Error{spend_error};
 
@@ -942,8 +1024,18 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawColdStakeDelegationAddress(
         const int spend_height = current_height + 1;
 
         if (delegation->tiered && delegation->unlock_height == 0) {
-            coin_control.m_allow_other_inputs = true;
+            coin_control.m_allow_other_inputs = false;
             coin_control.m_exclude_generated_quantum_inputs = true;
+            const CCoinsViewCache& view = wallet.chain().chainman().ActiveChainstate().CoinsTip();
+            const SafeFeeInputSummary fee_inputs = SelectSafeUnbondingFeeInputs(
+                wallet,
+                view,
+                coin_control,
+                wallet.m_default_max_tx_fee,
+                /*allow_legacy=*/true);
+            if (fee_inputs.inputs == 0) {
+                return util::Error{_("Error: No safe fee input is available to start cold-stake unbonding. Add a small ordinary legacy or direct quantum UTXO, then try again.")};
+            }
             auto change_dest = wallet.GetNewQuantumChangeDestination();
             if (!change_dest) return util::Error{util::ErrorString(change_dest)};
             coin_control.destChange = *change_dest;
@@ -984,7 +1076,9 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawColdStakeDelegationAddress(
 
     mapValue_t map_value;
     map_value["comment"] = "Blackcoin quantum cold-stake delegation withdrawal";
-    wallet.CommitTransaction(tx, std::move(map_value), {});
+    if (auto committed = CommitWalletTransactionOrError(wallet, tx, std::move(map_value), "cold-stake delegation withdrawal"); !committed) {
+        return util::Error{util::ErrorString(committed)};
+    }
 
     WalletQuantumOperatorBondTx result;
     result.txid = tx->GetHash().GetHex();
@@ -1296,7 +1390,9 @@ util::Result<WalletQuantumActionTx> CreateQuantumMigrationSweep(
 
     mapValue_t map_value;
     map_value["comment"] = std::move(comment);
-    wallet.CommitTransaction(tx, std::move(map_value), {});
+    if (auto committed = CommitWalletTransactionOrError(wallet, tx, std::move(map_value), goldrush_rewards_only ? "Gold Rush reward migration" : "quantum migration"); !committed) {
+        return util::Error{util::ErrorString(committed)};
+    }
 
     WalletQuantumActionTx result;
     result.txid = tx->GetHash().GetHex();
@@ -1349,7 +1445,9 @@ util::Result<WalletQuantumActionTx> CreateWalletDemurrageAttestation(CWallet& wa
 
     mapValue_t map_value;
     map_value["comment"] = "Blackcoin demurrage attestation";
-    wallet.CommitTransaction(tx_result.tx, std::move(map_value), {});
+    if (auto committed = CommitWalletTransactionOrError(wallet, tx_result.tx, std::move(map_value), "demurrage attestation"); !committed) {
+        return util::Error{util::ErrorString(committed)};
+    }
 
     WalletQuantumActionTx result;
     result.txid = tx_result.tx->GetHash().GetHex();

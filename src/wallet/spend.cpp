@@ -20,6 +20,7 @@
 #include <script/script.h>
 #include <script/signingprovider.h>
 #include <script/solver.h>
+#include <shadow.h>
 #include <util/check.h>
 #include <util/moneystr.h>
 #include <util/trace.h>
@@ -365,6 +366,14 @@ static bool MatchesCoinControlInputFamily(const CScript& script_pub_key, const C
     return !is_quantum && !IsEUTXOScript(script_pub_key);
 }
 
+static bool IsExcludedGeneratedQuantumInput(const CWallet& wallet, const CCoinControl& coin_control, const COutPoint& outpoint, const CScript& script_pub_key)
+{
+    if (!coin_control.m_exclude_generated_quantum_inputs || !IsQuantumMigrationScript(script_pub_key)) return false;
+
+    CScript marker_script;
+    return IsGoldRushDirectPayoutOutput(wallet.chain().getCoinsTip(), outpoint, &marker_script) && marker_script == script_pub_key;
+}
+
 // Fetch and validate the coin control selected inputs.
 // Coins could be internal (from the wallet) or external.
 util::Result<PreSelectedInputs> FetchSelectedInputs(const CWallet& wallet, const CCoinControl& coin_control,
@@ -396,12 +405,8 @@ util::Result<PreSelectedInputs> FetchSelectedInputs(const CWallet& wallet, const
         if (!MatchesCoinControlInputFamily(txout.scriptPubKey, coin_control)) {
             return util::Error{strprintf(_("Pre-selected input %s does not match the selected wallet source"), outpoint.ToString())};
         }
-        if (coin_control.m_exclude_generated_quantum_inputs &&
-            IsQuantumMigrationScript(txout.scriptPubKey)) {
-            const CWalletTx* wallet_tx = wallet.GetWalletTx(outpoint.hash);
-            if (wallet_tx && wallet_tx->IsCoinBase()) {
-                return util::Error{strprintf(_("Pre-selected input %s is a Gold Rush reward output. Move it to a fresh quantum address before using it for ordinary sends or staking."), outpoint.ToString())};
-            }
+        if (IsExcludedGeneratedQuantumInput(wallet, coin_control, outpoint, txout.scriptPubKey)) {
+            return util::Error{strprintf(_("Pre-selected input %s is a Gold Rush reward output. Move it to a fresh quantum address before using it for ordinary sends or staking."), outpoint.ToString())};
         }
 
         if (input_bytes == -1) {
@@ -481,8 +486,7 @@ CoinsResult AvailableCoins(const CWallet& wallet,
             if (coinControl && !MatchesCoinControlInputFamily(output.scriptPubKey, *coinControl))
                 continue;
 
-            if (coinControl && coinControl->m_exclude_generated_quantum_inputs &&
-                wtx.IsCoinBase() && IsQuantumMigrationScript(output.scriptPubKey)) {
+            if (coinControl && IsExcludedGeneratedQuantumInput(wallet, *coinControl, outpoint, output.scriptPubKey)) {
                 continue;
             }
 

@@ -58,6 +58,12 @@ static constexpr uint32_t SHADOW_ARGON2_TIME_COST = 1;
 static constexpr uint32_t SHADOW_ARGON2_MEMORY_KIB = 1024;
 static constexpr uint32_t SHADOW_ARGON2_LANES = 1;
 
+bool IsDirectQuantumMigrationScript(const CScript& script)
+{
+    const auto tier = GetQuantumStakeTierProgram(script);
+    return tier && !tier->tiered && !tier->cold_stake;
+}
+
 enum class ShadowProofMode : unsigned char {
     POW = 0,
     POS = 1,
@@ -306,7 +312,7 @@ bool DecodeSignalPayload(const valtype& payload, ShadowSignal& signal)
         if (payout_size == 0 || cursor + payout_size != payload.size()) return false;
         signal.payout_script = CScript(payload.begin() + cursor, payload.end());
         signal.quantum_linked = true;
-        if (!IsQuantumMigrationScript(signal.payout_script)) return false;
+        if (!IsDirectQuantumMigrationScript(signal.payout_script)) return false;
     } else {
         return false;
     }
@@ -344,7 +350,7 @@ bool DecodeActiveSignalMarker(const CScript& script, ShadowActiveSignal& signal)
     if (payout_size == 0 || cursor + payout_size != payload.size()) return false;
     CScript payout(payload.begin() + cursor, payload.end());
     if (target.empty() || target.IsUnspendable()) return false;
-    if (!IsQuantumMigrationScript(payout)) return false;
+    if (!IsDirectQuantumMigrationScript(payout)) return false;
     signal = ShadowActiveSignal{target, payout, last_signal_height};
     return true;
 }
@@ -586,7 +592,7 @@ bool DecodeProof(const valtype& proof, ShadowProof& decoded)
         if (payout_size == 0 || cursor + payout_size != proof.size()) return false;
         decoded.payout_script = CScript(proof.begin() + cursor, proof.end());
         decoded.quantum_linked = true;
-        if (!IsQuantumMigrationScript(decoded.payout_script)) return false;
+        if (!IsDirectQuantumMigrationScript(decoded.payout_script)) return false;
     } else {
         return false;
     }
@@ -853,7 +859,7 @@ bool BuildPosPayouts(const ShadowPoolState& credited_pool, const std::optional<C
 
     if (require_quantum_payouts) {
         for (const auto& [legacy_target, payout_script] : active_signals) {
-            if (!IsQuantumMigrationScript(payout_script)) return true;
+            if (!IsDirectQuantumMigrationScript(payout_script)) return true;
         }
     }
 
@@ -925,7 +931,7 @@ bool AddClaimMarker(CCoinsViewCache& view, const CBlockIndex* pindex, uint32_t m
 {
     claim.direct = true;
     if (!pindex || claim.amount <= 0 || !MoneyRange(claim.amount) ||
-        !IsQuantumMigrationScript(claim.target) ||
+        !IsDirectQuantumMigrationScript(claim.target) ||
         claim.target.size() > std::numeric_limits<uint16_t>::max()) {
         return false;
     }
@@ -992,7 +998,7 @@ bool AddActiveSignalMarkers(CCoinsViewCache& view, const CBlockIndex* pindex, co
         if (marker_index >= MAX_SHADOW_CLAIM_MARKERS_PER_BLOCK ||
             target.empty() || target.IsUnspendable() ||
             target.size() > std::numeric_limits<uint16_t>::max() ||
-            !IsQuantumMigrationScript(payout_script) ||
+            !IsDirectQuantumMigrationScript(payout_script) ||
             payout_script.size() > std::numeric_limits<uint16_t>::max()) {
             return false;
         }
@@ -1212,7 +1218,7 @@ bool GetShadowPowDirectPayouts(const CCoinsViewCache& view, const CBlock& block,
     if (pow_claim.internal_error) return false;
     if (pow_claim.proof_limit_exceeded || pow_claim.duplicate_claim) return true;
     if (!pow_claim.claim || !pow_claim.claim->direct) return true;
-    if (!IsQuantumMigrationScript(pow_claim.claim->target)) return false;
+    if (!IsDirectQuantumMigrationScript(pow_claim.claim->target)) return false;
     payouts_out.emplace(pow_claim.claim->target, pow_claim.claim->amount);
     total_out = pow_claim.claim->amount;
     return MoneyRange(total_out);
@@ -1273,7 +1279,7 @@ bool DecodeShadowClaimMarker(const CTxOut& txout, ShadowClaimMarkerInfo& info)
     info = {};
     const auto claim = DecodeClaimScript(txout.scriptPubKey);
     if (!claim || !claim->direct || claim->amount <= 0 || !MoneyRange(claim->amount) ||
-        !IsQuantumMigrationScript(claim->target)) {
+        !IsDirectQuantumMigrationScript(claim->target)) {
         return false;
     }
     info.target = claim->target;
@@ -1302,7 +1308,7 @@ std::vector<ShadowSyntheticPayoutTransaction> GetAppliedShadowClaimPayoutTransac
         if (!view.GetCoin(ClaimOutpoint(height, block_hash, marker_index), claim_coin)) break;
         const auto claim = DecodeClaimScript(claim_coin.out.scriptPubKey);
         if (!claim || !claim->direct || claim->amount <= 0 || !MoneyRange(claim->amount) ||
-            !IsQuantumMigrationScript(claim->target)) {
+            !IsDirectQuantumMigrationScript(claim->target)) {
             break;
         }
         payouts.push_back(ShadowSyntheticPayoutTransaction{
@@ -1334,7 +1340,7 @@ std::vector<ShadowSyntheticPayoutCoin> GetAppliedShadowClaimPayoutCoins(const CC
         if (!view.GetCoin(ClaimOutpoint(height, block_hash, marker_index), claim_coin)) break;
         const auto claim = DecodeClaimScript(claim_coin.out.scriptPubKey);
         if (!claim || !claim->direct || claim->amount <= 0 || !MoneyRange(claim->amount) ||
-            !IsQuantumMigrationScript(claim->target)) {
+            !IsDirectQuantumMigrationScript(claim->target)) {
             break;
         }
         const CTransactionRef payout_tx = BuildClaimPayoutTransaction(height, block_hash, block_time, marker_index, *claim);
@@ -1579,7 +1585,7 @@ bool BuildShadowSignalData(const CScript& target, const CScript& quantum_payout_
 {
     data_out.clear();
     if (target.empty() || target.IsUnspendable()) return false;
-    if (!IsQuantumMigrationScript(quantum_payout_script)) return false;
+    if (!IsDirectQuantumMigrationScript(quantum_payout_script)) return false;
     if (target.size() > std::numeric_limits<uint16_t>::max() || quantum_payout_script.size() > std::numeric_limits<uint16_t>::max()) return false;
     if ((solve_height == 0) != solve_hash.IsNull()) return false;
     const valtype payload = EncodeSignalPayloadV2(target, quantum_payout_script, solve_height, solve_hash);
@@ -1612,7 +1618,7 @@ ShadowPowWork PrepareShadowPowWork(const CScript& target, const CScript& quantum
     if (height < SHADOW_REWARD_START_HEIGHT || height > SHADOW_REWARD_END_HEIGHT) return work;
     if (target.empty() || target.IsUnspendable()) return work;
     if (IsQuantumMigrationScript(target) || IsQuantumColdStakeScript(target) || IsEUTXOScript(target)) return work;
-    if (!IsQuantumMigrationScript(quantum_payout_script)) return work;
+    if (!IsDirectQuantumMigrationScript(quantum_payout_script)) return work;
     if (target.size() > std::numeric_limits<uint16_t>::max() || quantum_payout_script.size() > std::numeric_limits<uint16_t>::max()) return work;
 
     // The ONLY coins-view read: snapshot the shadow pool and derive this tip's difficulty.

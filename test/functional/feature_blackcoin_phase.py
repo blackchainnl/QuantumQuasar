@@ -11,9 +11,11 @@ states without waiting on wall-clock schedule boundaries.
 
 from decimal import Decimal
 
+from test_framework.messages import COIN, COutPoint, CTransaction, CTxIn, CTxOut
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal, assert_raises_rpc_error
 from test_framework.address import key_to_p2pkh
+from test_framework.script import CScript, OP_FALSE, OP_RETURN
 from test_framework.script_util import key_to_p2pkh_script
 from test_framework.wallet_util import generate_keypair
 
@@ -84,6 +86,26 @@ class BlackcoinPhaseTest(BitcoinTestFramework):
         assert signed["complete"]
         return signed["hex"]
 
+    def _signed_shadow_marker_output_tx(self, node):
+        privkey, pubkey = generate_keypair(wif=True)
+        address = key_to_p2pkh(pubkey)
+        script_pub_key = key_to_p2pkh_script(pubkey).hex()
+        block_hashes = self.generatetoaddress(node, 101, address, sync_fun=self.no_op)
+        coinbase_txid = node.getblock(block_hashes[0])["tx"][0]
+        coinbase = node.getrawtransaction(coinbase_txid, True, block_hashes[0])
+        value = Decimal(str(coinbase["vout"][0]["value"]))
+
+        tx = CTransaction()
+        tx.vin = [CTxIn(COutPoint(int(coinbase_txid, 16), 0))]
+        tx.vout = [CTxOut(int((value - Decimal("0.001")) * COIN), CScript([OP_FALSE, OP_RETURN, b"QQPOOL"]))]
+        signed = node.signrawtransactionwithkey(
+            tx.serialize().hex(),
+            [privkey],
+            [{"txid": coinbase_txid, "vout": 0, "scriptPubKey": script_pub_key, "amount": value}],
+        )
+        assert signed["complete"]
+        return signed["hex"]
+
     def _assert_shadow_signal_rpc(self, node):
         if not self.is_wallet_compiled():
             return
@@ -138,6 +160,14 @@ class BlackcoinPhaseTest(BitcoinTestFramework):
         assert_equal(gold_rush_template["sigoplimit"], LEGACY_BLOCK_SIGOPS)
         self._assert_shadow_signal_rpc(self.nodes[0])
         self._assert_rgb_commitment_rpc(self.nodes[0])
+        assert_raises_rpc_error(
+            -25,
+            "TestBlockValidity failed: shadow-marker-output",
+            self.generateblock,
+            self.nodes[0],
+            self.nodes[0].get_deterministic_priv_key().address,
+            [self._signed_shadow_marker_output_tx(self.nodes[0])],
+        )
         gold_rush_eutxo = self.nodes[0].testmempoolaccept([self._signed_eutxo_output_tx(self.nodes[0])])[0]
         assert_equal(gold_rush_eutxo["allowed"], False)
         assert_equal(gold_rush_eutxo["reject-reason"], "eutxo-output-premature")

@@ -2360,6 +2360,10 @@ static bool CheckQuantumQuasarOutputs(const CTransaction& tx, unsigned int flags
 {
     for (unsigned int i = 0; i < tx.vout.size(); ++i) {
         const CTxOut& txout = tx.vout[i];
+        if ((flags & SCRIPT_VERIFY_ISCOINSTAKE) && IsShadowMarkerScript(txout.scriptPubKey)) {
+            reject_reason = "shadow-marker-output";
+            return false;
+        }
         if (IsEUTXOScript(txout.scriptPubKey) && !(flags & SCRIPT_VERIFY_EUTXO)) {
             reject_reason = "eutxo-output-premature";
             return false;
@@ -3119,6 +3123,15 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
             return FatalError(m_chainman.GetNotifications(), state, "Corrupt block found indicating potential hardware failure; shutting down");
         }
         return error("%s: Consensus::CheckBlock: %s", __func__, state.ToString());
+    }
+
+    if (pindex->pprev) {
+        if (pindex->IsProofOfStake() != block.IsProofOfStake()) {
+            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-proof-type");
+        }
+        if (block.nBits != GetNextTargetRequired(pindex->pprev, params.GetConsensus(), block.IsProofOfStake())) {
+            return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "bad-diffbits", strprintf("%s: incorrect %s", __func__, !block.IsProofOfStake() ? "proof-of-work" : "proof-of-stake"));
+        }
     }
 
     // verify that the view's current state corresponds to the previous block
@@ -5315,7 +5328,20 @@ bool ChainstateManager::AcceptBlock(const std::shared_ptr<const CBlock>& pblock,
 
     const CChainParams& params{GetParams()};
 
-    if (!CheckBlock(block, state, params.GetConsensus(), ActiveChainstate()) ||
+    if (pindex->pprev) {
+        const bool fProofOfStakeBody = block.IsProofOfStake();
+        const int nHeight = pindex->pprev->nHeight + 1;
+        if (block.nBits != GetNextTargetRequired(pindex->pprev, params.GetConsensus(), fProofOfStakeBody)) {
+            state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "bad-diffbits", strprintf("%s: incorrect %s", __func__, !fProofOfStakeBody ? "proof-of-work" : "proof-of-stake"));
+        } else if (nHeight > params.GetConsensus().nLastPOWBlock && !fProofOfStakeBody) {
+            state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "reject-pow", strprintf("%s: reject proof-of-work at height %d", __func__, nHeight));
+        } else if (nHeight > params.GetConsensus().nLastPOWBlock && !CheckStakeBlockTimestamp(block.GetBlockTime())) {
+            state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "bad-pos-time", "incorrect pos block timestamp");
+        }
+    }
+
+    if (!state.IsValid() ||
+        !CheckBlock(block, state, params.GetConsensus(), ActiveChainstate()) ||
         !ContextualCheckBlock(block, state, *this, pindex->pprev)) {
         if (state.IsInvalid() && state.GetResult() != BlockValidationResult::BLOCK_MUTATED) {
             pindex->nStatus |= BLOCK_FAILED_VALID;
@@ -5439,6 +5465,11 @@ bool TestBlockValidity(BlockValidationState& state,
     indexDummy.pprev = pindexPrev;
     indexDummy.nHeight = pindexPrev->nHeight + 1;
     indexDummy.phashBlock = &block_hash;
+    if (block.IsProofOfStake()) {
+        indexDummy.SetProofOfStake();
+    } else {
+        indexDummy.nFlags &= ~CBlockIndex::BLOCK_PROOF_OF_STAKE;
+    }
 
     // NOTE: CheckBlockHeader is called by CheckBlock
     if (!ContextualCheckBlockHeader(block, state, chainstate.m_blockman, chainstate.m_chainman, pindexPrev, adjusted_time_callback(), chainstate.m_chain, block.IsProofOfStake()))

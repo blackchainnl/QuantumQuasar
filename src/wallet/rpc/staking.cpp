@@ -59,6 +59,18 @@ static bool IsDirectQuantumMigrationScript(const CScript& script_pub_key)
     return tier && !tier->tiered && !tier->cold_stake;
 }
 
+static void CommitWalletTransactionOrThrow(CWallet& wallet, const CTransactionRef& tx, mapValue_t map_value, const std::string& action)
+{
+    std::string broadcast_error;
+    if (!wallet.CommitTransaction(tx, std::move(map_value), {}, &broadcast_error)) {
+        const std::string reason = broadcast_error.empty() ? "transaction was not accepted into the mempool" : broadcast_error;
+        if (!wallet.AbandonTransaction(tx->GetHash())) {
+            wallet.WalletLogPrintf("%s transaction could not be abandoned after broadcast failure: txid=%s\n", action, tx->GetHash().ToString());
+        }
+        throw JSONRPCError(RPC_WALLET_ERROR, strprintf("%s transaction was created but could not be broadcast: %s", action, reason));
+    }
+}
+
 static UniValue QuantumOperatorBondInfoToJSON(const interfaces::WalletQuantumOperatorBondInfo& info)
 {
     UniValue obj(UniValue::VOBJ);
@@ -900,7 +912,7 @@ static RPCHelpMan sendshadowsignal()
     const std::string hex = EncodeHexTx(*tx);
     mapValue_t map_value;
     map_value["comment"] = "Blackcoin shadow signal";
-    pwallet->CommitTransaction(tx, std::move(map_value), {});
+    CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "Blackcoin shadow signal");
 
     UniValue result(UniValue::VOBJ);
     result.pushKV("txid", tx->GetHash().GetHex());
@@ -1169,7 +1181,7 @@ static RPCHelpMan sendshadowpowclaim()
 
     mapValue_t map_value;
     map_value["comment"] = "Blackcoin shadow PoW claim";
-    pwallet->CommitTransaction(tx, std::move(map_value), {});
+    CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "Blackcoin shadow PoW claim");
 
     UniValue result(UniValue::VOBJ);
     result.pushKV("txid", tx->GetHash().GetHex());
@@ -1979,7 +1991,7 @@ static RPCHelpMan senddemurrageattestation()
     if (!dry_run) {
         mapValue_t map_value;
         map_value["comment"] = "Blackcoin demurrage attestation";
-        pwallet->CommitTransaction(tx, std::move(map_value), {});
+        CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "Blackcoin demurrage attestation");
         obj.pushKV("txid", tx->GetHash().GetHex());
     }
     return obj;
@@ -2388,7 +2400,7 @@ static RPCHelpMan sweepdemurragedecay()
     if (!dry_run) {
         mapValue_t map_value;
         map_value["comment"] = "Blackcoin demurrage sweep";
-        pwallet->CommitTransaction(tx, std::move(map_value), {});
+        CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "Blackcoin demurrage sweep");
         obj.pushKV("txid", tx->GetHash().GetHex());
     }
     if (newly_generated) {

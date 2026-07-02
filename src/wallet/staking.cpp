@@ -537,6 +537,10 @@ bool CreateDemurrageAttestationTransaction(
             error = _("Wallet is locked");
             return false;
         }
+        if (sign && wallet.m_wallet_unlock_staking_only) {
+            error = _("Wallet is unlocked for staking only");
+            return false;
+        }
         bilingual_str key_error;
         if (!wallet.GetQuantumKey(witness_program, public_key, private_key, key_error)) {
             error = key_error;
@@ -860,15 +864,28 @@ bool CreateQuantumColdStakeRedelegationTransaction(
     if (!options.dry_run) {
         mapValue_t map_value;
         map_value["comment"] = "Quantum Quasar cold-stake redelegation";
-        wallet.CommitTransaction(tx, std::move(map_value), {});
+        std::string broadcast_error;
+        if (!wallet.CommitTransaction(tx, std::move(map_value), {}, &broadcast_error)) {
+            if (!wallet.AbandonTransaction(tx->GetHash())) {
+                wallet.WalletLogPrintf("Cold-stake redelegation could not be abandoned after broadcast failure: txid=%s\n", tx->GetHash().ToString());
+            }
+            error = strprintf(_("Broadcasting cold-stake redelegation failed: %s"), broadcast_error.empty() ? "transaction was not accepted into the mempool" : broadcast_error);
+            return false;
+        }
     }
     return true;
 }
 
 int MaybeAutoDemurrageAttest(CWallet& wallet)
 {
-    if (!wallet.m_enabled_staking.load() || wallet.IsLocked() || wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
-        return 0;
+    {
+        LOCK(wallet.cs_wallet);
+        if (!wallet.m_enabled_staking.load() ||
+            wallet.IsLocked() ||
+            wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS) ||
+            wallet.m_wallet_unlock_staking_only) {
+            return 0;
+        }
     }
 
     const Consensus::Params& consensus = Params().GetConsensus();
@@ -993,7 +1010,14 @@ int MaybeAutoDemurrageAttest(CWallet& wallet)
 
             mapValue_t map_value;
             map_value["comment"] = "Quantum Quasar demurrage auto-attestation";
-            wallet.CommitTransaction(tx_result.tx, std::move(map_value), {});
+            std::string broadcast_error;
+            if (!wallet.CommitTransaction(tx_result.tx, std::move(map_value), {}, &broadcast_error)) {
+                if (!wallet.AbandonTransaction(tx_result.tx->GetHash())) {
+                    wallet.WalletLogPrintf("Demurrage auto-attestation could not be abandoned after broadcast failure: txid=%s\n", tx_result.tx->GetHash().ToString());
+                }
+                last_error = Untranslated(strprintf("broadcast failed: %s", broadcast_error.empty() ? "transaction was not accepted into the mempool" : broadcast_error));
+                continue;
+            }
             used_fee_outpoints.insert(fee_outpoint);
             wallet.WalletLogPrintf("Demurrage auto-attested demurrage key %s at height %d with tx %s (inactive %d blocks, fee %d)\n",
                                    candidate.key_hash.ToString(), evaluation_height, tx_result.tx->GetHash().ToString(), candidate.inactive_blocks, tx_result.fee);
@@ -1084,7 +1108,14 @@ int MaybeAutoShadowSignal(CWallet& wallet)
     mapValue_t map_value;
     map_value["comment"] = SHADOW_SIGNAL_COMMENT;
     try {
-        wallet.CommitTransaction(tx, std::move(map_value), {});
+        std::string broadcast_error;
+        if (!wallet.CommitTransaction(tx, std::move(map_value), {}, &broadcast_error)) {
+            wallet.WalletLogPrintf("Broadcasting Gold Rush PoS signal failed: %s\n", broadcast_error.empty() ? "transaction was not accepted into the mempool" : broadcast_error);
+            if (!wallet.AbandonTransaction(tx->GetHash())) {
+                wallet.WalletLogPrintf("Gold Rush PoS signal could not be abandoned after broadcast failure: txid=%s\n", tx->GetHash().ToString());
+            }
+            return 0;
+        }
     } catch (const std::exception& e) {
         wallet.WalletLogPrintf("Broadcasting Gold Rush PoS signal failed: %s\n", e.what());
         return 0;

@@ -226,6 +226,13 @@ CScript QuantumColdStakeScript(unsigned char tag)
     return GetScriptForDestination(WitnessUnknown{QUANTUM_COLDSTAKE_WITNESS_VERSION, std::vector<unsigned char>(QUANTUM_COLDSTAKE_PROGRAM_SIZE, tag)});
 }
 
+CScript TieredQuantumMigrationScript()
+{
+    return GetScriptForDestination(WitnessUnknown{
+        QUANTUM_MIGRATION_WITNESS_VERSION,
+        QuantumTieredProgramForCommitment(QUANTUM_TIERED_STATE_BONDED, /*unbonding_blocks=*/40500, /*unlock_height=*/0, uint256::ONE)});
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_CASE(legacy_whitelist_uses_aggregate_script_balance)
@@ -308,6 +315,35 @@ BOOST_AUTO_TEST_CASE(legacy_whitelist_canonicalizes_p2pk_stake_outputs)
     BOOST_CHECK_EQUAL(direct_total, 580 * COIN);
     BOOST_REQUIRE_EQUAL(direct_payouts.size(), 1U);
     BOOST_CHECK_EQUAL(direct_payouts[quantum_payout], 580 * COIN);
+}
+
+BOOST_AUTO_TEST_CASE(goldrush_payouts_must_use_direct_quantum_addresses)
+{
+    CCoinsView base;
+    CCoinsViewCache view{&base, true};
+
+    uint256 whitelist_hash;
+    CBlockIndex whitelist_index;
+    InitIndex(whitelist_index, SHADOW_WHITELIST_HEIGHT, nullptr, whitelist_hash);
+    ApplyLegacyWhitelistSnapshot(view, &whitelist_index);
+
+    uint256 prev_hash;
+    CBlockIndex prev_index;
+    InitIndex(prev_index, SHADOW_REWARD_START_HEIGHT, &whitelist_index, prev_hash);
+    CBlock prev_block;
+    prev_block.vtx.push_back(MakeCoinbaseTx(CScript{} << OP_TRUE));
+    BOOST_REQUIRE(ApplyShadowBlock(view, prev_block, &prev_index));
+
+    const CScript legacy_target = CScript{} << OP_2;
+    const CScript direct_payout = QuantumScript(0x72);
+    const CScript tiered_payout = TieredQuantumMigrationScript();
+
+    std::vector<unsigned char> signal;
+    BOOST_CHECK(BuildShadowSignalData(legacy_target, direct_payout, prev_index.nHeight, prev_index.GetBlockHash(), signal));
+    BOOST_CHECK(!BuildShadowSignalData(legacy_target, tiered_payout, prev_index.nHeight, prev_index.GetBlockHash(), signal));
+
+    BOOST_CHECK(PrepareShadowPowWork(legacy_target, direct_payout, &prev_index, view).valid);
+    BOOST_CHECK(!PrepareShadowPowWork(legacy_target, tiered_payout, &prev_index, view).valid);
 }
 
 BOOST_AUTO_TEST_CASE(legacy_whitelist_snapshot_undo_removes_markers)

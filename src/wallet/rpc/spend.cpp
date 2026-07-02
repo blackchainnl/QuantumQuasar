@@ -44,6 +44,18 @@ static bool IsDirectQuantumMigrationScript(const CScript& script_pub_key)
     return tier && !tier->tiered && !tier->cold_stake;
 }
 
+static void CommitWalletTransactionOrThrow(CWallet& wallet, const CTransactionRef& tx, mapValue_t map_value, const std::string& action)
+{
+    std::string broadcast_error;
+    if (!wallet.CommitTransaction(tx, std::move(map_value), {}, &broadcast_error)) {
+        const std::string reason = broadcast_error.empty() ? "transaction was not accepted into the mempool" : broadcast_error;
+        if (!wallet.AbandonTransaction(tx->GetHash())) {
+            wallet.WalletLogPrintf("%s transaction could not be abandoned after broadcast failure: txid=%s\n", action, tx->GetHash().ToString());
+        }
+        throw JSONRPCError(RPC_WALLET_ERROR, strprintf("%s transaction was created but could not be broadcast: %s", action, reason));
+    }
+}
+
 static void ParseRecipients(const UniValue& address_amounts, const UniValue& subtract_fee_outputs, std::vector<CRecipient>& recipients)
 {
     std::set<CTxDestination> destinations;
@@ -1916,7 +1928,7 @@ RPCHelpMan migratetoquantum()
         result.pushKV("fee", ValueFromAmount(res->fee));
         result.pushKV("vsize", (int)GetVirtualTransactionSize(*tx, 0, 0));
         if (!dry_run) {
-            pwallet->CommitTransaction(tx, {}, {});
+            CommitWalletTransactionOrThrow(*pwallet, tx, {}, "Blackcoin quantum migration");
             result.pushKV("txid", tx->GetHash().GetHex());
         }
         if (newly_generated) {
@@ -2076,7 +2088,7 @@ RPCHelpMan migrategoldrushrewards()
         result.pushKV("fee", ValueFromAmount(res->fee));
         result.pushKV("vsize", (int)GetVirtualTransactionSize(*tx, 0, 0));
         if (!dry_run) {
-            pwallet->CommitTransaction(tx, {}, {});
+            CommitWalletTransactionOrThrow(*pwallet, tx, {}, "Blackcoin Gold Rush reward migration");
             result.pushKV("txid", tx->GetHash().GetHex());
         }
         if (newly_generated) {
