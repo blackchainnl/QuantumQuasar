@@ -1453,6 +1453,7 @@ void StakingMiningPage::updateStatus()
     m_updating = true;
 
     interfaces::Wallet& w = m_wallet_model->wallet();
+    const interfaces::WalletBalances balances = w.getBalances();
 
     // Staking
     const bool staking = w.getEnabledStaking();
@@ -1541,9 +1542,7 @@ void StakingMiningPage::updateStatus()
         m_migration_goldrush_amount->setText(tr("%1 across %2 outputs")
             .arg(formatBLK(migration.goldrush_reward_amount_needing_move))
             .arg(QString::number(migration.goldrush_reward_outputs_needing_move)));
-        m_coldstake_quantum_available->setText(tr("%1 across %2 outputs")
-            .arg(formatBLK(migration.migrated_quantum_amount))
-            .arg(QString::number(migration.migrated_quantum_outputs)));
+        m_coldstake_quantum_available->setText(formatBLK(balances.quantum_balance));
         m_migration_advice->setText(QString::fromStdString(migration.advice));
     } else {
         m_migration_advice->setText(tr("Wallet is busy; migration status will refresh shortly."));
