@@ -840,6 +840,7 @@ void PoSMiner(CWallet *pwallet)
             }
 
             wallet::MaybeAutoDemurrageAttest(*pwallet);
+            wallet::MaybeAutoShadowSignal(*pwallet);
 
             //
             // Create new block

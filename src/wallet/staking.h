@@ -82,6 +82,7 @@ bool CreateQuantumColdStakeRedelegationTransaction(
     bilingual_str& error);
 
 int MaybeAutoDemurrageAttest(CWallet& wallet);
+int MaybeAutoShadowSignal(CWallet& wallet);
 int MaybeAutoRedelegateQuantumColdStake(CWallet& wallet);
 
 } // namespace wallet

@@ -1015,6 +1015,18 @@ std::vector<COutPoint> FindMarkerCoins(CCoinsViewCache& view, const valtype& tag
 
 } // namespace
 
+uint64_t GetActiveShadowSignalCount(const CCoinsViewCache& view, const CBlockIndex* pindex)
+{
+    if (!pindex) return 0;
+    return ReadActiveShadowSignals(view, pindex, pindex->nHeight).size();
+}
+
+std::map<CScript, CScript> GetActiveShadowSignalPayouts(const CCoinsViewCache& view, const CBlockIndex* pindex)
+{
+    if (!pindex) return {};
+    return ActiveSignalPayoutScripts(ReadActiveShadowSignals(view, pindex, pindex->nHeight));
+}
+
 CAmount ShadowBaseReward(int height)
 {
     if (height < SHADOW_REWARD_START_HEIGHT || height > SHADOW_REWARD_END_HEIGHT) return 0;

@@ -959,6 +959,7 @@ public:
     std::atomic<bool> m_stop_staking_thread{false};
     int m_demurrage_last_auto_attest_scan_height GUARDED_BY(cs_wallet){-1};
     std::map<uint256, int> m_demurrage_last_auto_attest_attempt_height GUARDED_BY(cs_wallet);
+    int m_shadow_signal_last_auto_scan_height GUARDED_BY(cs_wallet){-1};
     int m_redelegation_last_auto_scan_height GUARDED_BY(cs_wallet){-1};
     std::map<std::vector<unsigned char>, int> m_redelegation_last_auto_attempt_height GUARDED_BY(cs_wallet);
     std::map<std::vector<unsigned char>, int> m_redelegation_last_auto_success_height GUARDED_BY(cs_wallet);
