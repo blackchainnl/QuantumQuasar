@@ -51,6 +51,7 @@ private Q_SLOTS:
     void onDonationPercentChanged(int percentage);
     void onPowEnableToggled(bool enabled);
     void onPowUnlockWalletToggled(bool enabled);
+    void onPowSettingsChanged(int);
     void onApplyPow();
     void onCopyPayoutAddress();
     void onCreateQuantumAddress();
@@ -68,6 +69,7 @@ private:
     bool m_updating{false}; // guard against re-entrant control->slot->control loops
     bool m_pow_apply_pending{false};
     bool m_pow_pending_enabled{false};
+    bool m_pow_settings_dirty{false};
 
     // Staking section
     QCheckBox* m_staking_enable{nullptr};
