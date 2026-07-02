@@ -500,6 +500,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QCOMPARE(coldstake_operator_pubkey->text().size(), int{ML_DSA::PUBLICKEY_BYTES * 2});
     QVERIFY(coldstake_operator_address_selector->isEnabled());
     QVERIFY(coldstake_operator_address_selector->findData(coldstake_operator_address->text()) >= 0);
+    QVERIFY(!coldstake_operator_address_selector->currentText().contains(QString("40500")));
     QVERIFY(coldstake_operator_copy->isEnabled());
     QVERIFY(coldstake_operator_use->isEnabled());
     QVERIFY(coldstake_operator_status->text().contains(QString("30-day")));
