@@ -762,6 +762,8 @@ void StakingMiningPage::setWalletModel(WalletModel* walletModel)
     m_updating = false;
     m_pow_apply_pending = false;
     m_pow_settings_dirty = false;
+    m_operator_registry_loaded = false;
+    m_operator_registry_refresh_seconds = 0;
     m_operator_last_action_status.clear();
 
     if (m_wallet_model) {
@@ -771,6 +773,8 @@ void StakingMiningPage::setWalletModel(WalletModel* walletModel)
             m_updating = false;
             m_pow_apply_pending = false;
             m_pow_settings_dirty = false;
+            m_operator_registry_loaded = false;
+            m_operator_registry_refresh_seconds = 0;
             resetStatusForNoWallet();
         });
         updateStatus();
@@ -1383,6 +1387,8 @@ void StakingMiningPage::refreshOperatorRegistry()
         QSignalBlocker selector_blocker(m_coldstake_operator_selector);
         m_coldstake_operator_selector->addItem(tr("Operator registry busy; try Refresh again"), QString());
         m_operator_registry_status->setText(tr("Operator registry is busy. No delegation operator is selected."));
+        m_operator_registry_loaded = false;
+        m_operator_registry_refresh_seconds = 0;
         refreshControlsEnabled();
         return;
     }
@@ -1433,6 +1439,8 @@ void StakingMiningPage::refreshOperatorRegistry()
               .arg(static_cast<int>(pool.operators.size()))
               .arg(formatBLK(pool.total_coldstake))
               .arg(formatBps(pool.cap_bps)));
+    m_operator_registry_loaded = true;
+    m_operator_registry_refresh_seconds = 0;
     refreshControlsEnabled();
 }
 
@@ -1764,6 +1772,7 @@ void StakingMiningPage::updateStatus()
         !m_selfstake_status->text().startsWith(m_selfstake_last_action_status)) {
         m_selfstake_status->setText(m_selfstake_last_action_status + QStringLiteral("\n") + m_selfstake_status->text());
     }
+    bool local_bonded_operator = false;
     if (m_operator_pubkey->text().isEmpty()) {
         const auto operator_it = std::find_if(quantum_addresses.begin(), quantum_addresses.end(), [](const interfaces::WalletQuantumAddressInfo& info) {
             return info.tiered && info.label == "coldstake-operator" && info.unbonding_blocks == OPERATOR_COMMITMENT_BLOCKS;
@@ -1780,6 +1789,7 @@ void StakingMiningPage::updateStatus()
             w.getQuantumOperatorBondInfo(m_operator_address->text().toStdString());
         if (bond_info.valid_operator_address) {
             if (bond_info.bonded_outputs > 0) {
+                local_bonded_operator = true;
                 m_operator_status->setText(tr("Operator bond active: %1 across %2 output(s). Delegators can verify this operator. Stop/withdraw starts the 30-day unbonding period.")
                     .arg(formatBLK(bond_info.bonded_amount))
                     .arg(bond_info.bonded_outputs));
@@ -1812,7 +1822,17 @@ void StakingMiningPage::updateStatus()
         m_coldstake_address->setText(QString::fromStdString(coldstake_delegations.back().address));
     }
 
-    refreshControlsEnabled();
+    ++m_operator_registry_refresh_seconds;
+    const bool registry_empty = m_operator_registry && m_operator_registry->rowCount() == 0;
+    const bool should_refresh_registry =
+        !m_operator_registry_loaded ||
+        (local_bonded_operator && registry_empty && m_operator_registry_refresh_seconds >= 10) ||
+        m_operator_registry_refresh_seconds >= 60;
+    if (should_refresh_registry) {
+        refreshOperatorRegistry();
+    } else {
+        refreshControlsEnabled();
+    }
     m_updating = false;
 }
 

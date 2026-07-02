@@ -92,6 +92,8 @@ private:
     bool m_pow_apply_pending{false};
     bool m_pow_pending_enabled{false};
     bool m_pow_settings_dirty{false};
+    bool m_operator_registry_loaded{false};
+    int m_operator_registry_refresh_seconds{0};
     QString m_selfstake_last_action_status;
     QString m_operator_last_action_status;
 
