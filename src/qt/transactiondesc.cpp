@@ -13,6 +13,7 @@
 #include <qt/paymentserver.h>
 #include <qt/transactionrecord.h>
 
+#include <addresstype.h>
 #include <common/system.h>
 #include <consensus/consensus.h>
 #include <interfaces/node.h>
@@ -45,6 +46,36 @@ QString GoldRushWalletControlLabel(const interfaces::WalletTx& wtx)
         return QObject::tr("Gold Rush PoW claim");
     }
     return {};
+}
+
+bool IsQuantumOutput(const CTxOut& txout)
+{
+    return IsQuantumMigrationScript(txout.scriptPubKey) || IsQuantumColdStakeScript(txout.scriptPubKey);
+}
+
+bool IsQuantumWalletTransferTx(const interfaces::WalletTx& wtx)
+{
+    if (wtx.is_coinbase || wtx.is_coinstake || !GoldRushWalletControlLabel(wtx).isEmpty()) return false;
+
+    bool any_from_me{false};
+    bool all_from_me{true};
+    for (const isminetype mine : wtx.txin_is_mine) {
+        any_from_me = any_from_me || mine;
+        all_from_me = all_from_me && (mine & ISMINE_SPENDABLE);
+    }
+    if (!any_from_me || !all_from_me) return false;
+
+    bool any_value_output{false};
+    bool any_quantum_output{false};
+    for (size_t i = 0; i < wtx.tx->vout.size(); ++i) {
+        const CTxOut& txout = wtx.tx->vout[i];
+        if (txout.nValue <= 0 || txout.scriptPubKey.IsUnspendable()) continue;
+        any_value_output = true;
+        if (!(wtx.txout_is_mine[i] & ISMINE_SPENDABLE)) return false;
+        any_quantum_output = any_quantum_output || IsQuantumOutput(txout);
+    }
+
+    return any_value_output && any_quantum_output;
 }
 } // namespace
 
@@ -137,6 +168,7 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     CAmount nDebit = wtx.debit;
     CAmount nNet = nCredit - nDebit;
     const QString gold_rush_control_label = GoldRushWalletControlLabel(wtx);
+    const bool quantum_wallet_transfer = IsQuantumWalletTransferTx(wtx);
 
     strHTML += "<b>" + tr("Status") + ":</b> " + FormatTxStatus(status, inMempool);
     strHTML += "<br>";
@@ -150,6 +182,18 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     {
         strHTML += "<b>" + tr("Source") + ":</b> " + tr("Wallet self-authentication") + "<br>";
         strHTML += "<b>" + tr("Action") + ":</b> " + gold_rush_control_label + "<br>";
+    }
+    else if (quantum_wallet_transfer)
+    {
+        strHTML += "<b>" + tr("Source") + ":</b> " + tr("Wallet quantum transfer") + "<br>";
+        strHTML += "<b>" + tr("Ledger") + ":</b> ";
+        if (status.depth_in_main_chain == 0 && inMempool) {
+            strHTML += tr("On-chain quantum transaction, waiting in mempool for a block") + "<br>";
+        } else if (status.depth_in_main_chain > 0) {
+            strHTML += tr("Confirmed on-chain quantum transaction") + "<br>";
+        } else {
+            strHTML += tr("On-chain quantum transaction, not currently in mempool") + "<br>";
+        }
     }
     else if (wtx.is_coinbase)
     {
@@ -211,6 +255,24 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     //
     if (!gold_rush_control_label.isEmpty())
     {
+        const CAmount nTxFee = nDebit - wtx.tx->GetValueOut();
+        if (nTxFee > 0) {
+            strHTML += "<b>" + tr("Transaction fee") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, -nTxFee) + "<br>";
+        }
+        strHTML += "<b>" + tr("Net amount") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, nNet, true) + "<br>";
+    }
+    else if (quantum_wallet_transfer)
+    {
+        for (size_t i = 0; i < wtx.tx->vout.size(); ++i) {
+            const CTxOut& txout = wtx.tx->vout[i];
+            if (txout.nValue <= 0 || !IsQuantumOutput(txout)) continue;
+            CTxDestination address;
+            if (ExtractDestination(txout.scriptPubKey, address)) {
+                strHTML += "<b>" + (wtx.txout_is_change[i] ? tr("Quantum change") : tr("Quantum output")) + ":</b> ";
+                strHTML += GUIUtil::HtmlEscape(EncodeDestination(address));
+                strHTML += " " + BitcoinUnits::formatHtmlWithUnit(unit, txout.nValue) + "<br>";
+            }
+        }
         const CAmount nTxFee = nDebit - wtx.tx->GetValueOut();
         if (nTxFee > 0) {
             strHTML += "<b>" + tr("Transaction fee") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, -nTxFee) + "<br>";
@@ -327,7 +389,7 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
         }
     }
 
-    if (gold_rush_control_label.isEmpty()) {
+    if (gold_rush_control_label.isEmpty() && !quantum_wallet_transfer) {
         strHTML += "<b>" + tr("Net amount") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, nNet, true) + "<br>";
     }
 

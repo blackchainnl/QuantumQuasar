@@ -4,6 +4,7 @@
 
 #include <qt/transactionrecord.h>
 
+#include <addresstype.h>
 #include <chain.h>
 #include <interfaces/wallet.h>
 #include <key_io.h>
@@ -34,6 +35,36 @@ std::string GoldRushWalletControlLabel(const std::map<std::string, std::string>&
     if (it->second.find("PoW claim") != std::string::npos || it->second.find("shadow PoW") != std::string::npos) return "Gold Rush PoW claim";
     return "Gold Rush";
 }
+
+bool IsQuantumOutput(const CTxOut& txout)
+{
+    return IsQuantumMigrationScript(txout.scriptPubKey) || IsQuantumColdStakeScript(txout.scriptPubKey);
+}
+
+bool IsQuantumWalletTransferTx(const interfaces::WalletTx& wtx)
+{
+    if (wtx.is_coinbase || wtx.is_coinstake || IsGoldRushWalletControlTx(wtx.value_map)) return false;
+
+    bool any_from_me{false};
+    bool all_from_me{true};
+    for (const wallet::isminetype mine : wtx.txin_is_mine) {
+        any_from_me = any_from_me || mine;
+        all_from_me = all_from_me && (mine & wallet::ISMINE_SPENDABLE);
+    }
+    if (!any_from_me || !all_from_me) return false;
+
+    bool any_value_output{false};
+    bool any_quantum_output{false};
+    for (size_t i = 0; i < wtx.tx->vout.size(); ++i) {
+        const CTxOut& txout = wtx.tx->vout[i];
+        if (txout.nValue <= 0 || txout.scriptPubKey.IsUnspendable()) continue;
+        any_value_output = true;
+        if (!(wtx.txout_is_mine[i] & wallet::ISMINE_SPENDABLE)) return false;
+        any_quantum_output = any_quantum_output || IsQuantumOutput(txout);
+    }
+
+    return any_value_output && any_quantum_output;
+}
 } // namespace
 
 using wallet::ISMINE_NO;
@@ -63,6 +94,14 @@ QList<TransactionRecord> TransactionRecord::decomposeTransaction(const interface
 
     if (IsGoldRushWalletControlTx(mapValue)) {
         TransactionRecord sub(hash, nTime, TransactionRecord::Other, GoldRushWalletControlLabel(mapValue), nNet, 0);
+        sub.idx = 0;
+        sub.involvesWatchAddress = false;
+        parts.append(sub);
+        return parts;
+    }
+
+    if (IsQuantumWalletTransferTx(wtx)) {
+        TransactionRecord sub(hash, nTime, TransactionRecord::Other, "Quantum wallet transfer", nNet, 0);
         sub.idx = 0;
         sub.involvesWatchAddress = false;
         parts.append(sub);
