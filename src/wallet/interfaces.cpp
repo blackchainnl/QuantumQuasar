@@ -42,6 +42,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -63,6 +64,7 @@ using interfaces::WalletQuantumOperatorBondInfo;
 using interfaces::WalletQuantumOperatorBondTx;
 using interfaces::WalletQuantumPoolInfo;
 using interfaces::WalletQuantumPoolOperatorInfo;
+using interfaces::WalletQuantumStakeOutputInfo;
 using interfaces::WalletOrderForm;
 using interfaces::WalletTx;
 using interfaces::WalletTxOut;
@@ -167,6 +169,16 @@ bool CanCreateSignedSpend(const CWallet& wallet, bilingual_str& error)
 
 struct OperatorBondOutputs
 {
+    struct Record
+    {
+        COutPoint outpoint;
+        CAmount amount{0};
+        int depth{0};
+        bool spendable{false};
+        std::string state;
+        uint32_t unlock_height{0};
+    };
+
     CAmount bonded_amount{0};
     int bonded_outputs{0};
     std::vector<COutPoint> bonded_outpoints;
@@ -176,6 +188,7 @@ struct OperatorBondOutputs
     int withdrawable_outputs{0};
     std::vector<COutPoint> withdrawable_outpoints;
     uint32_t next_unlock_height{0};
+    std::vector<Record> records;
 };
 
 OperatorBondOutputs ScanOperatorBondOutputs(
@@ -202,6 +215,7 @@ OperatorBondOutputs ScanOperatorBondOutputs(
             outputs.bonded_amount += out.txout.nValue;
             ++outputs.bonded_outputs;
             if (spendable_only) outputs.bonded_outpoints.push_back(out.outpoint);
+            outputs.records.push_back({out.outpoint, out.txout.nValue, out.depth, out.spendable, "bonded", 0});
             continue;
         }
 
@@ -214,11 +228,93 @@ OperatorBondOutputs ScanOperatorBondOutputs(
             outputs.withdrawable_amount += out.txout.nValue;
             ++outputs.withdrawable_outputs;
             if (spendable_only) outputs.withdrawable_outpoints.push_back(out.outpoint);
+            outputs.records.push_back({out.outpoint, out.txout.nValue, out.depth, out.spendable, "withdrawable", tier->unlock_height});
         } else if (outputs.next_unlock_height == 0 || tier->unlock_height < outputs.next_unlock_height) {
             outputs.next_unlock_height = tier->unlock_height;
+            outputs.records.push_back({out.outpoint, out.txout.nValue, out.depth, out.spendable, "unbonding", tier->unlock_height});
+        } else {
+            outputs.records.push_back({out.outpoint, out.txout.nValue, out.depth, out.spendable, "unbonding", tier->unlock_height});
         }
     }
     return outputs;
+}
+
+std::vector<WalletQuantumStakeOutputInfo> ListTieredStakeOutputs(
+    const CWallet& wallet,
+    const std::string& address,
+    bool require_operator_lock)
+{
+    std::vector<WalletQuantumStakeOutputInfo> result;
+    CTxDestination dest;
+    const auto tier = DecodeTieredStakeAddress(address, dest, require_operator_lock);
+    if (!tier) return result;
+
+    LOCK(wallet.cs_wallet);
+    const auto key_info = wallet.GetQuantumKeyInfo(dest);
+    if (!key_info) return result;
+
+    const int current_height = wallet.GetLastBlockHeight();
+    const int spend_height = current_height + 1;
+    const OperatorBondOutputs outputs = ScanOperatorBondOutputs(
+        wallet,
+        GetScriptForDestination(dest),
+        tier->commitment,
+        spend_height,
+        /*spendable_only=*/false);
+
+    result.reserve(outputs.records.size());
+    for (const OperatorBondOutputs::Record& record : outputs.records) {
+        WalletQuantumStakeOutputInfo info;
+        info.txid = record.outpoint.hash.GetHex();
+        info.vout = record.outpoint.n;
+        info.address = address;
+        info.amount = record.amount;
+        info.depth = record.depth;
+        info.state = record.state;
+        info.unlock_height = record.unlock_height;
+        info.spendable = record.spendable;
+        result.push_back(std::move(info));
+    }
+    return result;
+}
+
+bool FindTieredStakeRecord(const OperatorBondOutputs& outputs, const COutPoint& outpoint, OperatorBondOutputs::Record& record)
+{
+    const auto it = std::find_if(outputs.records.begin(), outputs.records.end(), [&](const OperatorBondOutputs::Record& candidate) {
+        return candidate.outpoint == outpoint;
+    });
+    if (it == outputs.records.end()) return false;
+    record = *it;
+    return true;
+}
+
+void KeepOnlySelectedTieredStakeOutput(OperatorBondOutputs& outputs, const OperatorBondOutputs::Record& selected)
+{
+    outputs.bonded_amount = 0;
+    outputs.bonded_outputs = 0;
+    outputs.bonded_outpoints.clear();
+    outputs.unbonding_amount = 0;
+    outputs.unbonding_outputs = 0;
+    outputs.withdrawable_amount = 0;
+    outputs.withdrawable_outputs = 0;
+    outputs.withdrawable_outpoints.clear();
+    outputs.next_unlock_height = 0;
+
+    if (selected.state == "bonded") {
+        outputs.bonded_amount = selected.amount;
+        outputs.bonded_outputs = 1;
+        outputs.bonded_outpoints.push_back(selected.outpoint);
+    } else if (selected.state == "withdrawable") {
+        outputs.unbonding_amount = selected.amount;
+        outputs.unbonding_outputs = 1;
+        outputs.withdrawable_amount = selected.amount;
+        outputs.withdrawable_outputs = 1;
+        outputs.withdrawable_outpoints.push_back(selected.outpoint);
+    } else if (selected.state == "unbonding") {
+        outputs.unbonding_amount = selected.amount;
+        outputs.unbonding_outputs = 1;
+        outputs.next_unlock_height = selected.unlock_height;
+    }
 }
 
 WalletQuantumOperatorBondInfo MakeWalletTieredStakeBondInfo(const CWallet& wallet, const std::string& address, bool require_operator_lock)
@@ -313,7 +409,8 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
     const std::string& unbonding_label,
     const std::string& withdrawal_label,
     std::string unbonding_comment,
-    std::string withdrawal_comment)
+    std::string withdrawal_comment,
+    std::optional<COutPoint> selected_outpoint = std::nullopt)
 {
     CTxDestination dest;
     const auto tier = DecodeTieredStakeAddress(address, dest, require_operator_lock);
@@ -339,12 +436,29 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
 
         const int current_height = wallet.GetLastBlockHeight();
         const int spend_height = current_height + 1;
-        const OperatorBondOutputs outputs = ScanOperatorBondOutputs(
+        OperatorBondOutputs outputs = ScanOperatorBondOutputs(
             wallet,
             GetScriptForDestination(dest),
             tier->commitment,
             spend_height,
             /*spendable_only=*/true);
+
+        if (selected_outpoint) {
+            OperatorBondOutputs::Record selected_record;
+            if (!FindTieredStakeRecord(outputs, *selected_outpoint, selected_record)) {
+                const OperatorBondOutputs all_outputs = ScanOperatorBondOutputs(
+                    wallet,
+                    GetScriptForDestination(dest),
+                    tier->commitment,
+                    spend_height,
+                    /*spendable_only=*/false);
+                if (FindTieredStakeRecord(all_outputs, *selected_outpoint, selected_record)) {
+                    return util::Error{_("Error: Selected staking output is not currently spendable")};
+                }
+                return util::Error{_("Error: Selected staking output was not found for this address")};
+            }
+            KeepOnlySelectedTieredStakeOutput(outputs, selected_record);
+        }
 
         CCoinControl coin_control;
         int change_pos = RANDOM_CHANGE_POSITION;
@@ -1077,6 +1191,10 @@ public:
     {
         return MakeWalletTieredStakeBondInfo(*m_wallet, stake_address, /*require_operator_lock=*/false);
     }
+    std::vector<WalletQuantumStakeOutputInfo> listQuantumStakeOutputs(const std::string& stake_address) override
+    {
+        return ListTieredStakeOutputs(*m_wallet, stake_address, /*require_operator_lock=*/false);
+    }
     util::Result<WalletQuantumOperatorBondTx> fundQuantumStakeAddress(const std::string& stake_address, CAmount amount) override
     {
         return FundTieredStakeAddress(
@@ -1096,6 +1214,18 @@ public:
             "quantum-stake-withdrawal",
             "Blackcoin quantum staking address unbond",
             "Blackcoin quantum staking address withdrawal");
+    }
+    util::Result<WalletQuantumOperatorBondTx> withdrawQuantumStakeOutput(const std::string& stake_address, const COutPoint& outpoint) override
+    {
+        return WithdrawTieredStakeAddress(
+            *m_wallet,
+            stake_address,
+            /*require_operator_lock=*/false,
+            "quantum-stake-unbonding",
+            "quantum-stake-withdrawal",
+            "Blackcoin quantum staking output unbond",
+            "Blackcoin quantum staking output withdrawal",
+            outpoint);
     }
     util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label, uint16_t unbonding_blocks) override
     {

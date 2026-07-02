@@ -328,6 +328,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QLineEdit* selfstake_address = page.findChild<QLineEdit*>("selfStakeAddress");
     QPushButton* selfstake_new = page.findChild<QPushButton*>("newSelfStakeAddress");
     QPushButton* selfstake_copy = page.findChild<QPushButton*>("selfStakeCopy");
+    QComboBox* selfstake_output_selector = page.findChild<QComboBox*>("selfStakeOutputSelector");
     BitcoinAmountField* selfstake_fund_amount = page.findChild<BitcoinAmountField*>("selfStakeFundAmount");
     QPushButton* selfstake_fund = page.findChild<QPushButton*>("selfStakeFund");
     QPushButton* selfstake_withdraw = page.findChild<QPushButton*>("selfStakeWithdraw");
@@ -386,6 +387,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(selfstake_address);
     QVERIFY(selfstake_new);
     QVERIFY(selfstake_copy);
+    QVERIFY(selfstake_output_selector);
     QVERIFY(selfstake_fund_amount);
     QVERIFY(selfstake_fund);
     QVERIFY(selfstake_withdraw);
@@ -436,6 +438,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(selfstake_new->isEnabled());
     QVERIFY(!selfstake_selector->isEnabled());
     QVERIFY(!selfstake_copy->isEnabled());
+    QVERIFY(!selfstake_output_selector->isEnabled());
     QVERIFY(!selfstake_fund_amount->isEnabled());
     QVERIFY(!selfstake_fund->isEnabled());
     QVERIFY(!selfstake_withdraw->isEnabled());
@@ -479,6 +482,7 @@ void TestStakingMiningPageControls(MiniGUI& mini_gui, const PlatformStyle* platf
     QVERIFY(selfstake_copy->isEnabled());
     QVERIFY(selfstake_selector->isEnabled());
     QVERIFY(selfstake_selector->findData(selfstake_address->text()) >= 0);
+    QVERIFY(!selfstake_output_selector->isEnabled());
     QVERIFY(selfstake_fund_amount->isEnabled());
     QVERIFY(selfstake_fund->isEnabled());
     QVERIFY(selfstake_withdraw->isEnabled());
