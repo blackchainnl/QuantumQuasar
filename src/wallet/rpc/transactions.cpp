@@ -21,7 +21,9 @@ static bool IsGoldRushWalletControlTx(const CWalletTx& wtx)
     if (it == wtx.mapValue.end()) return false;
     return it->second == "Quantum Quasar built-in shadow PoW claim" ||
            it->second == "Blackcoin shadow PoW claim" ||
-           it->second == "Blackcoin shadow signal";
+           it->second == "Blackcoin shadow signal" ||
+           it->second == "Quantum PoW Claim" ||
+           it->second == "Quantum PoS Claim";
 }
 
 static void WalletTxToJSON(const CWallet& wallet, const CWalletTx& wtx, UniValue& entry)

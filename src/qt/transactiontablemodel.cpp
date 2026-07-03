@@ -373,8 +373,8 @@ bool IsQuantumClaimControlLabel(const std::string& address)
 QString QuantumClaimControlType(const std::string& address)
 {
     if (address.find("PoW") != std::string::npos || address == "goldrush-pow") return QObject::tr("PoW Claim");
-    if (address.find("Signal") != std::string::npos || address.find("signal") != std::string::npos || address == "pos-goldrush-test") return QObject::tr("PoS Signal");
-    if (address.find("PoS") != std::string::npos) return QObject::tr("PoS Signal");
+    if (address.find("Signal") != std::string::npos || address.find("signal") != std::string::npos || address == "pos-goldrush-test") return QObject::tr("PoS Claim");
+    if (address.find("PoS") != std::string::npos) return QObject::tr("PoS Claim");
     return QObject::tr("Quantum Claim");
 }
 } // namespace

@@ -1179,8 +1179,8 @@ static RPCHelpMan sendshadowsignal()
     CTransactionRef tx = MakeTransactionRef(std::move(signal_tx));
     const std::string hex = EncodeHexTx(*tx);
     mapValue_t map_value;
-    map_value["comment"] = "Blackcoin shadow signal";
-    CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "Blackcoin shadow signal");
+    map_value["comment"] = "Quantum PoS Claim";
+    CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "Quantum PoS Claim");
 
     UniValue result(UniValue::VOBJ);
     result.pushKV("txid", tx->GetHash().GetHex());
@@ -1448,8 +1448,8 @@ static RPCHelpMan sendshadowpowclaim()
     }
 
     mapValue_t map_value;
-    map_value["comment"] = "Blackcoin shadow PoW claim";
-    CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "Blackcoin shadow PoW claim");
+    map_value["comment"] = "Quantum PoW Claim";
+    CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "Quantum PoW Claim");
 
     UniValue result(UniValue::VOBJ);
     result.pushKV("txid", tx->GetHash().GetHex());

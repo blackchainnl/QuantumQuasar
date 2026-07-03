@@ -160,7 +160,7 @@ struct AutoShadowSignalCandidate
     uint256 solve_hash;
 };
 
-static constexpr const char* SHADOW_SIGNAL_COMMENT{"Blackcoin shadow signal"};
+static constexpr const char* SHADOW_SIGNAL_COMMENT{"Quantum PoS Claim"};
 static constexpr const char* SHADOW_SIGNAL_PAYOUT_LABEL{"Quantum PoS Reward Address"};
 static constexpr const char* LEGACY_SHADOW_SIGNAL_PAYOUT_LABEL{"goldrush-pos"};
 

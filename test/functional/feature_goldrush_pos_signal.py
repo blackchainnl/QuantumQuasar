@@ -186,7 +186,7 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
 
         self.log.info("Pre-creating wallet-backed PoS and PoW Gold Rush quantum payout addresses")
         payout_address = wallet.getnewquantumaddress("goldrush-pos")["address"]
-        pow_payout_address = wallet.getnewquantumaddress("goldrush-pow")["address"]
+        pow_payout_address = wallet.getnewquantumaddress("Quantum PoW Reward Address")["address"]
 
         self.log.info("Broadcasting a fee-paying QQSPROOF claim before the next PoS block")
         pow_claim = wallet.sendshadowpowclaim(pow_claim_address, pow_payout_address, 500000)
@@ -216,7 +216,7 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
         signal_txid = signal_txids[0]
         wallet_signals = [
             tx for tx in wallet.listtransactions("*", 100, 0, True)
-            if tx.get("txid") == signal_txid and tx.get("comment") == "Blackcoin shadow signal"
+            if tx.get("txid") == signal_txid and tx.get("comment") == "Quantum PoS Claim"
         ]
         assert_equal(len(wallet_signals), 1)
         self._assert_no_onchain_block_output_to(payout_block_hash, payout_address)

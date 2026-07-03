@@ -6858,7 +6858,7 @@ bool CWallet::SubmitShadowPowClaim(const CScript& target, const CTxDestination& 
     }
 
     mapValue_t map_value;
-    map_value["comment"] = "Quantum Quasar built-in shadow PoW claim";
+    map_value["comment"] = "Quantum PoW Claim";
     try {
         std::string broadcast_error;
         if (!CommitTransaction(tx, std::move(map_value), {}, &broadcast_error)) {
