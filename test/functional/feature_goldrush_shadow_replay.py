@@ -17,12 +17,13 @@ from test_framework.util import assert_equal
 
 COIN = 100_000_000
 FUTURE_V4_TIME = 2_000_000_000
+FUTURE_GOLD_RUSH_END_TIME = FUTURE_V4_TIME + 1_000
 GOLD_RUSH_BLOCKS = 20
 REWARD_BLOCKS_CONNECTED = 5
 BASE_ARGS = [
     "-shadowwhitelistheight=1",
     f"-shadowgoldrushblocks={GOLD_RUSH_BLOCKS}",
-    f"-qqgoldrushendtime={FUTURE_V4_TIME}",
+    f"-qqgoldrushendtime={FUTURE_GOLD_RUSH_END_TIME}",
 ]
 
 
