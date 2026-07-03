@@ -6631,8 +6631,9 @@ bool SelectShadowPowMiningTarget(CWallet& wallet, const CScript& quantum_payout_
 }
 } // namespace
 
-bool CWallet::SetPowMining(bool enabled, int threads, int cpu_percent, bilingual_str& error)
+bool CWallet::SetPowMining(bool enabled, int threads, int cpu_percent, bilingual_str& error, bool* created_payout)
 {
+    if (created_payout) *created_payout = false;
     if (enabled) {
         if (threads < 1 || threads > 256) {
             error = _("Gold Rush PoW mining threads must be between 1 and 256.");
@@ -6671,7 +6672,7 @@ bool CWallet::SetPowMining(bool enabled, int threads, int cpu_percent, bilingual
         }
     }
 
-    if (!EnsurePowPayoutAddress(error)) return false;
+    if (!EnsurePowPayoutAddress(error, created_payout)) return false;
 
     m_pow_threads = threads;
     m_pow_cpu_percent = cpu_percent;
@@ -6727,12 +6728,14 @@ bool CWallet::IsPowMiningClosing() const
     return (HaveChain() && chain().shutdownRequested()) || m_stop_pow_mining_thread.load();
 }
 
-bool CWallet::EnsurePowPayoutAddress(bilingual_str& error)
+bool CWallet::EnsurePowPayoutAddress(bilingual_str& error, bool* created)
 {
+    if (created) *created = false;
     static constexpr const char* POW_PAYOUT_LABEL{"PoW - Quantum Claim Address"};
     static constexpr const char* OLD_POW_PAYOUT_LABEL{"Quantum PoW Reward Address"};
     static constexpr const char* LEGACY_POW_PAYOUT_LABEL{"goldrush-pow"};
     std::string restored_payout;
+    std::optional<CTxDestination> relabel_dest;
     {
         LOCK(cs_wallet);
         if (!m_pow_payout_quantum.empty()) {
@@ -6749,11 +6752,18 @@ bool CWallet::EnsurePowPayoutAddress(bilingual_str& error)
             if (IsMine(dest) == ISMINE_NO) continue;
             restored_payout = EncodeDestination(dest);
             m_pow_payout_quantum = restored_payout;
+            if (label != POW_PAYOUT_LABEL) {
+                relabel_dest = dest;
+            }
             break;
         }
     }
 
     if (!restored_payout.empty()) {
+        if (relabel_dest && !SetAddressBook(*relabel_dest, POW_PAYOUT_LABEL, AddressPurpose::RECEIVE)) {
+            error = _("Failed to update Gold Rush PoW payout address label.");
+            return false;
+        }
         WalletLogPrintf("Gold Rush PoW miner restored payout address %s.\n", restored_payout);
         return true;
     }
@@ -6771,6 +6781,7 @@ bool CWallet::EnsurePowPayoutAddress(bilingual_str& error)
         }
     }
     WalletLogPrintf("Gold Rush PoW miner created payout address %s. Back up the wallet.\n", encoded);
+    if (created) *created = true;
     return true;
 }
 

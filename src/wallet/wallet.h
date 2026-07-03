@@ -1366,11 +1366,11 @@ public:
     std::unique_ptr<std::vector<std::thread>> threadStakeMinerGroup;
 
     /* Built-in Gold Rush PoW miner */
-    bool SetPowMining(bool enabled, int threads, int cpu_percent, bilingual_str& error);
+    bool SetPowMining(bool enabled, int threads, int cpu_percent, bilingual_str& error, bool* created_payout = nullptr);
     void StopPowMining();
     bool IsPowMiningClosing() const;
     void ThreadShadowPoWMiner(int worker_id);
-    bool EnsurePowPayoutAddress(bilingual_str& error);
+    bool EnsurePowPayoutAddress(bilingual_str& error, bool* created = nullptr);
     bool SubmitShadowPowClaim(const CScript& target, const CTxDestination& dest, const std::vector<unsigned char>& proof, bilingual_str& error);
     std::unique_ptr<std::vector<std::thread>> threadPowMinerGroup GUARDED_BY(m_pow_miner_mutex);
 

@@ -44,6 +44,8 @@ class GoldRushInfoTest(BitcoinTestFramework):
 
         self.log.info("Starting the built-in PoW miner via CLI and checking worker telemetry")
         cli_wallet = node.cli(f"-rpcwallet={wallet_name}")
+        legacy_payout = wallet.getnewquantumaddress("goldrush-pow")["address"]
+        assert_equal(wallet.getaddressinfo(legacy_payout)["labels"], ["goldrush-pow"])
         # Use real clock time while the worker runs. The hashrate meter is wall-clock based,
         # while epoch activity is derived from the already-connected chain tip.
         node.setmocktime(0)
@@ -54,6 +56,9 @@ class GoldRushInfoTest(BitcoinTestFramework):
             assert_equal(started["threads"], 1)
             assert_equal(started["cpu_percent"], 100)
             payout = started["payout_address"]
+            assert_equal(payout, legacy_payout)
+            assert "warning" not in started
+            assert_equal(wallet.getaddressinfo(payout)["labels"], ["PoW - Quantum Claim Address"])
             assert_equal(node.validateaddress(payout)["isvalid"], True)
             assert_equal(wallet.getpowmininginfo()["payout_address"], payout)
 

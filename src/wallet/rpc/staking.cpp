@@ -1851,14 +1851,9 @@ static RPCHelpMan setpowmining()
     const bool enabled = request.params[0].get_bool();
     const int threads = request.params[1].isNull() ? 1 : request.params[1].getInt<int>();
     const int cpu_percent = request.params[2].isNull() ? 1 : request.params[2].getInt<int>();
-    bool created_payout_key = false;
-    {
-        LOCK(pwallet->cs_wallet);
-        created_payout_key = enabled && pwallet->m_pow_payout_quantum.empty();
-    }
-
     bilingual_str error;
-    const bool ok = pwallet->SetPowMining(enabled, threads, cpu_percent, error);
+    bool created_payout_key{false};
+    const bool ok = pwallet->SetPowMining(enabled, threads, cpu_percent, error, &created_payout_key);
     if (!ok) {
         throw JSONRPCError(RPC_WALLET_ERROR, error.original);
     }
