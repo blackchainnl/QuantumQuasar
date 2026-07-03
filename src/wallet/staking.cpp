@@ -243,8 +243,8 @@ bool FindAutoShadowSignalCandidate(CWallet& wallet, AutoShadowSignalCandidate& c
     unsigned int recent_outputs{0};
     unsigned int already_active_outputs{0};
     for (const COutput& output : outputs) {
-        if (output.txout.nValue <= 0 || output.input_bytes < 0) continue;
-        const CScript& target = output.txout.scriptPubKey;
+        if (output.txout.nValue <= 0) continue;
+        const CScript target = CanonicalizeLegacyStakeScript(output.txout.scriptPubKey);
         if (target.empty() || target.IsUnspendable()) continue;
         if (!IsWhitelisted(view, target)) continue;
         ++whitelisted_outputs;
@@ -328,7 +328,7 @@ bool BuildAutoShadowSignalTransaction(CWallet& wallet, const AutoShadowSignalCan
     });
 
     for (const COutput& output : outputs) {
-        if (output.txout.scriptPubKey != candidate.target || output.input_bytes < 0) continue;
+        if (CanonicalizeLegacyStakeScript(output.txout.scriptPubKey) != candidate.target) continue;
 
         CMutableTransaction tx;
         tx.nVersion = CTransaction::CURRENT_VERSION;

@@ -150,6 +150,7 @@ BASE_SCRIPTS = [
     'feature_goldrush_value_path.py',
     'feature_goldrush_pow_miner_e2e.py',
     'feature_goldrush_pos_signal.py',
+    'feature_goldrush_pos_single_utxo.py',
     'feature_goldrush_shadow_replay.py',
     'feature_goldrush_migration_rpc.py',
     'feature_goldrush_coinstatsindex.py',

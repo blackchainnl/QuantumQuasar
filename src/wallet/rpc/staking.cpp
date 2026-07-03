@@ -1135,7 +1135,7 @@ static RPCHelpMan sendshadowsignal()
             throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Fee rate (%s) is lower than the minimum fee rate setting (%s)", coin_control.m_feerate->ToString(FeeEstimateMode::SAT_VB), fee_rate.ToString(FeeEstimateMode::SAT_VB)));
         }
         for (const COutput& output : AvailableCoins(*pwallet, &coin_control).All()) {
-            if (output.txout.scriptPubKey != target || output.input_bytes < 0) continue;
+            if (CanonicalizeLegacyStakeScript(output.txout.scriptPubKey) != target) continue;
 
             CMutableTransaction candidate;
             candidate.nVersion = CTransaction::CURRENT_VERSION;
@@ -1338,7 +1338,7 @@ static RPCHelpMan sendshadowpowclaim()
         }
         bool can_submit_claim = false;
         for (const COutput& output : AvailableCoins(*pwallet, &coin_control).All()) {
-            if (output.txout.scriptPubKey != target || output.input_bytes < 0) continue;
+            if (CanonicalizeLegacyStakeScript(output.txout.scriptPubKey) != target) continue;
 
             CMutableTransaction candidate;
             candidate.nVersion = CTransaction::CURRENT_VERSION;
@@ -1395,7 +1395,7 @@ static RPCHelpMan sendshadowpowclaim()
             throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Fee rate (%s) is lower than the minimum fee rate setting (%s)", coin_control.m_feerate->ToString(FeeEstimateMode::SAT_VB), fee_rate.ToString(FeeEstimateMode::SAT_VB)));
         }
         for (const COutput& output : AvailableCoins(*pwallet, &coin_control).All()) {
-            if (output.txout.scriptPubKey != target || output.input_bytes < 0) continue;
+            if (CanonicalizeLegacyStakeScript(output.txout.scriptPubKey) != target) continue;
 
             CMutableTransaction candidate;
             candidate.nVersion = CTransaction::CURRENT_VERSION;
@@ -1533,7 +1533,7 @@ static RPCHelpMan getgoldrushinfo()
         coin_control.m_avoid_address_reuse = false;
         for (const COutput& output : AvailableCoins(*pwallet, &coin_control).All()) {
             if (output.txout.nValue > 0 && !output.txout.scriptPubKey.empty() && !output.txout.scriptPubKey.IsUnspendable()) {
-                wallet_scripts.insert(output.txout.scriptPubKey);
+                wallet_scripts.insert(CanonicalizeLegacyStakeScript(output.txout.scriptPubKey));
             }
         }
     }
