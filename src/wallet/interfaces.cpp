@@ -317,10 +317,9 @@ bool CanCreateSignedSpend(const CWallet& wallet, bilingual_str& error)
     return true;
 }
 
-ColdStakeFundingInputs SelectColdStakeFundingInputs(
+ColdStakeFundingInputs ScanColdStakeFundingInputs(
     const CWallet& wallet,
-    const CCoinsViewCache& view,
-    CCoinControl& coin_control) EXCLUSIVE_LOCKS_REQUIRED(::cs_main, wallet.cs_wallet)
+    const CCoinsViewCache& view) EXCLUSIVE_LOCKS_REQUIRED(::cs_main, wallet.cs_wallet)
 {
     ColdStakeFundingInputs summary;
 
@@ -342,7 +341,6 @@ ColdStakeFundingInputs SelectColdStakeFundingInputs(
             continue;
         }
 
-        coin_control.Select(out.outpoint);
         summary.eligible_amount += out.txout.nValue;
         ++summary.eligible_inputs;
     }
@@ -708,6 +706,9 @@ util::Result<WalletQuantumOperatorBondTx> FundTieredStakeAddress(
         CCoinControl coin_control;
         coin_control.m_input_family = CCoinControl::InputFamily::LEGACY;
         coin_control.m_allow_other_inputs = true;
+        auto change_dest = wallet.GetNewQuantumChangeDestination();
+        if (!change_dest) return util::Error{util::ErrorString(change_dest)};
+        coin_control.destChange = *change_dest;
         int change_pos = RANDOM_CHANGE_POSITION;
         auto res = CreateTransaction(wallet, recipients, change_pos, coin_control, /*sign=*/true);
         if (!res) return util::Error{util::ErrorString(res)};
@@ -897,10 +898,11 @@ util::Result<WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
 
         CCoinControl coin_control;
         coin_control.m_input_family = CCoinControl::InputFamily::QUANTUM_MIGRATION;
-        coin_control.m_allow_other_inputs = false;
+        coin_control.m_exclude_generated_quantum_inputs = true;
+        coin_control.m_allow_other_inputs = true;
 
         const CCoinsViewCache& view = wallet.chain().chainman().ActiveChainstate().CoinsTip();
-        const ColdStakeFundingInputs funding = SelectColdStakeFundingInputs(wallet, view, coin_control);
+        const ColdStakeFundingInputs funding = ScanColdStakeFundingInputs(wallet, view);
         if (funding.eligible_inputs == 0) {
             if (funding.goldrush_reward_inputs > 0) {
                 use_goldrush_migration = true;
@@ -946,20 +948,11 @@ util::Result<WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
 
         auto delegation = FundColdStakeDelegationAddress(wallet, address, amount, allow_goldrush_migration);
         if (!delegation) {
-            WalletQuantumOperatorBondTx result;
-            result.address = address;
-            result.amount = migration->amount;
-            result.fee = migration->fee;
-            result.created_migration = true;
-            result.completed_delegation = false;
-            result.migration_txid = migration->txid;
-            result.migration_address = migration->address;
-            result.migration_amount = migration->amount;
-            result.migration_fee = migration->fee;
-            result.warning = strprintf(
-                "Gold Rush rewards were moved to a fresh quantum address, but the cold-stake delegation was not broadcast yet: %s",
-                util::ErrorString(delegation).original);
-            return result;
+            return util::Error{strprintf(
+                _("Gold Rush rewards were moved to fresh quantum address %s in transaction %s, but the cold-stake delegation was not broadcast yet: %s"),
+                migration->address,
+                migration->txid,
+                util::ErrorString(delegation).original)};
         }
         delegation->created_migration = true;
         delegation->migration_txid = migration->txid;

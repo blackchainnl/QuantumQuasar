@@ -175,6 +175,34 @@ class QuantumPoolCapTest(BitcoinTestFramework):
         assert_equal(bootstrap_info["operator_count"], 1)
         assert_equal(bootstrap_info["operators"][0]["operator_commitment_verified"], True)
 
+        self.log.info("Quantum staking funding sends legacy change to quantum change")
+        staker_c_legacy = staker_c.getnewaddress("", "legacy")
+        funder.sendtoaddress(staker_c_legacy, Decimal("10"))
+        self._generate(1, funder_address)
+        stake_change_test = staker_c.getnewquantumstakeaddress("change-test", 0)
+        stake_fund = staker_c.fundquantumstakeaddress(stake_change_test["address"], Decimal("1"))
+        stake_fund_tx = node.decoderawtransaction(node.getrawtransaction(stake_fund["txid"]))
+        change_outputs = [
+            vout for vout in stake_fund_tx["vout"]
+            if vout["scriptPubKey"].get("address")
+            and vout["scriptPubKey"]["address"] != stake_change_test["address"]
+            and Decimal(str(vout["value"])) > Decimal("0")
+        ]
+        assert change_outputs, "fundquantumstakeaddress must create a nonzero change output"
+        assert any(node.validateaddress(vout["scriptPubKey"]["address"])["isquantummigration"] for vout in change_outputs)
+        self._generate(1, funder_address)
+
+        self.log.info("Cold-stake funding uses minimal direct quantum inputs")
+        q_small = owner_a.getnewquantumaddress()["address"]
+        q_large = owner_a.getnewquantumaddress()["address"]
+        funder.sendtoaddress(q_small, Decimal("5"))
+        funder.sendtoaddress(q_large, Decimal("100"))
+        self._generate(1, funder_address)
+        minimal_delegation = owner_a.getnewquantumcoldstakingaddress(staker_c_key["public_key"], "minimal-direct")
+        minimal_fund = owner_a.fundquantumcoldstakeaddress(minimal_delegation["address"], Decimal("1"))
+        minimal_tx = node.decoderawtransaction(node.getrawtransaction(minimal_fund["txid"]))
+        assert_equal(len(minimal_tx["vin"]), 1)
+
 
 if __name__ == "__main__":
     QuantumPoolCapTest().main()
