@@ -44,6 +44,19 @@ void ReadSigNetArgs(const ArgsManager& args, CChainParams::SigNetOptions& option
     }
 }
 
+void ReadTestNetArgs(const ArgsManager& args, CChainParams::TestNetOptions& options)
+{
+    if (args.IsArgSet("-qqv4time")) {
+        options.quantum_v4_time = args.GetIntArg("-qqv4time", 0);
+    }
+    if (args.IsArgSet("-qqgoldrushendtime")) {
+        options.quantum_gold_rush_end_time = args.GetIntArg("-qqgoldrushendtime", 0);
+    }
+    if (args.IsArgSet("-qqmigrationdeadlinetime")) {
+        options.quantum_migration_deadline_time = args.GetIntArg("-qqmigrationdeadlinetime", 0);
+    }
+}
+
 void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& options)
 {
     for (const std::string& arg : args.GetArgs("-testactivationheight")) {
@@ -201,8 +214,11 @@ std::unique_ptr<const CChainParams> CreateChainParams(const ArgsManager& args, c
     switch (chain) {
     case ChainType::MAIN:
         return CChainParams::Main();
-    case ChainType::TESTNET:
-        return CChainParams::TestNet();
+    case ChainType::TESTNET: {
+        auto opts = CChainParams::TestNetOptions{};
+        ReadTestNetArgs(args, opts);
+        return CChainParams::TestNet(opts);
+    }
     case ChainType::SIGNET: {
         auto opts = CChainParams::SigNetOptions{};
         ReadSigNetArgs(args, opts);

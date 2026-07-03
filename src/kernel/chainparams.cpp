@@ -231,7 +231,7 @@ public:
  */
 class CTestNetParams : public CChainParams {
 public:
-    CTestNetParams() {
+    explicit CTestNetParams(const TestNetOptions& opts) {
         m_chain_type = ChainType::TESTNET;
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
@@ -286,6 +286,9 @@ public:
         consensus.nProtocolV4Time = 0; // Instantly active on testnet
         consensus.nGoldRushEndTime = Consensus::QUANTUM_QUASAR_MAINNET_V4_TIME + Consensus::QUANTUM_QUASAR_GOLD_RUSH_SECONDS;
         consensus.nQuantumMigrationDeadlineTime = consensus.nGoldRushEndTime + Consensus::QUANTUM_QUASAR_MIGRATION_SECONDS;
+        if (opts.quantum_v4_time) consensus.nProtocolV4Time = *opts.quantum_v4_time;
+        if (opts.quantum_gold_rush_end_time) consensus.nGoldRushEndTime = *opts.quantum_gold_rush_end_time;
+        if (opts.quantum_migration_deadline_time) consensus.nQuantumMigrationDeadlineTime = *opts.quantum_migration_deadline_time;
         consensus.nDemurrageMinActivationHeight = SHADOW_REWARD_END_HEIGHT + 1;
         consensus.nLastPOWBlock = 0x7fffffff;
         consensus.nStakeTimestampMask = 0xf;
@@ -678,7 +681,7 @@ std::unique_ptr<const CChainParams> CChainParams::Main()
     return std::make_unique<const CMainParams>();
 }
 
-std::unique_ptr<const CChainParams> CChainParams::TestNet()
+std::unique_ptr<const CChainParams> CChainParams::TestNet(const TestNetOptions& options)
 {
-    return std::make_unique<const CTestNetParams>();
+    return std::make_unique<const CTestNetParams>(options);
 }

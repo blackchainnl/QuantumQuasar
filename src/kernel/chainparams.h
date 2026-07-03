@@ -140,6 +140,16 @@ public:
     };
 
     /**
+     * TestNetOptions holds testnet-only schedule overrides for isolated fork
+     * validation. Mainnet never reads these fields.
+     */
+    struct TestNetOptions {
+        std::optional<int64_t> quantum_v4_time{};
+        std::optional<int64_t> quantum_gold_rush_end_time{};
+        std::optional<int64_t> quantum_migration_deadline_time{};
+    };
+
+    /**
      * VersionBitsParameters holds activation parameters
      */
     struct VersionBitsParameters {
@@ -172,8 +182,8 @@ public:
 
     static std::unique_ptr<const CChainParams> RegTest(const RegTestOptions& options);
     static std::unique_ptr<const CChainParams> SigNet(const SigNetOptions& options);
+    static std::unique_ptr<const CChainParams> TestNet(const TestNetOptions& options);
     static std::unique_ptr<const CChainParams> Main();
-    static std::unique_ptr<const CChainParams> TestNet();
 
 protected:
     CChainParams() {}

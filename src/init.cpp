@@ -929,6 +929,29 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         LogPrintf("Quantum Quasar: %s shadow schedule overridden: whitelist=%d reward=[%d,%d]\n",
                   ChainTypeToString(chain), SHADOW_WHITELIST_HEIGHT, SHADOW_REWARD_START_HEIGHT, SHADOW_REWARD_END_HEIGHT);
     }
+
+    const bool has_quantum_phase_override = args.IsArgSet("-qqv4time") ||
+                                            args.IsArgSet("-qqgoldrushendtime") ||
+                                            args.IsArgSet("-qqmigrationdeadlinetime");
+    if (has_quantum_phase_override) {
+        if (chain != ChainType::TESTNET && chain != ChainType::REGTEST) {
+            return InitError(_("-qqv4time, -qqgoldrushendtime, and -qqmigrationdeadlinetime are only supported on testnet/regtest in the test schedule branch."));
+        }
+        const int64_t v4_time = Params().GetConsensus().nProtocolV4Time;
+        const int64_t goldrush_end = Params().GetConsensus().nGoldRushEndTime;
+        const int64_t migration_deadline = Params().GetConsensus().nQuantumMigrationDeadlineTime;
+        if (v4_time < 0 || goldrush_end < 0 || migration_deadline < 0) {
+            return InitError(_("-qqv4time, -qqgoldrushendtime, and -qqmigrationdeadlinetime must be non-negative."));
+        }
+        if (goldrush_end != 0 && goldrush_end <= v4_time) {
+            return InitError(_("-qqgoldrushendtime must be greater than -qqv4time."));
+        }
+        if (migration_deadline != 0 && goldrush_end != 0 && migration_deadline <= goldrush_end) {
+            return InitError(_("-qqmigrationdeadlinetime must be greater than -qqgoldrushendtime."));
+        }
+        LogPrintf("Quantum Quasar: %s phase times overridden: v4=%d goldrush_end=%d migration_deadline=%d\n",
+                  ChainTypeToString(chain), v4_time, goldrush_end, migration_deadline);
+    }
     bilingual_str errors;
     for (const auto& arg : args.GetUnsuitableSectionOnlyArgs()) {
         errors += strprintf(_("Config setting for %s only applied on %s network when in [%s] section.") + Untranslated("\n"), arg, ChainTypeToString(chain), ChainTypeToString(chain));
