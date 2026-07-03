@@ -156,6 +156,36 @@ class GoldRushValuePathTest(BitcoinTestFramework):
         assert claim_entries, "PoW claim target must be visible in wallet Gold Rush status"
         assert_equal(claim_entries[0]["whitelisted"], False)
 
+        self.log.info("A QQSPROOF mined by a proof-of-work block remains legacy-visible but earns no shadow credit")
+        pow_block_payout = wallet.getnewquantumaddress()["address"]
+        pow_block_state_before = node.getgoldrushstate()
+        pow_block_claim = wallet.sendshadowpowclaim(claim_address, pow_block_payout, 500000)
+        assert pow_block_claim["txid"] in node.getrawmempool()
+        pow_block_hash = self.generatetoaddress(node, 1, node.get_deterministic_priv_key().address, sync_fun=self.no_op)[0]
+        pow_block = node.getblock(pow_block_hash, 2)
+        assert "proof-of-work" in pow_block["flags"]
+        assert pow_block_claim["txid"] in [tx["txid"] for tx in pow_block["tx"]]
+        self._assert_no_onchain_block_output_to(pow_block_hash, pow_block_payout)
+        self._assert_no_quantum_utxo(wallet, pow_block_payout)
+        pow_block_state_after = node.getgoldrushstate()
+        assert_equal(pow_block_state_after["claimed_amount"], pow_block_state_before["claimed_amount"])
+        assert_equal(pow_block_state_after["pow_count"], pow_block_state_before["pow_count"])
+        assert_equal(pow_block_state_after["last_pow_height"], pow_block_state_before["last_pow_height"])
+        assert pow_block_state_after["pow_amount"] > pow_block_state_before["pow_amount"]
+
+        self.log.info("Disconnecting and reconnecting the proof-of-work block preserves no-credit accounting")
+        node.invalidateblock(pow_block_hash)
+        self._assert_no_quantum_utxo(wallet, pow_block_payout)
+        assert_equal(node.getgoldrushstate()["claimed_amount"], pow_block_state_before["claimed_amount"])
+        node.reconsiderblock(pow_block_hash)
+        self.wait_until(lambda: node.getbestblockhash() == pow_block_hash)
+        self._assert_no_quantum_utxo(wallet, pow_block_payout)
+        pow_block_state_reconnected = node.getgoldrushstate()
+        assert_equal(pow_block_state_reconnected["claimed_amount"], pow_block_state_after["claimed_amount"])
+        assert_equal(pow_block_state_reconnected["pow_count"], pow_block_state_after["pow_count"])
+        assert_equal(pow_block_state_reconnected["pow_amount"], pow_block_state_after["pow_amount"])
+        self._sync_mocktime_to_tip()
+
         self.log.info("Broadcasting a fee-paying QQSPROOF claim to a wallet-backed quantum address")
         payout_address = wallet.getnewquantumaddress()["address"]
         claim = wallet.sendshadowpowclaim(claim_address, payout_address, 500000)

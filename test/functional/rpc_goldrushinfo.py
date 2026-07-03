@@ -141,7 +141,10 @@ class GoldRushInfoTest(BitcoinTestFramework):
         rpc_decoded = node.decoderawtransaction(stale_claim["hex"])
         assert any(QQSPROOF_HEX in vout["scriptPubKey"]["hex"] for vout in rpc_decoded["vout"])
         assert all(vout["scriptPubKey"].get("address") != rpc_quantum for vout in rpc_decoded["vout"] if "scriptPubKey" in vout)
-        assert_raises_rpc_error(-26, "shadow-proof-invalid", wallet.sendshadowpowclaim, rpc_target, rpc_quantum, 1, None, QQSPROOF_HEX + "00")
+        proof_mismatch_error = "proof does not match the current tip, target address, and quantum payout address"
+        assert_raises_rpc_error(-8, proof_mismatch_error, wallet.sendshadowpowclaim, rpc_target, rpc_quantum, 1, None, QQSPROOF_HEX + "00")
+        stolen_quantum = wallet.getnewquantumaddress()["address"]
+        assert_raises_rpc_error(-8, proof_mismatch_error, wallet.sendshadowpowclaim, rpc_target, stolen_quantum, 1, None, stale_claim["proof"])
         assert_raises_rpc_error(-26, "shadow-proof-mempool-conflict", wallet.sendshadowpowclaim, rpc_target, rpc_quantum, 1, None, stale_claim["proof"])
 
         self.log.info("Expiring unmined next-block-only PoW claims when the tip advances")

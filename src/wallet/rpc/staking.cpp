@@ -1316,6 +1316,9 @@ static RPCHelpMan sendshadowpowclaim()
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Failed to prepare shadow PoW work (outside the reward window or invalid payout script)");
         }
     }
+    if (supplied_proof && !ValidateShadowPowProofForWork(pow_work, *supplied_proof)) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "proof does not match the current tip, target address, and quantum payout address");
+    }
 
     {
         LOCK(pwallet->cs_wallet);

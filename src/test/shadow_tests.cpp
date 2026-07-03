@@ -811,7 +811,7 @@ BOOST_AUTO_TEST_CASE(pow_shadow_claim_records_ledger_credit_without_coinstake_pa
     BOOST_CHECK_EQUAL(ScanSpendableCoins(view, quantum_payout).count, 0U);
 }
 
-BOOST_AUTO_TEST_CASE(pow_shadow_claim_in_proof_of_work_block_records_ledger_credit)
+BOOST_AUTO_TEST_CASE(pow_shadow_claim_in_proof_of_work_block_is_legacy_visible_but_not_credited)
 {
     CCoinsView base;
     CCoinsViewCache view{&base, true};
@@ -850,22 +850,26 @@ BOOST_AUTO_TEST_CASE(pow_shadow_claim_in_proof_of_work_block_records_ledger_cred
     std::map<CScript, CAmount> direct_payouts;
     CAmount direct_total{0};
     BOOST_REQUIRE(GetShadowPowDirectPayouts(view, claim_block, &claim_index, &claim_undo, direct_payouts, direct_total));
-    BOOST_CHECK_EQUAL(direct_total, 580 * COIN);
-    BOOST_REQUIRE_EQUAL(direct_payouts.size(), 1U);
-    BOOST_CHECK_EQUAL(direct_payouts[quantum_payout], 580 * COIN);
+    BOOST_CHECK_EQUAL(direct_total, 0);
+    BOOST_CHECK(direct_payouts.empty());
 
     BOOST_REQUIRE(ApplyShadowBlock(view, claim_block, &claim_index, &claim_undo));
-    BOOST_CHECK_EQUAL(ScanShadowClaimMarkers(view, quantum_payout).count, 1U);
-    BOOST_CHECK_EQUAL(ScanSpendableCoins(view, quantum_payout).count, 1U);
+    BOOST_CHECK_EQUAL(ScanShadowClaimMarkers(view, quantum_payout).count, 0U);
+    BOOST_CHECK_EQUAL(ScanSpendableCoins(view, quantum_payout).count, 0U);
 
     const ShadowGoldRushInfo info = GetShadowGoldRushInfo(view, &claim_index);
-    BOOST_CHECK_EQUAL(info.pow_amount, 0);
-    BOOST_CHECK_EQUAL(info.claimed_amount, 580 * COIN);
-    BOOST_CHECK_EQUAL(info.pow_count, 1U);
+    BOOST_CHECK_EQUAL(info.pow_amount, 580 * COIN);
+    BOOST_CHECK_EQUAL(info.pos_amount, 580 * COIN);
+    BOOST_CHECK_EQUAL(info.claimed_amount, 0);
+    BOOST_CHECK_EQUAL(info.pow_count, 0U);
 
     BOOST_REQUIRE(UndoShadowBlock(view, claim_block, &claim_index, &claim_undo));
     BOOST_CHECK_EQUAL(ScanShadowClaimMarkers(view, quantum_payout).count, 0U);
     BOOST_CHECK_EQUAL(ScanSpendableCoins(view, quantum_payout).count, 0U);
+    const ShadowGoldRushInfo undo_info = GetShadowGoldRushInfo(view, &first_index);
+    BOOST_CHECK_EQUAL(undo_info.pow_amount, 290 * COIN);
+    BOOST_CHECK_EQUAL(undo_info.pos_amount, 290 * COIN);
+    BOOST_CHECK_EQUAL(undo_info.claimed_amount, 0);
 }
 
 BOOST_AUTO_TEST_CASE(pow_shadow_mempool_policy_is_next_tip_bound_and_not_whitelist_gated)

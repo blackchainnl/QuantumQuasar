@@ -185,8 +185,9 @@ class GoldRushPosSingleUtxoTest(BitcoinTestFramework):
         assert pow_claim["txid"] in node.getrawmempool()
         decoded_pow = node.decoderawtransaction(pow_claim["hex"])
         assert any(QQSPROOF_HEX in vout["scriptPubKey"]["hex"] for vout in decoded_pow["vout"])
-        pow_block_hash = self.generatetoaddress(node, 1, funder_address, sync_fun=self.no_op)[0]
+        pow_block_hash = self._mine_pos_block(wallet, expected_txids=[pow_claim["txid"]])
         pow_block = node.getblock(pow_block_hash, 2)
+        assert "proof-of-stake" in pow_block["flags"]
         assert pow_claim["txid"] in [tx["txid"] for tx in pow_block["tx"][1:]]
         pow_payout_utxo = self._wait_for_quantum_utxo(wallet, pow_payout_address)
         assert Decimal(str(pow_payout_utxo["amount"])) > 0

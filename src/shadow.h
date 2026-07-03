@@ -161,6 +161,10 @@ struct ShadowPowWork {
 ShadowPowWork PrepareShadowPowWork(const CScript& target, const CScript& quantum_payout_script, const CBlockIndex* pindexPrev, const CCoinsViewCache& view);
 /** Pure Argon2id grind over a nonce range. No chain/view access; safe to call with NO lock held. */
 bool GrindShadowPowWork(const ShadowPowWork& work, uint64_t start_nonce, uint64_t nonce_step, uint64_t max_tries, std::vector<unsigned char>& data_out, uint64_t* tries_done = nullptr);
+/** Wallet/RPC guard for externally supplied QQSPROOF payloads. The proof must
+ *  match the prepared next-block work exactly, including legacy target and
+ *  quantum payout script, before the wallet broadcasts a claim transaction. */
+bool ValidateShadowPowProofForWork(const ShadowPowWork& work, const std::vector<unsigned char>& prefixed_proof);
 
 /** Compute PoW Gold Rush shadow-ledger credits implied by a candidate block. */
 bool GetShadowPowDirectPayouts(const CCoinsViewCache& view, const CBlock& block, const CBlockIndex* pindex, const CBlockUndo* blockundo, std::map<CScript, CAmount>& payouts_out, CAmount& total_out);

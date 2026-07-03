@@ -756,17 +756,21 @@ std::optional<CScript> GetCurrentSolverScript(const CCoinsViewCache& view, const
 
 bool TxSpendsFromScript(const CTransaction& tx, size_t tx_index, const CBlockUndo* blockundo, const CScript& script)
 {
+    const CScript canonical_script = CanonicalLegacyStakeScript(script);
     for (size_t input_index = 0; input_index < tx.vin.size(); ++input_index) {
         const CScript* input_script = GetInputScript(blockundo, tx_index, input_index);
-        if (input_script && IsLegacyShadowTargetScript(*input_script) && CanonicalLegacyStakeScript(*input_script) == script) return true;
+        if (input_script && IsLegacyShadowTargetScript(*input_script) && CanonicalLegacyStakeScript(*input_script) == canonical_script) return true;
     }
     return false;
 }
 
 bool TxPaysToScript(const CTransaction& tx, const CScript& script)
 {
+    const CScript canonical_script = CanonicalLegacyStakeScript(script);
     return std::any_of(tx.vout.begin(), tx.vout.end(), [&](const CTxOut& txout) {
-        return txout.nValue > 0 && txout.scriptPubKey == script;
+        return txout.nValue > 0 &&
+               IsLegacyShadowTargetScript(txout.scriptPubKey) &&
+               CanonicalLegacyStakeScript(txout.scriptPubKey) == canonical_script;
     });
 }
 
@@ -797,17 +801,18 @@ std::map<CScript, CScript> FindValidShadowSignalsInBlock(const CCoinsViewCache& 
             ShadowSignal signal;
             if (!DecodeSignalPayload(*payload, signal)) continue;
             if (!signal.quantum_linked) continue;
-            if (!IsLegacyShadowTargetScript(signal.target)) continue;
-            if (!IsWhitelisted(view, signal.target)) continue;
-            if (!TxSpendsFromScript(tx, tx_index, blockundo, signal.target)) continue;
+            const CScript target = CanonicalLegacyStakeScript(signal.target);
+            if (!IsLegacyShadowTargetScript(target)) continue;
+            if (!IsWhitelisted(view, target)) continue;
+            if (!TxSpendsFromScript(tx, tx_index, blockundo, target)) continue;
 
-            if (!TxPaysToScript(tx, signal.target)) continue;
-            if (SignalReferencesRecentSolve(view, pindex, signal.target, signal.solve_height, signal.solve_hash)) {
-                if (conflicted_targets.count(signal.target)) continue;
-                const auto [it, inserted] = signals.emplace(signal.target, signal.payout_script);
+            if (!TxPaysToScript(tx, target)) continue;
+            if (SignalReferencesRecentSolve(view, pindex, target, signal.solve_height, signal.solve_hash)) {
+                if (conflicted_targets.count(target)) continue;
+                const auto [it, inserted] = signals.emplace(target, signal.payout_script);
                 if (!inserted && it->second != signal.payout_script) {
                     signals.erase(it);
-                    conflicted_targets.insert(signal.target);
+                    conflicted_targets.insert(target);
                 }
             }
         }
@@ -896,6 +901,10 @@ ShadowClaimResult FindPowShadowClaim(const CBlock& block, const CBlockIndex* pin
     unsigned int proof_evals = 0;
     bool proof_limit_exceeded = false;
     ShadowClaimResult result;
+    // QQSPROOF is merged-mined by fee-paying transactions inside regular PoS
+    // blocks. A proof accidentally included by a proof-of-work block remains a
+    // legacy-visible transaction, but it is not a Gold Rush payout venue.
+    if (!block.IsProofOfStake()) return result;
     for (size_t tx_index = 0; tx_index < block.vtx.size(); ++tx_index) {
         const auto& ptx = block.vtx[tx_index];
         const CTransaction& tx = *ptx;
@@ -922,7 +931,7 @@ ShadowClaimResult FindPowShadowClaim(const CBlock& block, const CBlockIndex* pin
                 return {std::nullopt, true};
             }
             if (status == ShadowProofValidation::VALID) {
-                if (!TxSpendsFromScript(tx, tx_index, blockundo, CanonicalLegacyStakeScript(decoded.target))) continue;
+                if (!TxSpendsFromScript(tx, tx_index, blockundo, decoded.target)) continue;
                 const CAmount amount = ClaimablePoolAmount(pool, decoded.mode);
                 if (amount <= 0) continue;
                 if (result.claim) {
@@ -1594,11 +1603,12 @@ bool BuildShadowSignalData(const CScript& target, uint32_t solve_height, const u
 bool BuildShadowSignalData(const CScript& target, const CScript& quantum_payout_script, uint32_t solve_height, const uint256& solve_hash, std::vector<unsigned char>& data_out)
 {
     data_out.clear();
-    if (target.empty() || target.IsUnspendable()) return false;
+    const CScript canonical_target = CanonicalLegacyStakeScript(target);
+    if (canonical_target.empty() || canonical_target.IsUnspendable()) return false;
     if (!IsDirectQuantumMigrationScript(quantum_payout_script)) return false;
-    if (target.size() > std::numeric_limits<uint16_t>::max() || quantum_payout_script.size() > std::numeric_limits<uint16_t>::max()) return false;
+    if (canonical_target.size() > std::numeric_limits<uint16_t>::max() || quantum_payout_script.size() > std::numeric_limits<uint16_t>::max()) return false;
     if ((solve_height == 0) != solve_hash.IsNull()) return false;
-    const valtype payload = EncodeSignalPayloadV2(target, quantum_payout_script, solve_height, solve_hash);
+    const valtype payload = EncodeSignalPayloadV2(canonical_target, quantum_payout_script, solve_height, solve_hash);
     data_out = SIGNAL_PREFIX;
     data_out.insert(data_out.end(), payload.begin(), payload.end());
     return true;
@@ -1671,6 +1681,29 @@ bool GrindShadowPowWork(const ShadowPowWork& work, uint64_t start_nonce, uint64_
         nonce += nonce_step;
     }
     return false;
+}
+
+bool ValidateShadowPowProofForWork(const ShadowPowWork& work, const std::vector<unsigned char>& prefixed_proof)
+{
+    if (!work.valid) return false;
+    const std::vector<unsigned char>& prefix = GetShadowPrefix();
+    if (prefixed_proof.size() <= prefix.size() ||
+        prefixed_proof.size() > MAX_SCRIPT_ELEMENT_SIZE ||
+        !std::equal(prefix.begin(), prefix.end(), prefixed_proof.begin())) {
+        return false;
+    }
+
+    const valtype proof(prefixed_proof.begin() + prefix.size(), prefixed_proof.end());
+    ShadowProof decoded;
+    if (!DecodeProof(proof, decoded)) return false;
+    if (decoded.mode != ShadowProofMode::POW || !decoded.quantum_linked) return false;
+    if (decoded.target != work.target || decoded.payout_script != work.quantum_payout_script) return false;
+
+    uint256 proof_hash;
+    if (!ComputeShadowProofHash(decoded.target, decoded.payout_script, work.height, work.prev_hash, decoded.mode, decoded.nonce, proof_hash)) {
+        return false;
+    }
+    return HashMeetsLeadingZeroBits(proof_hash, work.bits);
 }
 
 bool MineShadowProofDataRange(const CScript& target, const CScript& quantum_payout_script, const CBlockIndex* pindexPrev, const CCoinsViewCache& view, uint64_t start_nonce, uint64_t nonce_step, uint64_t max_tries, std::vector<unsigned char>& data_out, uint64_t* tries_done)
