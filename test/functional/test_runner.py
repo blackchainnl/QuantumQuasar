@@ -131,6 +131,7 @@ BASE_SCRIPTS = [
     'p2p_orphan_handling.py',
     'wallet_basic.py --legacy-wallet',
     'wallet_basic.py --descriptors',
+    'wallet_quantum_coin_selection.py',
     'feature_maxtipage.py',
     'wallet_multiwallet.py --legacy-wallet',
     'wallet_multiwallet.py --descriptors',

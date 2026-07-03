@@ -44,6 +44,46 @@ static bool IsDirectQuantumMigrationScript(const CScript& script_pub_key)
     return tier && !tier->tiered && !tier->cold_stake;
 }
 
+static std::optional<CCoinControl::InputFamily> InferRecipientInputFamily(const CScript& script_pub_key)
+{
+    if (script_pub_key.empty() || script_pub_key.IsUnspendable()) return std::nullopt;
+    if (IsQuantumMigrationScript(script_pub_key) || IsQuantumColdStakeScript(script_pub_key) || IsEUTXOScript(script_pub_key)) {
+        return std::nullopt;
+    }
+    return CCoinControl::InputFamily::LEGACY;
+}
+
+static void MergeRecipientInputFamily(std::optional<CCoinControl::InputFamily>& inferred, const std::optional<CCoinControl::InputFamily>& candidate)
+{
+    if (!candidate) return;
+    inferred = candidate;
+}
+
+static void ApplyInferredInputFamily(CCoinControl& coin_control, const std::optional<CCoinControl::InputFamily>& inferred)
+{
+    if (!inferred || coin_control.m_input_family) return;
+    coin_control.m_input_family = *inferred;
+}
+
+static void ApplyRecipientInputFamily(CCoinControl& coin_control, const std::vector<CRecipient>& recipients)
+{
+    std::optional<CCoinControl::InputFamily> inferred;
+    for (const CRecipient& recipient : recipients) {
+        const CScript script_pub_key = recipient.scriptPubKey ? *recipient.scriptPubKey : GetScriptForDestination(recipient.dest);
+        MergeRecipientInputFamily(inferred, InferRecipientInputFamily(script_pub_key));
+    }
+    ApplyInferredInputFamily(coin_control, inferred);
+}
+
+static void ApplyOutputInputFamily(CCoinControl& coin_control, const std::vector<CTxOut>& outputs)
+{
+    std::optional<CCoinControl::InputFamily> inferred;
+    for (const CTxOut& output : outputs) {
+        MergeRecipientInputFamily(inferred, InferRecipientInputFamily(output.scriptPubKey));
+    }
+    ApplyInferredInputFamily(coin_control, inferred);
+}
+
 static void CommitWalletTransactionOrThrow(CWallet& wallet, const CTransactionRef& tx, mapValue_t map_value, const std::string& action)
 {
     std::string broadcast_error;
@@ -586,6 +626,7 @@ RPCHelpMan sendtoaddress()
     std::vector<CRecipient> recipients;
     ParseRecipients(address_amounts, subtractFeeFromAmount, recipients);
     const bool verbose{request.params[7].isNull() ? false : request.params[7].get_bool()};
+    ApplyRecipientInputFamily(coin_control, recipients);
 
     return SendMoney(*pwallet, coin_control, recipients, mapValue, verbose);
 },
@@ -677,6 +718,7 @@ RPCHelpMan sendmany()
     std::vector<CRecipient> recipients;
     ParseRecipients(sendTo, subtractFeeFromAmount, recipients);
     const bool verbose{request.params[6].isNull() ? false : request.params[6].get_bool()};
+    ApplyRecipientInputFamily(coin_control, recipients);
 
     return SendMoney(*pwallet, coin_control, recipients, std::move(mapValue), verbose);
 },
@@ -942,6 +984,10 @@ void FundTransaction(CWallet& wallet, CMutableTransaction& tx, CAmount& fee_out,
 
     if (tx.vout.size() == 0)
         throw JSONRPCError(RPC_INVALID_PARAMETER, "TX must have at least one output");
+
+    if (coinControl.m_allow_other_inputs) {
+        ApplyOutputInputFamily(coinControl, tx.vout);
+    }
 
     if (change_position != -1 && (change_position < 0 || (unsigned int)change_position > tx.vout.size()))
         throw JSONRPCError(RPC_INVALID_PARAMETER, "changePosition out of bounds");
@@ -1462,6 +1508,9 @@ RPCHelpMan sendall()
 
             CMutableTransaction rawTx{ConstructTransaction(options["inputs"], recipient_key_value_pairs, options["locktime"])};
             LOCK(pwallet->cs_wallet);
+            if (!options.exists("inputs")) {
+                ApplyOutputInputFamily(coin_control, rawTx.vout);
+            }
 
             CAmount total_input_value(0);
             bool send_max{options.exists("send_max") ? options["send_max"].get_bool() : false};

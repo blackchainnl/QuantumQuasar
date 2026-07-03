@@ -264,8 +264,6 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     // Proof-of-stake block
 #ifdef ENABLE_WALLET
     // peercoin: if coinstake available add coinstake tx
-    static int64_t nLastCoinStakeSearchTime = GetAdjustedTimeSeconds();  // only initialized at startup
-
     if (pwallet) {
         // attempt to find a coinstake
         *pfPoSCancel = true;
@@ -274,8 +272,11 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
         txCoinStake.nTime = pblock->nTime;
 
         int64_t nSearchTime = txCoinStake.nTime; // search to current time
+        if (pwallet->m_last_coin_stake_search_time == 0) {
+            pwallet->m_last_coin_stake_search_time = nSearchTime - 1;
+        }
 
-        if (nSearchTime > nLastCoinStakeSearchTime) {
+        if (nSearchTime > pwallet->m_last_coin_stake_search_time) {
             std::vector<CTransactionRef> selected_txs;
             selected_txs.reserve(pblock->vtx.size() > 0 ? pblock->vtx.size() - 1 : 0);
             for (size_t i = 1; i < pblock->vtx.size(); ++i) {
@@ -290,8 +291,8 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
                     *pfPoSCancel = false;
                 }
             }
-            pwallet->m_last_coin_stake_search_interval = nSearchTime - nLastCoinStakeSearchTime;
-            nLastCoinStakeSearchTime = nSearchTime;
+            pwallet->m_last_coin_stake_search_interval = nSearchTime - pwallet->m_last_coin_stake_search_time;
+            pwallet->m_last_coin_stake_search_time = nSearchTime;
         }
         if (*pfPoSCancel)
             return nullptr; // peercoin: there is no point to continue if we failed to create coinstake
