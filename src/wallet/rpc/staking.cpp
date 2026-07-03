@@ -2503,12 +2503,14 @@ static RPCHelpMan sweepdemurragedecay()
     }
 
     LOCK2(cs_main, pwallet->cs_wallet);
-    EnsureWalletIsUnlocked(*pwallet);
-    if (pwallet->m_wallet_unlock_staking_only) {
-        throw JSONRPCError(RPC_WALLET_ERROR, "Wallet unlocked for staking only, unable to sweep demurrage outputs");
-    }
-    if (pwallet->IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
-        throw JSONRPCError(RPC_WALLET_ERROR, "Error: Private keys are disabled for this wallet");
+    if (!dry_run) {
+        EnsureWalletIsUnlocked(*pwallet);
+        if (pwallet->m_wallet_unlock_staking_only) {
+            throw JSONRPCError(RPC_WALLET_ERROR, "Wallet unlocked for staking only, unable to sweep demurrage outputs");
+        }
+        if (pwallet->IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
+            throw JSONRPCError(RPC_WALLET_ERROR, "Error: Private keys are disabled for this wallet");
+        }
     }
 
     const Consensus::Params& consensus = Params().GetConsensus();

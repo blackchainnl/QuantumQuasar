@@ -556,6 +556,7 @@ class QuantumDemurrageTest(BitcoinTestFramework):
         )
         dry_run_destination = wallet.getnewquantumaddress()["address"]
         quantum_count_before = len(wallet.listquantumaddresses())
+        wallet.encryptwallet("demurrage-passphrase")
         sweep = wallet.sweepdemurragedecay({
             "source_address": quantum_address,
             "destination_address": dry_run_destination,
@@ -568,6 +569,7 @@ class QuantumDemurrageTest(BitcoinTestFramework):
         assert_greater_than(Decimal(sweep["burned_amount"]), Decimal("0"))
         assert_greater_than(Decimal(sweep["effective_amount"]), Decimal("0"))
         assert_equal(len(wallet.listquantumaddresses()), quantum_count_before)
+        wallet.walletpassphrase("demurrage-passphrase", 600)
 
         self.log.info("Broadcast and mine the demurrage sweep through consensus")
         sweep_tx = wallet.sweepdemurragedecay({"source_address": quantum_address})
@@ -595,6 +597,7 @@ class QuantumDemurrageTest(BitcoinTestFramework):
         node.setmocktime(self.mock_time)
         node.loadwallet("demurrage")
         wallet = node.get_wallet_rpc("demurrage")
+        wallet.walletpassphrase("demurrage-passphrase", 600)
         off_supply = node.getcirculatingsupply()
         self._assert_supply_matches_txoutset(off_supply)
         assert_equal(off_supply["demurrage_active"], False)
