@@ -9,7 +9,7 @@ import time
 
 from test_framework.blocktools import COINBASE_MATURITY
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal
+from test_framework.util import assert_equal, assert_raises_rpc_error
 
 
 class QuantumPoolCapTest(BitcoinTestFramework):
@@ -202,6 +202,22 @@ class QuantumPoolCapTest(BitcoinTestFramework):
         minimal_fund = owner_a.fundquantumcoldstakeaddress(minimal_delegation["address"], Decimal("1"))
         minimal_tx = node.decoderawtransaction(node.getrawtransaction(minimal_fund["txid"]))
         assert_equal(len(minimal_tx["vin"]), 1)
+
+        self.log.info("Cold-stake withdrawal refuses ambiguous multi-output sweeps unless all=true")
+        second_minimal_fund = owner_a.fundquantumcoldstakeaddress(minimal_delegation["address"], Decimal("1"))
+        self._generate(1, funder_address)
+        coldstake_utxos = owner_a.listunspent(1, 9999999, [minimal_delegation["address"]])
+        assert_equal(len(coldstake_utxos), 2)
+        assert_raises_rpc_error(
+            -4,
+            "Multiple spendable cold-stake delegation outputs",
+            owner_a.withdrawquantumcoldstakeaddress,
+            minimal_delegation["address"],
+        )
+        withdrawal = owner_a.withdrawquantumcoldstakeaddress(minimal_delegation["address"], None, {"all": True})
+        assert_equal(withdrawal["completed_withdrawal"], True)
+        assert_equal(withdrawal["started_unbonding"], False)
+        assert_equal(Decimal(withdrawal["amount"]), Decimal("2.00000000"))
 
 
 if __name__ == "__main__":

@@ -155,10 +155,12 @@ class GoldRushMigrationRpcTest(BitcoinTestFramework):
         )
         legacy_dry_destination = wallet.getnewquantumaddress()["address"]
         quantum_count_before = len(wallet.listquantumaddresses())
+        wallet.encryptwallet("test-passphrase")
         legacy_dry_run = wallet.migratetoquantum({"dry_run": True, "existing_address": legacy_dry_destination})
         assert_equal(legacy_dry_run["destination"], legacy_dry_destination)
         assert_equal(legacy_dry_run["newly_generated"], False)
         assert_equal(len(wallet.listquantumaddresses()), quantum_count_before)
+        wallet.walletpassphrase("test-passphrase", 600)
 
         self.log.info("Mining a Gold Rush payout to a wallet-backed quantum address")
         payout_address = wallet.getnewquantumaddress()["address"]
@@ -196,6 +198,7 @@ class GoldRushMigrationRpcTest(BitcoinTestFramework):
         )
         goldrush_destination = wallet.getnewquantumaddress()["address"]
         quantum_count_before = len(wallet.listquantumaddresses())
+        wallet.walletlock()
         goldrush_dry_run = wallet.migrategoldrushrewards({"dry_run": True, "existing_address": goldrush_destination})
         assert_equal(goldrush_dry_run["phase"], "gold_rush")
         assert_equal(goldrush_dry_run["eligible_inputs"], 1)
@@ -203,6 +206,7 @@ class GoldRushMigrationRpcTest(BitcoinTestFramework):
         assert_equal(goldrush_dry_run["destination"], goldrush_destination)
         assert_equal(len(wallet.listquantumaddresses()), quantum_count_before)
         assert_equal(wallet.getmigrationstatus()["goldrush_reward_outputs_needing_move"], 1)
+        wallet.walletpassphrase("test-passphrase", 600)
 
         self.log.info("Advancing to the migration window")
         mining_address = wallet.getnewquantumaddress()["address"]
@@ -256,6 +260,7 @@ class GoldRushMigrationRpcTest(BitcoinTestFramework):
         wallet.unloadwallet()
         node.loadwallet(WALLET_NAME)
         wallet = node.get_wallet_rpc(WALLET_NAME)
+        wallet.walletpassphrase("test-passphrase", 600)
         wallet.rescanblockchain(0)
         node.syncwithvalidationinterfacequeue()
         assert_equal(wallet.getmigrationstatus()["goldrush_reward_outputs_needing_move"], 0)

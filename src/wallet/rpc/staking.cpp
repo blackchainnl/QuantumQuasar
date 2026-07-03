@@ -265,6 +265,15 @@ static COutPoint OutPointFromRPCOptions(const UniValue& options)
     return COutPoint{ParseHashV(txid_v, "txid"), static_cast<uint32_t>(vout)};
 }
 
+static bool ParseWithdrawAllOption(const UniValue& options)
+{
+    if (options.isNull()) return false;
+    if (!options.isObject()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "options must be an object");
+    }
+    return options.exists("all") && options["all"].get_bool();
+}
+
 static UniValue StakingDonationInfoToJSON(const CWallet& wallet)
 {
     const unsigned int percentage = wallet.m_donation_percentage;
@@ -661,9 +670,16 @@ static RPCHelpMan withdrawquantumstakeaddress()
                 {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Transaction id."},
                 {"vout", RPCArg::Type::NUM, RPCArg::Optional::NO, "Output index."},
             }},
+            {"options", RPCArg::Type::OBJ, RPCArg::Default{UniValue::VOBJ}, "Withdrawal options.", {
+                {"all", RPCArg::Type::BOOL, RPCArg::Default{false}, "Permit acting on every spendable staking output for this address when no outpoint is specified."},
+            }},
         },
         RPCResult{RPCResult::Type::OBJ, "", "", QuantumStakeTxResult()},
-        RPCExamples{HelpExampleCli("withdrawquantumstakeaddress", "\"quantum_stake_address\"")},
+        RPCExamples{
+            HelpExampleCli("withdrawquantumstakeaddress", "\"quantum_stake_address\"")
+          + HelpExampleCli("withdrawquantumstakeaddress", "\"quantum_stake_address\" '{\"txid\":\"<txid>\",\"vout\":0}'")
+          + HelpExampleCli("withdrawquantumstakeaddress", "\"quantum_stake_address\" null '{\"all\":true}'")
+        },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
@@ -672,6 +688,8 @@ static RPCHelpMan withdrawquantumstakeaddress()
 
     std::optional<COutPoint> outpoint;
     if (request.params.size() > 1 && !request.params[1].isNull()) outpoint = OutPointFromRPCOptions(request.params[1]);
+    const UniValue options = request.params.size() > 2 ? request.params[2] : UniValue(UniValue::VNULL);
+    const bool allow_all_outputs = ParseWithdrawAllOption(options);
     return ThrowOrReturnQuantumStakeTx(WithdrawTieredStakeAddress(
         *pwallet,
         request.params[0].get_str(),
@@ -680,7 +698,8 @@ static RPCHelpMan withdrawquantumstakeaddress()
         "quantum-stake-withdrawal",
         "Blackcoin quantum staking address unbond",
         "Blackcoin quantum staking address withdrawal",
-        outpoint));
+        outpoint,
+        allow_all_outputs));
 },
     };
 }
@@ -834,15 +853,30 @@ static RPCHelpMan withdrawquantumoperatorbond()
         "\nStarts unbonding or withdraws matured cold-stake operator bond funds.\n" + HELP_REQUIRING_PASSPHRASE,
         {
             {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed fixed 30-day cold-stake operator address."},
+            {"outpoint", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "Optional single operator bond output to withdraw/unbond.", {
+                {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Transaction id."},
+                {"vout", RPCArg::Type::NUM, RPCArg::Optional::NO, "Output index."},
+            }},
+            {"options", RPCArg::Type::OBJ, RPCArg::Default{UniValue::VOBJ}, "Withdrawal options.", {
+                {"all", RPCArg::Type::BOOL, RPCArg::Default{false}, "Permit acting on every spendable operator bond output for this address when no outpoint is specified."},
+            }},
         },
         RPCResult{RPCResult::Type::OBJ, "", "", QuantumStakeTxResult()},
-        RPCExamples{HelpExampleCli("withdrawquantumoperatorbond", "\"operator_address\"")},
+        RPCExamples{
+            HelpExampleCli("withdrawquantumoperatorbond", "\"operator_address\"")
+          + HelpExampleCli("withdrawquantumoperatorbond", "\"operator_address\" '{\"txid\":\"<txid>\",\"vout\":0}'")
+          + HelpExampleCli("withdrawquantumoperatorbond", "\"operator_address\" null '{\"all\":true}'")
+        },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
     pwallet->BlockUntilSyncedToCurrentChain();
 
+    std::optional<COutPoint> outpoint;
+    if (request.params.size() > 1 && !request.params[1].isNull()) outpoint = OutPointFromRPCOptions(request.params[1]);
+    const UniValue options = request.params.size() > 2 ? request.params[2] : UniValue(UniValue::VNULL);
+    const bool allow_all_outputs = ParseWithdrawAllOption(options);
     return ThrowOrReturnQuantumStakeTx(WithdrawTieredStakeAddress(
         *pwallet,
         request.params[0].get_str(),
@@ -850,7 +884,9 @@ static RPCHelpMan withdrawquantumoperatorbond()
         "coldstake-operator-unbonding",
         "coldstake-operator-withdrawal",
         "Blackcoin cold-stake operator unbond",
-        "Blackcoin cold-stake operator withdrawal"));
+        "Blackcoin cold-stake operator withdrawal",
+        outpoint,
+        allow_all_outputs));
 },
     };
 }
@@ -928,16 +964,31 @@ static RPCHelpMan withdrawquantumcoldstakeaddress()
         "\nStarts unbonding or withdraws matured funds from a quantum cold-stake delegation address.\n" + HELP_REQUIRING_PASSPHRASE,
         {
             {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed quantum cold-stake delegation address."},
+            {"outpoint", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "Optional single delegation output to withdraw/unbond.", {
+                {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Transaction id."},
+                {"vout", RPCArg::Type::NUM, RPCArg::Optional::NO, "Output index."},
+            }},
+            {"options", RPCArg::Type::OBJ, RPCArg::Default{UniValue::VOBJ}, "Withdrawal options.", {
+                {"all", RPCArg::Type::BOOL, RPCArg::Default{false}, "Permit acting on every spendable delegation output for this address when no outpoint is specified."},
+            }},
         },
         RPCResult{RPCResult::Type::OBJ, "", "", QuantumStakeTxResult()},
-        RPCExamples{HelpExampleCli("withdrawquantumcoldstakeaddress", "\"coldstake_delegation_address\"")},
+        RPCExamples{
+            HelpExampleCli("withdrawquantumcoldstakeaddress", "\"coldstake_delegation_address\"")
+          + HelpExampleCli("withdrawquantumcoldstakeaddress", "\"coldstake_delegation_address\" '{\"txid\":\"<txid>\",\"vout\":0}'")
+          + HelpExampleCli("withdrawquantumcoldstakeaddress", "\"coldstake_delegation_address\" null '{\"all\":true}'")
+        },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
     pwallet->BlockUntilSyncedToCurrentChain();
 
-    return ThrowOrReturnQuantumStakeTx(WithdrawColdStakeDelegationAddress(*pwallet, request.params[0].get_str()));
+    std::optional<COutPoint> outpoint;
+    if (request.params.size() > 1 && !request.params[1].isNull()) outpoint = OutPointFromRPCOptions(request.params[1]);
+    const UniValue options = request.params.size() > 2 ? request.params[2] : UniValue(UniValue::VNULL);
+    const bool allow_all_outputs = ParseWithdrawAllOption(options);
+    return ThrowOrReturnQuantumStakeTx(WithdrawColdStakeDelegationAddress(*pwallet, request.params[0].get_str(), outpoint, allow_all_outputs));
 },
     };
 }

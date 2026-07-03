@@ -166,6 +166,14 @@ WalletQuantumColdStakeInfo MakeWalletQuantumColdStakeInfo(const CWallet& wallet,
 
 struct ColdStakeDelegationOutputs
 {
+    struct Record
+    {
+        COutPoint outpoint;
+        CAmount amount{0};
+        int depth{0};
+        bool spendable{false};
+    };
+
     CAmount amount{0};
     int outputs{0};
     CAmount confirmed_amount{0};
@@ -175,6 +183,8 @@ struct ColdStakeDelegationOutputs
     CAmount spendable_amount{0};
     int spendable_outputs{0};
     std::vector<COutPoint> spendable_outpoints;
+    std::vector<Record> records;
+    std::vector<Record> spendable_records;
 };
 
 struct ColdStakeFundingInputs
@@ -229,6 +239,7 @@ ColdStakeDelegationOutputs ScanColdStakeDelegationOutputs(
 
     for (const COutput& out : coins) {
         if (out.txout.nValue <= 0 || out.txout.scriptPubKey != delegation_script) continue;
+        outputs.records.push_back({out.outpoint, out.txout.nValue, out.depth, out.spendable});
         outputs.amount += out.txout.nValue;
         ++outputs.outputs;
         if (out.depth > 0) {
@@ -241,7 +252,10 @@ ColdStakeDelegationOutputs ScanColdStakeDelegationOutputs(
         if (out.spendable) {
             outputs.spendable_amount += out.txout.nValue;
             ++outputs.spendable_outputs;
-            if (spendable_only) outputs.spendable_outpoints.push_back(out.outpoint);
+            if (spendable_only) {
+                outputs.spendable_outpoints.push_back(out.outpoint);
+                outputs.spendable_records.push_back({out.outpoint, out.txout.nValue, out.depth, out.spendable});
+            }
         }
     }
     return outputs;
@@ -636,6 +650,45 @@ void KeepOnlySelectedTieredStakeOutput(OperatorBondOutputs& outputs, const Opera
     }
 }
 
+bool FindColdStakeDelegationRecord(const ColdStakeDelegationOutputs& outputs, const COutPoint& outpoint, ColdStakeDelegationOutputs::Record& record)
+{
+    const auto it = std::find_if(outputs.records.begin(), outputs.records.end(), [&](const ColdStakeDelegationOutputs::Record& candidate) {
+        return candidate.outpoint == outpoint;
+    });
+    if (it == outputs.records.end()) return false;
+    record = *it;
+    return true;
+}
+
+bool HasColdStakeDelegationOutpoint(const ColdStakeDelegationOutputs& outputs, const COutPoint& outpoint)
+{
+    return std::any_of(outputs.records.begin(), outputs.records.end(), [&](const ColdStakeDelegationOutputs::Record& candidate) {
+        return candidate.outpoint == outpoint;
+    });
+}
+
+void KeepOnlySelectedColdStakeDelegationOutput(ColdStakeDelegationOutputs& outputs, const ColdStakeDelegationOutputs::Record& selected)
+{
+    outputs.amount = selected.amount;
+    outputs.outputs = 1;
+    if (selected.depth > 0) {
+        outputs.confirmed_amount = selected.amount;
+        outputs.confirmed_outputs = 1;
+        outputs.unconfirmed_amount = 0;
+        outputs.unconfirmed_outputs = 0;
+    } else {
+        outputs.confirmed_amount = 0;
+        outputs.confirmed_outputs = 0;
+        outputs.unconfirmed_amount = selected.amount;
+        outputs.unconfirmed_outputs = 1;
+    }
+    outputs.spendable_amount = selected.amount;
+    outputs.spendable_outputs = 1;
+    outputs.spendable_outpoints = {selected.outpoint};
+    outputs.records = {selected};
+    outputs.spendable_records = {selected};
+}
+
 WalletQuantumOperatorBondInfo MakeWalletTieredStakeBondInfo(const CWallet& wallet, const std::string& address, bool require_operator_lock)
 {
     WalletQuantumOperatorBondInfo result;
@@ -738,7 +791,8 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
     const std::string& withdrawal_label,
     std::string unbonding_comment,
     std::string withdrawal_comment,
-    std::optional<COutPoint> selected_outpoint)
+    std::optional<COutPoint> selected_outpoint,
+    bool allow_all_outputs)
 {
     CTxDestination dest;
     const auto tier = DecodeTieredStakeAddress(address, dest, require_operator_lock);
@@ -786,6 +840,8 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
                 return util::Error{_("Error: Selected staking output was not found for this address")};
             }
             KeepOnlySelectedTieredStakeOutput(outputs, selected_record);
+        } else if (outputs.bonded_outpoints.size() + outputs.withdrawable_outpoints.size() > 1 && !allow_all_outputs) {
+            return util::Error{_("Error: Multiple spendable staking outputs were found. Specify an outpoint, or pass all=true to act on every spendable output for this address.")};
         }
 
         CCoinControl coin_control;
@@ -978,7 +1034,9 @@ util::Result<WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
 
 util::Result<WalletQuantumOperatorBondTx> WithdrawColdStakeDelegationAddress(
     CWallet& wallet,
-    const std::string& address)
+    const std::string& address,
+    std::optional<COutPoint> selected_outpoint,
+    bool allow_all_outputs)
 {
     CTransactionRef tx;
     CAmount amount{0};
@@ -999,12 +1057,28 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawColdStakeDelegationAddress(
             return util::Error{_("Error: Wallet does not hold the owner key for this cold-stake delegation")};
         }
 
-        const ColdStakeDelegationOutputs outputs = ScanColdStakeDelegationOutputs(
+        ColdStakeDelegationOutputs outputs = ScanColdStakeDelegationOutputs(
             wallet,
             GetScriptForDestination(dest),
             /*spendable_only=*/true);
         if (outputs.spendable_outpoints.empty()) {
             return util::Error{_("Error: No spendable cold-stake delegation funds found for this address")};
+        }
+        if (selected_outpoint) {
+            ColdStakeDelegationOutputs::Record selected_record;
+            if (!FindColdStakeDelegationRecord(outputs, *selected_outpoint, selected_record)) {
+                const ColdStakeDelegationOutputs all_outputs = ScanColdStakeDelegationOutputs(
+                    wallet,
+                    GetScriptForDestination(dest),
+                    /*spendable_only=*/false);
+                if (HasColdStakeDelegationOutpoint(all_outputs, *selected_outpoint)) {
+                    return util::Error{_("Error: Selected cold-stake delegation output is not currently spendable")};
+                }
+                return util::Error{_("Error: Selected cold-stake delegation output was not found for this address")};
+            }
+            KeepOnlySelectedColdStakeDelegationOutput(outputs, selected_record);
+        } else if (outputs.spendable_outpoints.size() > 1 && !allow_all_outputs) {
+            return util::Error{_("Error: Multiple spendable cold-stake delegation outputs were found. Specify an outpoint, or pass all=true to act on every spendable output for this address.")};
         }
 
         CCoinControl coin_control;
@@ -2161,7 +2235,9 @@ public:
             "coldstake-operator-unbonding",
             "coldstake-operator-withdrawal",
             "Blackcoin cold-stake operator unbond",
-            "Blackcoin cold-stake operator withdrawal");
+            "Blackcoin cold-stake operator withdrawal",
+            std::nullopt,
+            /*allow_all_outputs=*/true);
     }
     WalletQuantumOperatorBondInfo getQuantumStakeAddressBondInfo(const std::string& stake_address) override
     {
@@ -2189,7 +2265,9 @@ public:
             "quantum-stake-unbonding",
             "quantum-stake-withdrawal",
             "Blackcoin quantum staking address unbond",
-            "Blackcoin quantum staking address withdrawal");
+            "Blackcoin quantum staking address withdrawal",
+            std::nullopt,
+            /*allow_all_outputs=*/true);
     }
     util::Result<WalletQuantumOperatorBondTx> withdrawQuantumStakeOutput(const std::string& stake_address, const COutPoint& outpoint) override
     {
@@ -2201,7 +2279,8 @@ public:
             "quantum-stake-withdrawal",
             "Blackcoin quantum staking output unbond",
             "Blackcoin quantum staking output withdrawal",
-            outpoint);
+            outpoint,
+            /*allow_all_outputs=*/false);
     }
     util::Result<WalletQuantumColdStakeInfo> createQuantumColdStakeAddress(const std::string& staking_pubkey_hex, const std::string& label, uint16_t unbonding_blocks) override
     {
@@ -2238,7 +2317,7 @@ public:
     }
     util::Result<WalletQuantumOperatorBondTx> withdrawQuantumColdStakeAddress(const std::string& coldstake_address) override
     {
-        return WithdrawColdStakeDelegationAddress(*m_wallet, coldstake_address);
+        return WithdrawColdStakeDelegationAddress(*m_wallet, coldstake_address, std::nullopt, /*allow_all_outputs=*/true);
     }
     WalletMigrationStatus getMigrationStatus() override
     {
