@@ -214,7 +214,7 @@ private:
     void showHelpDialog(const QString& title, const QString& html);
     QString selectedColdStakeOperatorPubKey() const;
     QString selectedColdStakeOperatorHash() const;
-    void setColdStakeOperatorSelection(const QString& pubkey, const QString& label);
+    void setColdStakeOperatorSelection(const QString& pubkey, const QString& label, const QString& pubkey_hash = QString());
 };
 
 #endif // BITCOIN_QT_STAKINGMININGPAGE_H

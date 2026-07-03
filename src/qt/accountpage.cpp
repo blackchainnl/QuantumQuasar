@@ -17,6 +17,8 @@
 
 #include <algorithm>
 #include <limits>
+#include <map>
+#include <vector>
 
 #include <QAbstractItemView>
 #include <QApplication>
@@ -42,6 +44,35 @@
 #include <QVBoxLayout>
 
 namespace {
+constexpr uint16_t OPERATOR_COMMITMENT_BLOCKS = 40500;
+
+struct StakeOutputDetail
+{
+    QString role;
+    QString state;
+    uint32_t unlock_height{0};
+    bool operator_bond{false};
+};
+
+struct ColdStakeDetail
+{
+    interfaces::WalletQuantumColdStakeInfo info;
+    interfaces::WalletQuantumColdStakeBalanceInfo balance;
+};
+
+struct AccountOutputMetadata
+{
+    std::map<QString, StakeOutputDetail> stake_outputs;
+    std::map<QString, ColdStakeDetail> coldstake_addresses;
+};
+
+struct OutputRowDetail
+{
+    QString family;
+    QString type;
+    QString status;
+    QString notes;
+};
 
 QString formatBLK(CAmount amount, bool plus = false)
 {
@@ -60,13 +91,140 @@ QLabel* makeCard(const QString& text, QWidget* parent)
     return label;
 }
 
-QString classifyOutput(const CTxDestination& dest, const CScript& script)
+QString baseOutputFamily(const CTxDestination& dest, const CScript& script)
 {
     if (IsQuantumColdStakeDestination(dest) || IsQuantumColdStakeScript(script)) return QObject::tr("Cold stake");
     if (IsEUTXOScript(script)) return QObject::tr("EUTXO");
     if (IsQuantumMigrationDestination(dest) || IsQuantumMigrationScript(script)) return QObject::tr("Quantum");
     if (IsValidDestination(dest)) return QObject::tr("Legacy");
     return QObject::tr("Other");
+}
+
+bool isDirectQuantumScript(const CScript& script)
+{
+    const auto tier = GetQuantumStakeTierProgram(script);
+    return tier && !tier->tiered && !tier->cold_stake;
+}
+
+QString stakeStateLabel(const QString& state)
+{
+    if (state == QStringLiteral("bonded")) return QObject::tr("bonded");
+    if (state == QStringLiteral("unbonding")) return QObject::tr("unbonding");
+    if (state == QStringLiteral("withdrawable")) return QObject::tr("withdrawable");
+    return state.isEmpty() ? QObject::tr("unknown") : state;
+}
+
+QString coldStakeRoleLabel(const interfaces::WalletQuantumColdStakeInfo& info)
+{
+    if (info.has_owner_key && info.has_staker_key) return QObject::tr("owner/staker");
+    if (info.has_owner_key) return QObject::tr("owner");
+    if (info.has_staker_key) return QObject::tr("staker");
+    return QObject::tr("watch-only");
+}
+
+QString coldStakeStateLabel(const ColdStakeDetail& detail)
+{
+    if (!detail.balance.available) return QObject::tr("refreshing");
+    if (!detail.info.tiered) return QObject::tr("delegated");
+    if (detail.info.unlock_height == 0) return QObject::tr("bonded");
+    const int spend_height = detail.balance.current_height + 1;
+    if (detail.info.unlock_height <= static_cast<uint32_t>(std::max(0, spend_height))) {
+        return QObject::tr("withdrawable");
+    }
+    return QObject::tr("unbonding");
+}
+
+QString stakeOutputNote(const StakeOutputDetail& detail)
+{
+    QString note = detail.operator_bond
+        ? QObject::tr("30-day cold-staking node bond controlled by this wallet.")
+        : QObject::tr("Self-staking quantum output controlled by this wallet.");
+    if (detail.state == QStringLiteral("unbonding") && detail.unlock_height > 0) {
+        note += QObject::tr(" Unlock height: %1.").arg(detail.unlock_height);
+    } else if (detail.state == QStringLiteral("withdrawable")) {
+        note += QObject::tr(" Matured unbonding output; withdrawal is available.");
+    }
+    return note;
+}
+
+QString coldStakeNote(const ColdStakeDetail& detail)
+{
+    QString note = QObject::tr("Cold-stake delegation where this wallet has %1 authority.")
+        .arg(coldStakeRoleLabel(detail.info));
+    if (detail.info.tiered && detail.info.unlock_height > 0) {
+        note += QObject::tr(" Unlock height: %1.").arg(detail.info.unlock_height);
+    }
+    if (detail.balance.spendable_outputs > 0) {
+        note += QObject::tr(" Owner-spend available: %1 across %2 output(s).")
+            .arg(formatBLK(detail.balance.spendable_amount))
+            .arg(detail.balance.spendable_outputs);
+    }
+    return note;
+}
+
+OutputRowDetail describeOutput(const CTxDestination& dest,
+                               const COutPoint& outpoint,
+                               const interfaces::WalletTxOut& out,
+                               const QString& address,
+                               const AccountOutputMetadata& metadata)
+{
+    OutputRowDetail detail;
+    detail.family = baseOutputFamily(dest, out.txout.scriptPubKey);
+    detail.type = detail.family;
+    detail.notes = QObject::tr("Nonstandard or wallet-internal script group.");
+
+    const QString outpoint_text = QString::fromStdString(outpoint.ToString());
+    const auto stake_it = metadata.stake_outputs.find(outpoint_text);
+    if (stake_it != metadata.stake_outputs.end()) {
+        detail.family = QObject::tr("Quantum");
+        detail.type = QObject::tr("%1 - %2").arg(stake_it->second.role, stakeStateLabel(stake_it->second.state));
+        detail.status = stakeStateLabel(stake_it->second.state);
+        detail.notes = stakeOutputNote(stake_it->second);
+        return detail;
+    }
+
+    if (detail.family == QObject::tr("Cold stake")) {
+        const auto coldstake_it = metadata.coldstake_addresses.find(address);
+        if (coldstake_it != metadata.coldstake_addresses.end()) {
+            const QString state = coldStakeStateLabel(coldstake_it->second);
+            detail.type = QObject::tr("Cold stake - %1 - %2")
+                .arg(coldStakeRoleLabel(coldstake_it->second.info), state);
+            detail.status = state;
+            detail.notes = coldStakeNote(coldstake_it->second);
+        } else {
+            detail.notes = QObject::tr("Cold-stake contract path. Owner and staker authority are separated.");
+        }
+        return detail;
+    }
+
+    if (detail.family == QObject::tr("Quantum")) {
+        const auto tier = GetQuantumStakeTierProgram(out.txout.scriptPubKey);
+        if (tier && tier->tiered) {
+            const QString state = tier->IsUnbonding()
+                ? (tier->unlock_height > 0 ? QObject::tr("unbonding") : QObject::tr("bonded"))
+                : QObject::tr("bonded");
+            detail.type = QObject::tr("Tiered quantum stake - %1").arg(state);
+            detail.status = state;
+            detail.notes = tier->unlock_height > 0
+                ? QObject::tr("Tiered quantum staking output. Unlock height: %1.").arg(tier->unlock_height)
+                : QObject::tr("Tiered quantum staking output.");
+        } else if (isDirectQuantumScript(out.txout.scriptPubKey)) {
+            detail.type = out.depth_in_main_chain > 0 && !out.is_spent
+                ? QObject::tr("Direct quantum spendable")
+                : QObject::tr("Direct quantum");
+            detail.notes = QObject::tr("Direct ML-DSA quantum spend path.");
+        } else {
+            detail.notes = QObject::tr("Wallet-owned quantum output; staking or reward metadata may affect ordinary use.");
+        }
+        return detail;
+    }
+
+    if (detail.family == QObject::tr("Legacy")) {
+        detail.notes = QObject::tr("Legacy spend path. Use for current-chain fees, sends, and legacy staking.");
+    } else if (detail.family == QObject::tr("EUTXO")) {
+        detail.notes = QObject::tr("Extended UTXO state. Do not spend as ordinary BLK unless a guided workflow says to.");
+    }
+    return detail;
 }
 
 QString outputStatus(const interfaces::WalletTxOut& out)
@@ -201,8 +359,8 @@ void AccountPage::setWalletModel(WalletModel* walletModel)
     }
     m_wallet_model = walletModel;
     if (m_wallet_model) {
-        connect(m_wallet_model, &WalletModel::balanceChanged, this, &AccountPage::refresh);
-        connect(m_wallet_model, &WalletModel::encryptionStatusChanged, this, &AccountPage::refresh);
+        connect(m_wallet_model, &WalletModel::balanceChanged, this, &AccountPage::scheduleRefresh);
+        connect(m_wallet_model, &WalletModel::encryptionStatusChanged, this, &AccountPage::scheduleRefresh);
         connect(m_wallet_model, &QObject::destroyed, this, [this] {
             m_wallet_model = nullptr;
             m_timer->stop();
@@ -241,6 +399,19 @@ void AccountPage::scheduleRefresh()
 
 void AccountPage::refresh()
 {
+    if (m_refreshing) {
+        m_refresh_queued = true;
+        return;
+    }
+    m_refreshing = true;
+    auto finish_refresh = [this] {
+        m_refreshing = false;
+        if (m_refresh_queued) {
+            m_refresh_queued = false;
+            QTimer::singleShot(100, this, &AccountPage::refresh);
+        }
+    };
+
     if (m_privacy) {
         m_tree->clear();
         m_total_card->setText(tr("<b>Values hidden</b><br>Privacy mode is enabled."));
@@ -248,6 +419,7 @@ void AccountPage::refresh()
         m_quantum_card->setText(tr("<b>Quantum</b><br>Hidden"));
         m_attention_card->setText(tr("<b>Attention</b><br>Hidden"));
         m_status->setText(tr("Disable privacy mode to inspect account-level coins."));
+        finish_refresh();
         return;
     }
 
@@ -258,6 +430,7 @@ void AccountPage::refresh()
         m_quantum_card->setText(QStringLiteral("-"));
         m_attention_card->setText(QStringLiteral("-"));
         m_status->setText(tr("No wallet is loaded."));
+        finish_refresh();
         return;
     }
 
@@ -268,6 +441,29 @@ void AccountPage::refresh()
     const std::vector<interfaces::WalletRGBAssetInfo> rgb_assets = wallet.listRGBAssets(/*include_spent=*/false);
     const std::vector<interfaces::WalletEUTXOStateInfo> eutxo_states = wallet.listEUTXOStates(/*include_spent=*/true);
     const interfaces::Wallet::CoinsList coins = wallet.listCoins();
+    AccountOutputMetadata metadata;
+    const std::vector<interfaces::WalletQuantumAddressInfo> quantum_addresses = wallet.listQuantumAddresses();
+    for (const interfaces::WalletQuantumAddressInfo& info : quantum_addresses) {
+        if (!info.tiered) continue;
+        StakeOutputDetail detail;
+        detail.operator_bond = info.label == "coldstake-operator" && info.unbonding_blocks == OPERATOR_COMMITMENT_BLOCKS;
+        detail.role = detail.operator_bond ? tr("Operator bond") : tr("Self stake");
+        const std::vector<interfaces::WalletQuantumStakeOutputInfo> outputs = wallet.listQuantumStakeOutputs(info.address);
+        for (const interfaces::WalletQuantumStakeOutputInfo& output : outputs) {
+            StakeOutputDetail output_detail = detail;
+            output_detail.state = QString::fromStdString(output.state);
+            output_detail.unlock_height = output.unlock_height;
+            const QString outpoint = QString::fromStdString(output.txid) + QStringLiteral(":") + QString::number(output.vout);
+            metadata.stake_outputs[outpoint] = output_detail;
+        }
+    }
+    const std::vector<interfaces::WalletQuantumColdStakeInfo> coldstake_delegations = wallet.listQuantumColdStakeDelegations();
+    for (const interfaces::WalletQuantumColdStakeInfo& info : coldstake_delegations) {
+        ColdStakeDetail detail;
+        detail.info = info;
+        detail.balance = wallet.getQuantumColdStakeBalanceInfo(info.address);
+        metadata.coldstake_addresses[QString::fromStdString(info.address)] = detail;
+    }
 
     m_total_card->setText(tr("<b>Total wallet balance</b><br>Available: %1<br>Pending: %2<br>Immature: %3")
         .arg(formatBLK(balances.balance))
@@ -302,54 +498,104 @@ void AccountPage::refresh()
         CAmount group_amount{0};
         int min_depth{std::numeric_limits<int>::max()};
         QString family = tr("Other");
+        QString group_type;
+        QString group_note;
+        QString group_status;
+        bool same_type{true};
+        bool same_status{true};
         QString searchable = address + QStringLiteral(" ") + label;
+        std::vector<OutputRowDetail> output_details;
+        output_details.reserve(entry.second.size());
         for (const auto& coin_tuple : entry.second) {
             const COutPoint& outpoint = std::get<0>(coin_tuple);
             const interfaces::WalletTxOut& out = std::get<1>(coin_tuple);
             group_amount += out.txout.nValue;
             min_depth = std::min(min_depth, out.depth_in_main_chain);
-            const QString output_family = classifyOutput(dest, out.txout.scriptPubKey);
-            if (family == tr("Other") || output_family != tr("Other")) family = output_family;
-            searchable += QStringLiteral(" ") + QString::fromStdString(outpoint.ToString());
+            const OutputRowDetail detail = describeOutput(dest, outpoint, out, address, metadata);
+            output_details.push_back(detail);
+            if (family == tr("Other") || detail.family != tr("Other")) family = detail.family;
+            if (group_type.isEmpty()) {
+                group_type = detail.type;
+                group_note = detail.notes;
+                group_status = detail.status;
+            } else {
+                same_type = same_type && group_type == detail.type;
+                same_status = same_status && group_status == detail.status;
+            }
+            searchable += QStringLiteral(" ") + QString::fromStdString(outpoint.ToString()) +
+                          QStringLiteral(" ") + detail.type +
+                          QStringLiteral(" ") + detail.notes;
         }
 
         if (entry.second.empty()) continue;
         if (!rowMatchesFilter(family, searchable, label)) continue;
 
+        if (!same_type || group_type.isEmpty()) {
+            group_type = family;
+            group_note = addressNote(family);
+        }
+        if (!same_status) {
+            group_status.clear();
+        }
+
         auto* parent = new QTreeWidgetItem(m_tree);
-        parent->setText(Type, family);
+        parent->setText(Type, group_type);
         parent->setText(Address, address.isEmpty() ? tr("(script without address)") : address);
         parent->setText(Label, label);
         parent->setText(Amount, formatBLK(group_amount));
         parent->setText(Outputs, QString::number(static_cast<int>(entry.second.size())));
         parent->setText(Confirmations, minDepthText(min_depth == std::numeric_limits<int>::max() ? 0 : min_depth));
-        parent->setText(Status, min_depth <= 0 ? tr("needs confirmation") : tr("available"));
-        parent->setText(Notes, addressNote(family));
+        parent->setText(Status, group_status.isEmpty()
+            ? (min_depth <= 0 ? tr("needs confirmation") : tr("available"))
+            : group_status);
+        parent->setText(Notes, group_note);
         parent->setData(Address, Qt::UserRole, address);
         parent->setToolTip(Address, address);
         parent->setToolTip(Notes, parent->text(Notes));
 
-        for (const auto& coin_tuple : entry.second) {
+        for (int i = 0; i < static_cast<int>(entry.second.size()); ++i) {
+            const auto& coin_tuple = entry.second.at(i);
             const COutPoint& outpoint = std::get<0>(coin_tuple);
             const interfaces::WalletTxOut& out = std::get<1>(coin_tuple);
+            const OutputRowDetail& detail = output_details.at(i);
             const QString outpoint_text = QString::fromStdString(outpoint.ToString());
             auto* child = new QTreeWidgetItem(parent);
-            child->setText(Type, classifyOutput(dest, out.txout.scriptPubKey));
+            child->setText(Type, detail.type);
             child->setText(Address, outpoint_text);
             child->setText(Label, label);
             child->setText(Amount, formatBLK(out.txout.nValue));
             child->setText(Outputs, tr("1"));
             child->setText(Confirmations, QString::number(out.depth_in_main_chain));
-            child->setText(Status, outputStatus(out));
-            child->setText(Notes, addressNote(child->text(Type)));
+            child->setText(Status, detail.status.isEmpty() || out.depth_in_main_chain <= 0 || out.is_spent
+                ? outputStatus(out)
+                : detail.status);
+            child->setText(Notes, detail.notes);
             child->setData(Address, Qt::UserRole, address);
             child->setData(Address, Qt::UserRole + 1, outpoint_text);
             child->setToolTip(Address, outpoint_text);
+            child->setToolTip(Notes, detail.notes);
         }
 
         ++visible_groups;
         visible_outputs += static_cast<int>(entry.second.size());
         visible_amount += group_amount;
+    }
+
+    if (migration.available && migration.goldrush_reward_outputs_needing_move > 0) {
+        const QString family = tr("Quantum");
+        const QString searchable = tr("Gold Rush needs move aggregate quantum reward migration");
+        if (rowMatchesFilter(family, searchable, QString())) {
+            auto* item = new QTreeWidgetItem(m_tree);
+            item->setText(Type, tr("Gold Rush needs move"));
+            item->setText(Address, tr("(aggregate)"));
+            item->setText(Label, QString());
+            item->setText(Amount, formatBLK(migration.goldrush_reward_amount_needing_move));
+            item->setText(Outputs, QString::number(migration.goldrush_reward_outputs_needing_move));
+            item->setText(Confirmations, QStringLiteral("-"));
+            item->setText(Status, tr("move first"));
+            item->setText(Notes, tr("Wallet migration status reports these Gold Rush reward output(s) need one fresh move before ordinary sends, staking, node bonds, or delegation. Exact outpoints are not exposed to this account view, so this aggregate row is not added to the visible balance total."));
+            item->setToolTip(Notes, item->text(Notes));
+        }
     }
 
     if (visible_groups <= 12) {
@@ -365,6 +611,7 @@ void AccountPage::refresh()
         .arg(static_cast<int>(rgb_assets.size()))
         .arg(static_cast<int>(eutxo_states.size()))
         .arg(demurrage.available ? demurrage.quantum_outputs : 0));
+    finish_refresh();
 }
 
 void AccountPage::copySelectedAddress()

@@ -54,6 +54,8 @@ private:
 
     QPointer<WalletModel> m_wallet_model;
     bool m_privacy{false};
+    bool m_refreshing{false};
+    bool m_refresh_queued{false};
 
     QLabel* m_total_card{nullptr};
     QLabel* m_legacy_card{nullptr};

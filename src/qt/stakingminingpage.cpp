@@ -14,10 +14,12 @@
 #include <qt/walletmodel.h>
 
 #include <addresstype.h>
+#include <crypto/sha256.h>
 #include <interfaces/wallet.h>
 #include <key_io.h>
 #include <primitives/transaction.h>
 #include <uint256.h>
+#include <util/strencodings.h>
 #include <wallet/wallet.h>
 
 #include <algorithm>
@@ -197,6 +199,19 @@ bool isBondedTieredStakingAddress(const QString& address)
 {
     QuantumStakeTierProgram tier;
     return stakingAddressTier(address, tier) && tier.IsBonded();
+}
+
+QString stakingPubKeyHashHex(const QString& pubkey)
+{
+    const std::string clean_pubkey = pubkey.trimmed().toStdString();
+    if (!IsHex(clean_pubkey)) return {};
+
+    const std::vector<unsigned char> parsed = ParseHex(clean_pubkey);
+    if (parsed.empty()) return {};
+
+    uint256 hash;
+    CSHA256().Write(parsed.data(), parsed.size()).Finalize(hash.begin());
+    return QString::fromStdString(hash.GetHex());
 }
 
 } // namespace
@@ -1693,7 +1708,7 @@ void StakingMiningPage::onCopyOperatorKey()
 void StakingMiningPage::onUseOperatorKeyForDelegation()
 {
     if (m_operator_pubkey && !m_operator_pubkey->text().isEmpty()) {
-        setColdStakeOperatorSelection(m_operator_pubkey->text(), tr("This wallet node key"));
+        setColdStakeOperatorSelection(m_operator_pubkey->text(), tr("This node operator key"));
     }
 }
 
@@ -1808,8 +1823,9 @@ void StakingMiningPage::onUseRegistryOperatorForDelegation()
     if (!operator_item) return;
     const QString pubkey = operator_item->data(Qt::UserRole).toString();
     if (pubkey.isEmpty()) return;
+    const QString pubkey_hash = operator_item->data(Qt::UserRole + 1).toString();
 
-    setColdStakeOperatorSelection(pubkey, operator_item->text());
+    setColdStakeOperatorSelection(pubkey, operator_item->text(), pubkey_hash);
 }
 
 void StakingMiningPage::onCreateColdStakeAddress()
@@ -2007,6 +2023,7 @@ void StakingMiningPage::refreshOperatorRegistry()
 
         auto* operator_item = new QTableWidgetItem(label);
         operator_item->setData(Qt::UserRole, pubkey);
+        operator_item->setData(Qt::UserRole + 1, QString::fromStdString(op.staking_pubkey_hash));
         operator_item->setToolTip(!pubkey.isEmpty() ? pubkey : QString::fromStdString(op.staking_pubkey_hash));
         m_operator_registry->setItem(row, 0, operator_item);
         m_operator_registry->setItem(row, 1, new QTableWidgetItem(formatBLK(op.verified_value)));
@@ -2616,7 +2633,9 @@ void StakingMiningPage::updateStatus()
     }
     const QString selected_operator_label = selectedColdStakeOperatorPubKey().isEmpty()
         ? tr("none")
-        : shortenHex(selectedColdStakeOperatorPubKey().toStdString());
+        : (m_coldstake_operator_selector->currentText().trimmed().isEmpty()
+            ? shortenHex(selectedColdStakeOperatorPubKey().toStdString())
+            : m_coldstake_operator_selector->currentText().trimmed());
     m_coldstake_selection_summary->setText(selected_operator_hash.isEmpty()
         ? tr("Selected node: %1. Your confirmed delegations: %2 across %3 output(s). Pending: %4 across %5 output(s).")
               .arg(selected_operator_label)
@@ -2881,7 +2900,16 @@ void StakingMiningPage::refreshControlsEnabled()
         registry_selection_has_pubkey = operator_item && !operator_item->data(Qt::UserRole).toString().isEmpty();
     }
     m_operator_registry_use->setEnabled(has_wallet && registry_selection_has_pubkey);
-    m_coldstake_operator_selector->setEnabled(can_create_quantum && m_coldstake_operator_selector && m_coldstake_operator_selector->count() > 1);
+    bool has_selectable_coldstake_operator{false};
+    if (m_coldstake_operator_selector) {
+        for (int i = 0; i < m_coldstake_operator_selector->count(); ++i) {
+            if (!m_coldstake_operator_selector->itemData(i).toString().trimmed().isEmpty()) {
+                has_selectable_coldstake_operator = true;
+                break;
+            }
+        }
+    }
+    m_coldstake_operator_selector->setEnabled(has_wallet && has_selectable_coldstake_operator);
     m_coldstake_existing_selector->setEnabled(has_wallet && m_coldstake_existing_selector->count() > 1);
     m_coldstake_lock_period->setEnabled(can_create_quantum);
     m_coldstake_new->setEnabled(can_create_quantum && !selectedColdStakeOperatorPubKey().isEmpty());
@@ -3004,22 +3032,30 @@ QString StakingMiningPage::selectedColdStakeOperatorHash() const
     return m_coldstake_operator_selector->itemData(m_coldstake_operator_selector->currentIndex(), Qt::UserRole + 1).toString().trimmed();
 }
 
-void StakingMiningPage::setColdStakeOperatorSelection(const QString& pubkey, const QString& label)
+void StakingMiningPage::setColdStakeOperatorSelection(const QString& pubkey, const QString& label, const QString& pubkey_hash)
 {
     if (!m_coldstake_operator_selector || pubkey.trimmed().isEmpty()) return;
 
     const QString clean_pubkey = pubkey.trimmed();
+    const QString clean_pubkey_hash = pubkey_hash.trimmed().isEmpty()
+        ? stakingPubKeyHashHex(clean_pubkey)
+        : pubkey_hash.trimmed();
+    const QString display = label.trimmed().isEmpty()
+        ? shortenHex(clean_pubkey.toStdString())
+        : label.trimmed();
     int index = m_coldstake_operator_selector->findData(clean_pubkey);
     if (index < 0) {
         if (m_coldstake_operator_selector->count() == 1 &&
             m_coldstake_operator_selector->itemData(0).toString().isEmpty()) {
             m_coldstake_operator_selector->clear();
         }
-        const QString display = label.trimmed().isEmpty()
-            ? shortenHex(clean_pubkey.toStdString())
-            : label.trimmed();
         m_coldstake_operator_selector->addItem(display, clean_pubkey);
         index = m_coldstake_operator_selector->count() - 1;
+    } else {
+        m_coldstake_operator_selector->setItemText(index, display);
+    }
+    if (!clean_pubkey_hash.isEmpty()) {
+        m_coldstake_operator_selector->setItemData(index, clean_pubkey_hash, Qt::UserRole + 1);
     }
     m_coldstake_operator_selector->setCurrentIndex(index);
     m_coldstake_operator_user_selected = true;
