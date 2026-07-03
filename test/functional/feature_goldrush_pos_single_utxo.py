@@ -20,6 +20,7 @@ from test_framework.util import assert_equal, assert_raises_rpc_error
 
 GOLD_RUSH_END_TIME = 2_000_000_000
 QQSIGNAL_HEX = "51515349474e414c"
+QQSPROOF_HEX = "51515350524f4f46"
 WALLET_NAME = "goldrush_single_utxo"
 
 
@@ -68,8 +69,9 @@ class GoldRushPosSingleUtxoTest(BitcoinTestFramework):
                 return kernel["kernel"]["time"]
         raise AssertionError("timed out searching for a deterministic PoS kernel")
 
-    def _mine_pos_block(self, wallet, *, expected_txid=None):
+    def _mine_pos_block(self, wallet, *, expected_txids=None):
         node = self.nodes[0]
+        expected_txids = expected_txids or []
         last_error = None
         for _ in range(4):
             start_height = node.getblockcount()
@@ -83,8 +85,8 @@ class GoldRushPosSingleUtxoTest(BitcoinTestFramework):
                 block = node.getblock(block_hash, 2)
                 assert "proof-of-stake" in block["flags"]
                 txids = [tx["txid"] for tx in block["tx"]]
-                if expected_txid is not None:
-                    assert expected_txid in txids[2:], "pending QQSIGNAL must be mined as a fee-paying transaction"
+                for expected_txid in expected_txids:
+                    assert expected_txid in txids[2:], f"pending Gold Rush claim {expected_txid} must be mined as a fee-paying transaction"
                 return block_hash
             except AssertionError as e:
                 last_error = e
@@ -154,14 +156,14 @@ class GoldRushPosSingleUtxoTest(BitcoinTestFramework):
         goldrush_info = wallet.getgoldrushinfo()
         assert_equal(goldrush_info["wallet_recent_solve_qualified"], True)
 
-        self.log.info("Broadcasting one QQSIGNAL from the matured coinstake output")
+        self.log.info("Broadcasting one QQSIGNAL from a matured canonical P2PK coinstake output")
         signal = wallet.sendshadowsignal(signal_address, solve_height, solve_block_hash, payout_address)
         assert signal["txid"] in node.getrawmempool()
         decoded_signal = node.decoderawtransaction(signal["hex"])
         assert any(QQSIGNAL_HEX in vout["scriptPubKey"]["hex"] for vout in decoded_signal["vout"])
 
         self.log.info("Mining a PoS block with the pending signal does not double-spend the signaling input")
-        payout_block_hash = self._mine_pos_block(wallet, expected_txid=signal["txid"])
+        payout_block_hash = self._mine_pos_block(wallet, expected_txids=[signal["txid"]])
         payout_block = node.getblock(payout_block_hash, 2)
         signal_txs = [
             tx for tx in payout_block["tx"][2:]
@@ -174,6 +176,23 @@ class GoldRushPosSingleUtxoTest(BitcoinTestFramework):
         final_info = wallet.getgoldrushinfo()
         assert_equal(final_info["last_pos_height"], node.getblock(payout_block_hash)["height"])
         assert final_info["pos_count"] >= 1
+
+        self.log.info("Submitting a QQSPROOF from a matured P2PK coinstake output uses the same canonical identity")
+        pow_payout_address = wallet.getnewquantumaddress("single-utxo-pow-payout")["address"]
+        self.generatetoaddress(node, COINBASE_MATURITY, funder_address, sync_fun=self.no_op)
+        self._sync_mocktime_to_tip()
+        pow_claim = wallet.sendshadowpowclaim(signal_address, pow_payout_address, 500000)
+        assert pow_claim["txid"] in node.getrawmempool()
+        decoded_pow = node.decoderawtransaction(pow_claim["hex"])
+        assert any(QQSPROOF_HEX in vout["scriptPubKey"]["hex"] for vout in decoded_pow["vout"])
+        pow_block_hash = self.generatetoaddress(node, 1, funder_address, sync_fun=self.no_op)[0]
+        pow_block = node.getblock(pow_block_hash, 2)
+        assert pow_claim["txid"] in [tx["txid"] for tx in pow_block["tx"][1:]]
+        pow_payout_utxo = self._wait_for_quantum_utxo(wallet, pow_payout_address)
+        assert Decimal(str(pow_payout_utxo["amount"])) > 0
+        pow_info = wallet.getgoldrushinfo()
+        assert_equal(pow_info["last_pow_height"], node.getblock(pow_block_hash)["height"])
+        assert pow_info["pow_count"] >= 1
 
 
 if __name__ == "__main__":

@@ -6599,29 +6599,30 @@ bool SelectShadowPowMiningTarget(CWallet& wallet, const CScript& quantum_payout_
     std::vector<unsigned char> dummy_proof(GetShadowPrefix().size() + 17 + quantum_payout_script.size(), 0);
     std::copy(GetShadowPrefix().begin(), GetShadowPrefix().end(), dummy_proof.begin());
     for (const COutput& output : AvailableCoins(wallet, &coin_control).All()) {
-        if (output.txout.nValue <= 0 || output.input_bytes < 0) continue;
+        if (output.txout.nValue <= 0) continue;
         if (!IsShadowPowMiningTarget(output.txout.scriptPubKey)) continue;
         CTxDestination candidate_dest;
         if (!ExtractDestination(output.txout.scriptPubKey, candidate_dest) || !IsValidDestination(candidate_dest)) continue;
+        const CScript canonical_target = CanonicalizeLegacyStakeScript(output.txout.scriptPubKey);
 
-        dummy_proof.resize(GetShadowPrefix().size() + 17 + output.txout.scriptPubKey.size() + quantum_payout_script.size(), 0);
+        dummy_proof.resize(GetShadowPrefix().size() + 17 + canonical_target.size() + quantum_payout_script.size(), 0);
         std::copy(GetShadowPrefix().begin(), GetShadowPrefix().end(), dummy_proof.begin());
         CMutableTransaction candidate;
         candidate.nVersion = CTransaction::CURRENT_VERSION;
         candidate.nTime = current_time;
         static constexpr uint32_t MAX_SEQUENCE_NONFINAL = 0xfffffffe;
         candidate.vin.emplace_back(output.outpoint, CScript(), MAX_SEQUENCE_NONFINAL);
-        candidate.vout.emplace_back(output.txout.nValue, output.txout.scriptPubKey);
+        candidate.vout.emplace_back(output.txout.nValue, canonical_target);
         candidate.vout.emplace_back(0, CScript() << OP_RETURN << dummy_proof);
         const TxSize tx_size = CalculateMaximumSignedTxSize(CTransaction(candidate), &wallet, &coin_control);
         if (tx_size.vsize <= 0) continue;
         const CAmount candidate_fee = std::max(GetMinFee(static_cast<size_t>(tx_size.vsize), static_cast<uint32_t>(current_time)), fee_rate.GetFee(static_cast<uint32_t>(tx_size.vsize)));
         const CAmount candidate_change = output.txout.nValue - candidate_fee;
-        CTxOut change_out(candidate_change, output.txout.scriptPubKey);
+        CTxOut change_out(candidate_change, canonical_target);
         if (!MoneyRange(candidate_change) || candidate_change <= 0 || IsDust(change_out, wallet.chain().relayDustFee())) continue;
         if (candidate_fee > wallet.m_default_max_tx_fee) continue;
 
-        target = output.txout.scriptPubKey;
+        target = canonical_target;
         dest = candidate_dest;
         return true;
     }
@@ -6796,7 +6797,7 @@ bool CWallet::SubmitShadowPowClaim(const CScript& target, const CTxDestination& 
         const int64_t current_time = GetAdjustedTimeSeconds();
         const CFeeRate fee_rate = GetMinimumFeeRate(*this, coin_control, current_time);
         for (const COutput& output : AvailableCoins(*this, &coin_control).All()) {
-            if (output.txout.scriptPubKey != target || output.input_bytes < 0) continue;
+            if (CanonicalizeLegacyStakeScript(output.txout.scriptPubKey) != target) continue;
 
             CMutableTransaction candidate;
             candidate.nVersion = CTransaction::CURRENT_VERSION;

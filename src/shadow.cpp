@@ -922,7 +922,7 @@ ShadowClaimResult FindPowShadowClaim(const CBlock& block, const CBlockIndex* pin
                 return {std::nullopt, true};
             }
             if (status == ShadowProofValidation::VALID) {
-                if (!TxSpendsFromScript(tx, tx_index, blockundo, decoded.target)) continue;
+                if (!TxSpendsFromScript(tx, tx_index, blockundo, CanonicalLegacyStakeScript(decoded.target))) continue;
                 const CAmount amount = ClaimablePoolAmount(pool, decoded.mode);
                 if (amount <= 0) continue;
                 if (result.claim) {
@@ -1476,9 +1476,11 @@ bool CheckShadowPowClaimForMempool(const CTransaction& tx, const CBlockIndex* pi
         }
 
         bool spends_target = false;
+        const CScript canonical_target = CanonicalLegacyStakeScript(decoded.target);
         for (const CTxIn& txin : tx.vin) {
             Coin coin;
-            if (view.GetCoin(txin.prevout, coin) && !coin.IsSpent() && coin.out.scriptPubKey == decoded.target) {
+            if (view.GetCoin(txin.prevout, coin) && !coin.IsSpent() &&
+                CanonicalLegacyStakeScript(coin.out.scriptPubKey) == canonical_target) {
                 spends_target = true;
                 break;
             }
@@ -1624,10 +1626,11 @@ ShadowPowWork PrepareShadowPowWork(const CScript& target, const CScript& quantum
     if (!pindexPrev) return work;
     const int height = pindexPrev->nHeight + 1;
     if (height < SHADOW_REWARD_START_HEIGHT || height > SHADOW_REWARD_END_HEIGHT) return work;
-    if (target.empty() || target.IsUnspendable()) return work;
-    if (IsQuantumMigrationScript(target) || IsQuantumColdStakeScript(target) || IsEUTXOScript(target)) return work;
+    const CScript canonical_target = CanonicalLegacyStakeScript(target);
+    if (canonical_target.empty() || canonical_target.IsUnspendable()) return work;
+    if (IsQuantumMigrationScript(canonical_target) || IsQuantumColdStakeScript(canonical_target) || IsEUTXOScript(canonical_target)) return work;
     if (!IsDirectQuantumMigrationScript(quantum_payout_script)) return work;
-    if (target.size() > std::numeric_limits<uint16_t>::max() || quantum_payout_script.size() > std::numeric_limits<uint16_t>::max()) return work;
+    if (canonical_target.size() > std::numeric_limits<uint16_t>::max() || quantum_payout_script.size() > std::numeric_limits<uint16_t>::max()) return work;
 
     // The ONLY coins-view read: snapshot the shadow pool and derive this tip's difficulty.
     ShadowPoolState pool = ReadPool(view);
@@ -1637,7 +1640,7 @@ ShadowPowWork PrepareShadowPowWork(const CScript& target, const CScript& quantum
     pool.pow_amount = *next_pow_amount;
 
     work.bits = RetargetedBits(ShadowProofMode::POW, pool, height);
-    work.target = target;
+    work.target = canonical_target;
     work.quantum_payout_script = quantum_payout_script;
     work.height = height;
     work.prev_hash = pindexPrev->GetBlockHash();

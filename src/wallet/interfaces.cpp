@@ -2056,7 +2056,7 @@ public:
                 coin_control.m_avoid_address_reuse = false;
                 for (const COutput& output : AvailableCoins(*m_wallet, &coin_control).All()) {
                     if (output.txout.nValue > 0 && !output.txout.scriptPubKey.empty() && !output.txout.scriptPubKey.IsUnspendable()) {
-                        wallet_scripts.insert(output.txout.scriptPubKey);
+                        wallet_scripts.insert(CanonicalizeLegacyStakeScript(output.txout.scriptPubKey));
                     }
                 }
             } else {
