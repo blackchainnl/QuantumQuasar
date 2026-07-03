@@ -718,7 +718,7 @@ bool SignSignature(const SigningProvider &provider, const CTransaction& txFrom, 
     return SignSignature(provider, txout.scriptPubKey, txTo, nIn, txout.nValue, nHashType, sig_data);
 }
 
-bool VerifySignature(const Coin& coin, const uint256 txFromHash, const CTransaction& txTo, unsigned int nIn, unsigned int flags)
+bool VerifySignature(const Coin& coin, const uint256 txFromHash, const CTransaction& txTo, unsigned int nIn, unsigned int flags, uint32_t quantum_chain_id, const std::vector<CTxOut>* spent_outputs)
 {
     const CTxIn& txin = txTo.vin[nIn];
     /*
@@ -732,10 +732,17 @@ bool VerifySignature(const Coin& coin, const uint256 txFromHash, const CTransact
     if (txin.prevout.hash != txFromHash)
         return false;
 
-    std::vector<CTxOut> spent_outputs(txTo.vin.size());
-    spent_outputs[nIn] = txout;
+    std::vector<CTxOut> fallback_spent_outputs(txTo.vin.size());
+    if (!spent_outputs) {
+        fallback_spent_outputs[nIn] = txout;
+        spent_outputs = &fallback_spent_outputs;
+    }
+    if (spent_outputs->size() != txTo.vin.size()) {
+        return false;
+    }
     PrecomputedTransactionData txdata;
-    txdata.Init(txTo, std::move(spent_outputs));
+    txdata.Init(txTo, std::vector<CTxOut>{spent_outputs->begin(), spent_outputs->end()});
+    txdata.m_quantum_sighash_chain_id = quantum_chain_id;
     TransactionSignatureChecker checker(&txTo, nIn, txout.nValue, txdata, MissingDataBehavior::FAIL);
 
     return VerifyScript(txin.scriptSig, txout.scriptPubKey, &txin.scriptWitness, flags, checker);

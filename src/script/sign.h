@@ -117,7 +117,7 @@ bool SignSignature(const SigningProvider &provider, const CScript& fromPubKey, C
                    unsigned int nIn, const CAmount& amount, int nHashType, SignatureData& sig_data);
 bool SignSignature(const SigningProvider &provider, const CTransaction& txFrom, CMutableTransaction& txTo,
                    unsigned int nIn, int nHashType, SignatureData& sig_data);
-bool VerifySignature(const Coin& coin, uint256 txFromHash, const CTransaction& txTo, unsigned int nIn, unsigned int flags);
+bool VerifySignature(const Coin& coin, uint256 txFromHash, const CTransaction& txTo, unsigned int nIn, unsigned int flags, uint32_t quantum_chain_id = 0, const std::vector<CTxOut>* spent_outputs = nullptr);
 bool VerifySignature(const CScript& fromPubKey, uint256 txFromHash, const CTransaction& txTo, unsigned int nIn, unsigned int flags);    
 
 /** Extract signature data from a transaction input, and insert it. */

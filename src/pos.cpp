@@ -362,8 +362,18 @@ bool CheckProofOfStake(CBlockIndex* pindexPrev, const CTransaction& tx, unsigned
         script_verify_flags |= SCRIPT_VERIFY_LEGACY_ECDSA_LOCKOUT;
     }
 
+    std::vector<CTxOut> spent_outputs;
+    spent_outputs.reserve(tx.vin.size());
+    for (const CTxIn& input : tx.vin) {
+        Coin spent_coin;
+        if (!view.GetCoin(input.prevout, spent_coin)) {
+            return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "stake-prevout-not-exist", strprintf("CheckProofOfStake() : Stake prevout does not exist %s", input.prevout.hash.ToString()));
+        }
+        spent_outputs.push_back(spent_coin.out);
+    }
+
     // Verify signature
-    if (!VerifySignature(coinPrev, txin.prevout.hash, tx, 0, script_verify_flags))
+    if (!VerifySignature(coinPrev, txin.prevout.hash, tx, 0, script_verify_flags, consensus.nQuantumSighashChainId, &spent_outputs))
         return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "stake-verify-signature-failed", strprintf("CheckProofOfStake() : VerifySignature failed on coinstake %s", tx.GetHash().ToString()));
 
     const StakeWeightContext stake_weight_context = GetStakeWeightContext(
