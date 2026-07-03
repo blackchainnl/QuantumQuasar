@@ -43,6 +43,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <vector>
 
 using node::BlockAssembler;
 
@@ -103,6 +104,111 @@ static UniValue QuantumStakeOutputsToJSON(const std::vector<interfaces::WalletQu
         arr.push_back(std::move(obj));
     }
     return arr;
+}
+
+static UniValue QuantumPoolOperatorToJSON(const node::QuantumPoolShare& share)
+{
+    UniValue obj(UniValue::VOBJ);
+    obj.pushKV("staking_pubkey_hash", share.operator_share.staker_pubkey_hash.GetHex());
+    if (!share.operator_share.staker_pubkey.empty()) {
+        obj.pushKV("staking_pubkey", HexStr(share.operator_share.staker_pubkey));
+    }
+    obj.pushKV("verified_value", ValueFromAmount(share.operator_share.verified_value));
+    obj.pushKV("share_bps", node::QuantumPoolShareBps(share.operator_share.verified_value, share.total_coldstake));
+    obj.pushKV("verified_claims", share.operator_share.verified_claims);
+    obj.pushKV("invalid_claims", share.operator_share.invalid_claims);
+    obj.pushKV("operator_commitment_verified", share.operator_share.operator_commitment_verified);
+    obj.pushKV("over_cap", node::WouldQuantumPoolExceedCap(share.total_coldstake, share.operator_share.verified_value, 0));
+    return obj;
+}
+
+struct RpcLocalOperatorBondCandidate
+{
+    std::vector<unsigned char> staking_pubkey;
+    COutPoint outpoint;
+};
+
+static std::vector<RpcLocalOperatorBondCandidate> FindRpcWalletOperatorBondCandidates(const CWallet& wallet)
+{
+    static constexpr uint16_t OPERATOR_COMMITMENT_BLOCKS = 40500;
+
+    struct OperatorAddress
+    {
+        std::string address;
+        std::vector<unsigned char> staking_pubkey;
+    };
+
+    std::vector<OperatorAddress> operator_addresses;
+    {
+        LOCK2(::cs_main, wallet.cs_wallet);
+        const auto infos = wallet.ListQuantumKeyInfos();
+        operator_addresses.reserve(infos.size());
+        for (const QuantumKeyInfo& info : infos) {
+            if (info.public_key.size() != ML_DSA::PUBLICKEY_BYTES) continue;
+            const CScript script = GetScriptForDestination(info.destination);
+            const auto tier = GetQuantumStakeTierProgram(script);
+            if (!tier || !tier->tiered || tier->cold_stake ||
+                tier->unbonding_blocks != OPERATOR_COMMITMENT_BLOCKS) {
+                continue;
+            }
+            operator_addresses.push_back({EncodeDestination(info.destination), info.public_key});
+        }
+    }
+
+    std::vector<RpcLocalOperatorBondCandidate> candidates;
+    for (const OperatorAddress& operator_address : operator_addresses) {
+        const std::vector<interfaces::WalletQuantumStakeOutputInfo> outputs =
+            ListTieredStakeOutputs(wallet, operator_address.address, /*require_operator_lock=*/true);
+        for (const interfaces::WalletQuantumStakeOutputInfo& output : outputs) {
+            if (output.state != "bonded" || output.amount <= 0) continue;
+            candidates.push_back({
+                operator_address.staking_pubkey,
+                COutPoint{uint256S(output.txid), output.vout}});
+        }
+    }
+    return candidates;
+}
+
+static std::map<uint256, std::vector<node::QuantumPoolClaim>> FindRpcWalletQuantumPoolClaims(const CWallet& wallet)
+{
+    std::map<uint256, std::vector<node::QuantumPoolClaim>> claims_by_operator;
+
+    LOCK(wallet.cs_wallet);
+    CoinFilterParams filter;
+    filter.only_spendable = false;
+    filter.skip_locked = false;
+    filter.include_immature_coinbase = false;
+    const std::vector<COutput> coins = AvailableCoinsListUnspent(wallet, nullptr, filter).All();
+
+    for (const COutput& out : coins) {
+        if (out.txout.nValue <= 0) continue;
+
+        int witness_version{0};
+        std::vector<unsigned char> witness_program;
+        if (!out.txout.scriptPubKey.IsWitnessProgram(witness_version, witness_program) ||
+            !IsQuantumColdStakeWitnessProgram(witness_version, witness_program)) {
+            continue;
+        }
+
+        const auto info = wallet.GetQuantumColdStakeDelegationInfo(witness_program);
+        if (!info) continue;
+
+        node::QuantumPoolClaim claim;
+        claim.outpoint = out.outpoint;
+        claim.staker_pubkey_hash = info->staker_pubkey_hash;
+        claim.owner_pubkey_hash = info->owner_pubkey_hash;
+
+        if (const auto tier = GetQuantumStakeTierProgram(out.txout.scriptPubKey); tier && tier->tiered && tier->cold_stake) {
+            claim.tiered = true;
+            claim.state = tier->state;
+            claim.unbonding_blocks = tier->unbonding_blocks;
+            claim.unlock_height = tier->unlock_height;
+        }
+
+        claims_by_operator[claim.staker_pubkey_hash].push_back(std::move(claim));
+    }
+
+    return claims_by_operator;
 }
 
 static UniValue QuantumColdStakeBalanceToJSON(const interfaces::WalletQuantumColdStakeBalanceInfo& info)
@@ -594,6 +700,104 @@ static RPCHelpMan getquantumoperatorbondinfo()
     if (!pwallet) return NullUniValue;
 
     return QuantumOperatorBondInfoToJSON(MakeWalletOperatorBondInfo(*pwallet, request.params[0].get_str()));
+},
+    };
+}
+
+static RPCHelpMan getwalletquantumpoolinfo()
+{
+    return RPCHelpMan{"getwalletquantumpoolinfo",
+        "\nReturn wallet-aware Quantum Cold-Stake pool share information.\n"
+        "\nUnlike node-level getquantumpoolinfo, this wallet RPC first scans this loaded wallet\n"
+        "for locally-owned operator bonds and cold-stake delegation claims, verifies them\n"
+        "against active chainstate, and publishes the verified local data into the node's\n"
+        "non-consensus discovery registry before reporting pool shares.\n",
+        {},
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::BOOL, "available", "Whether chainstate was available."},
+            {RPCResult::Type::STR_AMOUNT, "total_coldstake", "Total live cold-stake UTXO value in chainstate."},
+            {RPCResult::Type::NUM, "cap_bps", "Wallet/policy cap in basis points."},
+            {RPCResult::Type::NUM, "local_operator_bond_candidates", "Wallet-owned bonded node outputs scanned."},
+            {RPCResult::Type::NUM, "local_operator_bonds_verified", "Wallet-owned bonded node outputs verified on chain."},
+            {RPCResult::Type::NUM, "local_claim_groups", "Wallet-owned delegation claim groups published by staker hash."},
+            {RPCResult::Type::NUM, "operator_count", "Operators reported after local publish/verify."},
+            {RPCResult::Type::ARR, "operators", "Operator share entries.", {
+                {RPCResult::Type::OBJ, "", "", {
+                    {RPCResult::Type::STR_HEX, "staking_pubkey_hash", "SHA256(staking_pubkey)."},
+                    {RPCResult::Type::STR_HEX, "staking_pubkey", /*optional=*/true, "Operator/staker ML-DSA public key."},
+                    {RPCResult::Type::STR_AMOUNT, "verified_value", "Verified live value claimed by this operator."},
+                    {RPCResult::Type::NUM, "share_bps", "Verified share of cold-staked value in basis points."},
+                    {RPCResult::Type::NUM, "verified_claims", "Number of accepted claim UTXOs."},
+                    {RPCResult::Type::NUM, "invalid_claims", "Number of rejected claim UTXOs."},
+                    {RPCResult::Type::BOOL, "operator_commitment_verified", "Whether this operator has a live 40,500-block bonded self-stake proof."},
+                    {RPCResult::Type::BOOL, "over_cap", "Whether the verified current share is over the wallet/policy cap."},
+                }},
+            }},
+        }},
+        RPCExamples{HelpExampleCli("getwalletquantumpoolinfo", "")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!pwallet) return NullUniValue;
+
+    if (!pwallet->HaveChain()) {
+        UniValue unavailable(UniValue::VOBJ);
+        unavailable.pushKV("available", false);
+        unavailable.pushKV("total_coldstake", ValueFromAmount(0));
+        unavailable.pushKV("cap_bps", node::QUANTUM_POOL_CAP_BPS);
+        unavailable.pushKV("local_operator_bond_candidates", 0);
+        unavailable.pushKV("local_operator_bonds_verified", 0);
+        unavailable.pushKV("local_claim_groups", 0);
+        unavailable.pushKV("operator_count", 0);
+        unavailable.pushKV("operators", UniValue(UniValue::VARR));
+        return unavailable;
+    }
+
+    const std::vector<RpcLocalOperatorBondCandidate> local_operator_bonds =
+        FindRpcWalletOperatorBondCandidates(*pwallet);
+    const std::map<uint256, std::vector<node::QuantumPoolClaim>> local_claims =
+        FindRpcWalletQuantumPoolClaims(*pwallet);
+
+    LOCK(cs_main);
+    ChainstateManager& chainman = pwallet->chain().chainman();
+    const CCoinsViewCache& view = chainman.ActiveChainstate().CoinsTip();
+    const CAmount total = node::ComputeQuantumColdStakeTotal(view);
+
+    for (const auto& [staker_hash, claims] : local_claims) {
+        node::UpsertQuantumPoolClaims(staker_hash, claims);
+    }
+
+    int verified_local_bonds{0};
+    for (const RpcLocalOperatorBondCandidate& candidate : local_operator_bonds) {
+        if (!node::VerifyQuantumPoolOperatorCommitment(view, candidate.staking_pubkey, candidate.outpoint)) {
+            continue;
+        }
+        ++verified_local_bonds;
+        const uint256 staker_hash = node::QuantumPoolHashPubKey(candidate.staking_pubkey);
+        node::UpsertQuantumPoolOperator(
+            staker_hash,
+            candidate.staking_pubkey,
+            node::GetQuantumPoolClaims(staker_hash),
+            /*operator_commitment_verified=*/true,
+            candidate.outpoint);
+    }
+
+    UniValue entries(UniValue::VARR);
+    for (const uint256& staker_hash : node::ListQuantumPoolOperators()) {
+        const node::QuantumPoolShare share = node::ComputeQuantumPoolShare(view, staker_hash, node::GetQuantumPoolClaims(staker_hash));
+        entries.push_back(QuantumPoolOperatorToJSON(share));
+    }
+
+    UniValue obj(UniValue::VOBJ);
+    obj.pushKV("available", true);
+    obj.pushKV("total_coldstake", ValueFromAmount(total));
+    obj.pushKV("cap_bps", node::QUANTUM_POOL_CAP_BPS);
+    obj.pushKV("local_operator_bond_candidates", static_cast<int>(local_operator_bonds.size()));
+    obj.pushKV("local_operator_bonds_verified", verified_local_bonds);
+    obj.pushKV("local_claim_groups", static_cast<int>(local_claims.size()));
+    obj.pushKV("operator_count", entries.size());
+    obj.pushKV("operators", std::move(entries));
+    return obj;
 },
     };
 }
@@ -2443,6 +2647,7 @@ static const CRPCCommand commands[] =
     { "staking",            &fundquantumstakeaddress,        },
     { "staking",            &withdrawquantumstakeaddress,    },
     { "staking",            &getquantumoperatorbondinfo,     },
+    { "staking",            &getwalletquantumpoolinfo,       },
     { "staking",            &fundquantumoperatorbond,        },
     { "staking",            &withdrawquantumoperatorbond,    },
     { "staking",            &getquantumcoldstakebalance,     },

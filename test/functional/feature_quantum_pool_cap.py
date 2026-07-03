@@ -84,6 +84,19 @@ class QuantumPoolCapTest(BitcoinTestFramework):
         utxo_a = self._one_utxo(owner_a, delegation_a["address"], txid_a)
         self._one_utxo(owner_b, delegation_b["address"], txid_b)
 
+        self.log.info("Wallet-aware pool info publishes locally-owned delegation claims")
+        wallet_pool_info = owner_a.getwalletquantumpoolinfo()
+        assert_equal(wallet_pool_info["available"], True)
+        assert_equal(wallet_pool_info["total_coldstake"], Decimal("500.00000000"))
+        assert_equal(wallet_pool_info["local_claim_groups"], 1)
+        assert_equal(wallet_pool_info["local_operator_bond_candidates"], 0)
+        assert_equal(wallet_pool_info["local_operator_bonds_verified"], 0)
+        assert_equal(wallet_pool_info["operator_count"], 1)
+        assert_equal(wallet_pool_info["operators"][0]["staking_pubkey_hash"], delegation_a["staking_pubkey_hash"])
+        assert_equal(wallet_pool_info["operators"][0]["verified_value"], Decimal("100.00000000"))
+        assert_equal(wallet_pool_info["operators"][0]["verified_claims"], 1)
+        assert_equal(wallet_pool_info["operators"][0]["operator_commitment_verified"], False)
+
         self.log.info("Rejecting a forged discovery claim and accepting the genuine claim")
         forged = node.submitquantumpoolclaim(staker_a_key["public_key"], [{
             "txid": utxo_a["txid"],
@@ -135,6 +148,15 @@ class QuantumPoolCapTest(BitcoinTestFramework):
         operator_txid = funder.sendtoaddress(operator_only["address"], Decimal("1"))
         self._generate(1, funder_address)
         operator_utxo = self._one_utxo(staker_c, operator_only["address"], operator_txid)
+
+        staker_wallet_pool_info = staker_c.getwalletquantumpoolinfo()
+        assert_equal(staker_wallet_pool_info["local_operator_bond_candidates"], 1)
+        assert_equal(staker_wallet_pool_info["local_operator_bonds_verified"], 1)
+        assert any(
+            entry.get("staking_pubkey") == operator_only["public_key"]
+            and entry["operator_commitment_verified"] is True
+            for entry in staker_wallet_pool_info["operators"]
+        )
 
         bootstrap = node.submitquantumpoolclaim(
             operator_only["public_key"],
