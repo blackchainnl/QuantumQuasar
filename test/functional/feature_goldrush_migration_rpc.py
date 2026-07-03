@@ -173,6 +173,20 @@ class GoldRushMigrationRpcTest(BitcoinTestFramework):
         payout_amount = Decimal(str(payout_utxo["amount"]))
         self._assert_one_reward_needs_move(wallet, payout_amount)
 
+        self.log.info("Cold-stake funding refuses Gold Rush migration side effects unless explicitly enabled")
+        staker_key = wallet.dumpquantumkey(wallet.getnewquantumaddress()["address"])
+        coldstake_address = wallet.getnewquantumcoldstakingaddress(staker_key["public_key"], "rpc-coldstake")["address"]
+        mempool_before = set(node.getrawmempool())
+        assert_raises_rpc_error(
+            -4,
+            "allow_goldrush_migration=true",
+            wallet.fundquantumcoldstakeaddress,
+            coldstake_address,
+            Decimal("1"),
+        )
+        assert_equal(set(node.getrawmempool()), mempool_before)
+        self._assert_one_reward_needs_move(wallet, payout_amount)
+
         self.log.info("migrategoldrushrewards can dry-run during Gold Rush once quantum reward spends are active")
         assert_raises_rpc_error(
             -8,

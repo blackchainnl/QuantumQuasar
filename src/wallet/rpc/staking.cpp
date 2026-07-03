@@ -890,21 +890,34 @@ static RPCHelpMan fundquantumcoldstakeaddress()
 {
     return RPCHelpMan{"fundquantumcoldstakeaddress",
         "\nFunds a quantum cold-stake delegation address from direct quantum funds.\n"
-        "If only wallet-owned Gold Rush reward outputs are available, the wallet first moves them to a fresh quantum address and then funds the delegation.\n" +
+        "Gold Rush reward outputs are never moved as a side effect unless options.allow_goldrush_migration is true.\n" +
         HELP_REQUIRING_PASSPHRASE,
         {
             {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed quantum cold-stake delegation address."},
             {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "Amount to delegate."},
+            {"options", RPCArg::Type::OBJ, RPCArg::Default{UniValue::VOBJ}, "Delegation funding options.", {
+                {"allow_goldrush_migration", RPCArg::Type::BOOL, RPCArg::Default{false}, "Allow this RPC to first move wallet-owned Gold Rush reward outputs to a fresh quantum address if direct quantum funds are not currently available."},
+            }},
         },
         RPCResult{RPCResult::Type::OBJ, "", "", QuantumStakeTxResult()},
-        RPCExamples{HelpExampleCli("fundquantumcoldstakeaddress", "\"coldstake_delegation_address\" 1000")},
+        RPCExamples{
+            HelpExampleCli("fundquantumcoldstakeaddress", "\"coldstake_delegation_address\" 1000")
+          + HelpExampleCli("fundquantumcoldstakeaddress", "\"coldstake_delegation_address\" 1000 '{\"allow_goldrush_migration\":true}'")
+        },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
     pwallet->BlockUntilSyncedToCurrentChain();
 
-    return ThrowOrReturnQuantumStakeTx(FundColdStakeDelegationAddress(*pwallet, request.params[0].get_str(), AmountFromValue(request.params[1])));
+    const UniValue options = request.params[2].isNull() ? UniValue(UniValue::VOBJ) : request.params[2].get_obj();
+    const bool allow_goldrush_migration = options.exists("allow_goldrush_migration") && options["allow_goldrush_migration"].get_bool();
+
+    return ThrowOrReturnQuantumStakeTx(FundColdStakeDelegationAddress(
+        *pwallet,
+        request.params[0].get_str(),
+        AmountFromValue(request.params[1]),
+        allow_goldrush_migration));
 },
     };
 }

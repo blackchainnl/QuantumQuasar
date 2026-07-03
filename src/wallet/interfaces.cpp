@@ -326,7 +326,6 @@ ColdStakeFundingInputs SelectColdStakeFundingInputs(
 
     CCoinControl scan_control;
     scan_control.m_input_family = CCoinControl::InputFamily::QUANTUM_MIGRATION;
-    scan_control.m_exclude_generated_quantum_inputs = true;
 
     CoinFilterParams filter;
     filter.only_spendable = true;
@@ -535,8 +534,7 @@ std::vector<LocalOperatorBondCandidate> FindWalletOperatorBondCandidates(const C
         operator_addresses.reserve(infos.size());
         for (const QuantumKeyInfo& info : infos) {
             const WalletQuantumAddressInfo address_info = MakeWalletQuantumAddressInfo(wallet, info);
-            if (address_info.label != "coldstake-operator" ||
-                !address_info.tiered ||
+            if (!address_info.tiered ||
                 address_info.unbonding_blocks != OPERATOR_COMMITMENT_BLOCKS ||
                 info.public_key.size() != ML_DSA::PUBLICKEY_BYTES) {
                 continue;
@@ -875,7 +873,8 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
 util::Result<WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
     CWallet& wallet,
     const std::string& address,
-    CAmount amount)
+    CAmount amount,
+    bool allow_goldrush_migration)
 {
     if (!MoneyRange(amount) || amount <= 0) {
         return util::Error{_("Error: Delegation funding amount must be positive")};
@@ -939,10 +938,13 @@ util::Result<WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
     }
 
     if (use_goldrush_migration) {
+        if (!allow_goldrush_migration) {
+            return util::Error{_("Error: Funding this cold-stake delegation requires first moving wallet-owned Gold Rush reward outputs to a fresh quantum address. Re-run with allow_goldrush_migration=true, or run migrategoldrushrewards first.")};
+        }
         auto migration = CreateGoldRushColdStakeMigration(wallet);
         if (!migration) return util::Error{util::ErrorString(migration)};
 
-        auto delegation = FundColdStakeDelegationAddress(wallet, address, amount);
+        auto delegation = FundColdStakeDelegationAddress(wallet, address, amount, allow_goldrush_migration);
         if (!delegation) {
             WalletQuantumOperatorBondTx result;
             result.address = address;
