@@ -12,6 +12,7 @@
 #include <crypto/mldsa.h>
 #include <crypto/sha256.h>
 #include <eutxo/transition.h>
+#include <chainparams.h>
 #include <key_io.h>
 #include <policy/feerate.h>
 #include <policy/policy.h>
@@ -245,6 +246,53 @@ BOOST_AUTO_TEST_CASE(quantum_migration_witness_spend_enforces_mldsa)
     BOOST_CHECK(!VerifyScript(CScript(), quantum_script, &tampered_tx.vin[0].scriptWitness,
                               SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS | SCRIPT_VERIFY_QUANTUM_ML_DSA,
                               tampered_checker, &err));
+    BOOST_CHECK_EQUAL(err, SCRIPT_ERR_ML_DSA_SIG);
+}
+
+BOOST_AUTO_TEST_CASE(quantum_migration_mldsa_sighash_is_chain_bound)
+{
+    std::vector<uint8_t> pubkey;
+    std::vector<uint8_t> privkey;
+    BOOST_REQUIRE(ML_DSA::KeyGen(pubkey, privkey));
+
+    const std::vector<unsigned char> program = QuantumProgramForPubkey(pubkey);
+    const CScript quantum_script = GetScriptForDestination(WitnessUnknown{QUANTUM_MIGRATION_WITNESS_VERSION, program});
+    const CTxOut spent_output{10 * COIN, quantum_script};
+
+    CMutableTransaction mtx;
+    mtx.nVersion = 2;
+    mtx.vin.emplace_back(COutPoint{uint256::ONE, 0});
+    mtx.vout.emplace_back(9 * COIN, quantum_script);
+
+    static constexpr uint32_t MAINNET_CHAIN_ID{0x424c4b00};
+    static constexpr uint32_t TESTNET_CHAIN_ID{0x424c4b01};
+    const CTransaction unsigned_tx{mtx};
+    const uint256 sighash = QuantumSignatureHash(unsigned_tx, 0, spent_output, MAINNET_CHAIN_ID);
+    std::vector<uint8_t> signature;
+    BOOST_REQUIRE(ML_DSA::Sign(privkey, sighash.begin(), uint256::size(), signature));
+
+    mtx.vin[0].scriptWitness.stack.emplace_back(signature.begin(), signature.end());
+    mtx.vin[0].scriptWitness.stack.emplace_back(pubkey.begin(), pubkey.end());
+    const CTransaction spend_tx{mtx};
+
+    PrecomputedTransactionData mainnet_txdata;
+    mainnet_txdata.Init(spend_tx, std::vector<CTxOut>{spent_output});
+    mainnet_txdata.m_quantum_sighash_chain_id = MAINNET_CHAIN_ID;
+    TransactionSignatureChecker mainnet_checker(&spend_tx, 0, spent_output.nValue, mainnet_txdata, MissingDataBehavior::FAIL);
+
+    ScriptError err;
+    BOOST_CHECK(VerifyScript(CScript(), quantum_script, &spend_tx.vin[0].scriptWitness,
+                             SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS | SCRIPT_VERIFY_QUANTUM_ML_DSA,
+                             mainnet_checker, &err));
+    BOOST_CHECK_EQUAL(err, SCRIPT_ERR_OK);
+
+    PrecomputedTransactionData testnet_txdata;
+    testnet_txdata.Init(spend_tx, std::vector<CTxOut>{spent_output});
+    testnet_txdata.m_quantum_sighash_chain_id = TESTNET_CHAIN_ID;
+    TransactionSignatureChecker testnet_checker(&spend_tx, 0, spent_output.nValue, testnet_txdata, MissingDataBehavior::FAIL);
+    BOOST_CHECK(!VerifyScript(CScript(), quantum_script, &spend_tx.vin[0].scriptWitness,
+                              SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS | SCRIPT_VERIFY_QUANTUM_ML_DSA,
+                              testnet_checker, &err));
     BOOST_CHECK_EQUAL(err, SCRIPT_ERR_ML_DSA_SIG);
 }
 
@@ -640,8 +688,9 @@ BOOST_AUTO_TEST_CASE(check_input_scripts_enforces_quantum_schedule_flags)
     mtx.nVersion = 2;
     mtx.vin.emplace_back(COutPoint{uint256::ONE, 0});
     mtx.vout.emplace_back(9 * COIN, quantum_script);
+    const uint32_t quantum_chain_id = Params().GetConsensus().nQuantumSighashChainId;
     const CTransaction unsigned_tx{mtx};
-    const uint256 sighash = QuantumSignatureHash(unsigned_tx, 0, quantum_prevout);
+    const uint256 sighash = QuantumSignatureHash(unsigned_tx, 0, quantum_prevout, quantum_chain_id);
     std::vector<uint8_t> signature;
     BOOST_REQUIRE(ML_DSA::Sign(privkey, sighash.begin(), uint256::size(), signature));
     mtx.vin[0].scriptWitness.stack.emplace_back(signature.begin(), signature.end());
@@ -676,7 +725,7 @@ BOOST_AUTO_TEST_CASE(check_input_scripts_enforces_quantum_schedule_flags)
     downgrade_mtx.vin.emplace_back(COutPoint{uint256::ONE, 0});
     downgrade_mtx.vout.emplace_back(9 * COIN, CScript() << OP_TRUE);
     const CTransaction unsigned_downgrade_tx{downgrade_mtx};
-    const uint256 downgrade_sighash = QuantumSignatureHash(unsigned_downgrade_tx, 0, quantum_prevout);
+    const uint256 downgrade_sighash = QuantumSignatureHash(unsigned_downgrade_tx, 0, quantum_prevout, quantum_chain_id);
     BOOST_REQUIRE(ML_DSA::Sign(privkey, downgrade_sighash.begin(), uint256::size(), signature));
     downgrade_mtx.vin[0].scriptWitness.stack.emplace_back(signature.begin(), signature.end());
     downgrade_mtx.vin[0].scriptWitness.stack.emplace_back(pubkey.begin(), pubkey.end());
@@ -698,7 +747,7 @@ BOOST_AUTO_TEST_CASE(check_input_scripts_enforces_quantum_schedule_flags)
     op_return_mtx.vout.emplace_back(9 * COIN, quantum_script);
     op_return_mtx.vout.emplace_back(0, CScript() << OP_RETURN << std::vector<unsigned char>{'Q', 'Q'});
     const CTransaction unsigned_op_return_tx{op_return_mtx};
-    const uint256 op_return_sighash = QuantumSignatureHash(unsigned_op_return_tx, 0, quantum_prevout);
+    const uint256 op_return_sighash = QuantumSignatureHash(unsigned_op_return_tx, 0, quantum_prevout, quantum_chain_id);
     BOOST_REQUIRE(ML_DSA::Sign(privkey, op_return_sighash.begin(), uint256::size(), signature));
     op_return_mtx.vin[0].scriptWitness.stack.emplace_back(signature.begin(), signature.end());
     op_return_mtx.vin[0].scriptWitness.stack.emplace_back(pubkey.begin(), pubkey.end());

@@ -136,6 +136,7 @@ struct Params {
     int64_t nProtocolV4Time;
     int64_t nGoldRushEndTime;
     int64_t nQuantumMigrationDeadlineTime;
+    uint32_t nQuantumSighashChainId{0};
     int nStakeTierActivationHeight{std::numeric_limits<int>::max()};
     int nStakeRewardSplitActivationHeight{std::numeric_limits<int>::max()};
     int nDemurrageActivationHeight{std::numeric_limits<int>::max()};

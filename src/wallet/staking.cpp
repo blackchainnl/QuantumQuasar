@@ -1855,7 +1855,7 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
 
     // Calculate reward. Before the stake-reward split activates, V4 cold-stake
     // delegation is deliberately less profitable than self-staking.
-    const bool fColdStakeReward = consensus.IsProtocolV4(stake_mtp) && CoinStakeSpendsKnownColdStake(wallet, txNew, vwtxPrev);
+    const bool fColdStakeReward = quantum_stake_rules_active && CoinStakeSpendsKnownColdStake(wallet, txNew, vwtxPrev);
     CAmount nReward = 0;
     CAmount nOperatorCredit = 0;
     if (stake_reward_split_active) {

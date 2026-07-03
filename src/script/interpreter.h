@@ -185,10 +185,10 @@ static constexpr size_t QUANTUM_COLDSTAKE_WITNESS_SIGOPS = 16;
 
 bool CheckSignatureEncoding(const std::vector<unsigned char> &vchSig, unsigned int flags, ScriptError* serror);
 
-uint256 QuantumSignatureHash(const CTransaction& tx_to, unsigned int n_in, const CTxOut& spent_output);
-uint256 QuantumSignatureHash(const CMutableTransaction& tx_to, unsigned int n_in, const CTxOut& spent_output);
-uint256 QuantumSignatureHash(const CTransaction& tx_to, unsigned int n_in, const std::vector<CTxOut>& spent_outputs);
-uint256 QuantumSignatureHash(const CMutableTransaction& tx_to, unsigned int n_in, const std::vector<CTxOut>& spent_outputs);
+uint256 QuantumSignatureHash(const CTransaction& tx_to, unsigned int n_in, const CTxOut& spent_output, uint32_t chain_id = 0);
+uint256 QuantumSignatureHash(const CMutableTransaction& tx_to, unsigned int n_in, const CTxOut& spent_output, uint32_t chain_id = 0);
+uint256 QuantumSignatureHash(const CTransaction& tx_to, unsigned int n_in, const std::vector<CTxOut>& spent_outputs, uint32_t chain_id = 0);
+uint256 QuantumSignatureHash(const CMutableTransaction& tx_to, unsigned int n_in, const std::vector<CTxOut>& spent_outputs, uint32_t chain_id = 0);
 
 struct PrecomputedTransactionData
 {
@@ -210,6 +210,8 @@ struct PrecomputedTransactionData
     std::vector<CTxOut> m_spent_outputs;
     //! Whether m_spent_outputs is initialized.
     bool m_spent_outputs_ready = false;
+    //! Network replay domain for Quantum Quasar ML-DSA witness-v16 signatures.
+    uint32_t m_quantum_sighash_chain_id = 0;
 
     PrecomputedTransactionData() = default;
 

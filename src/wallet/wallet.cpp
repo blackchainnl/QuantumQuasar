@@ -2485,6 +2485,7 @@ bool CWallet::SignQuantumTransaction(CMutableTransaction& tx, const std::map<COu
 {
     AssertLockHeld(cs_wallet);
 
+    const uint32_t quantum_chain_id = Params().GetConsensus().nQuantumSighashChainId;
     std::set<unsigned int> quantum_inputs;
     for (unsigned int i = 0; i < tx.vin.size(); ++i) {
         const auto coin_it = coins.find(tx.vin[i].prevout);
@@ -2638,7 +2639,7 @@ bool CWallet::SignQuantumTransaction(CMutableTransaction& tx, const std::map<COu
         }
 
         const CTransaction tx_to{tx};
-        const uint256 sighash = QuantumSignatureHash(tx_to, i, spent_outputs);
+        const uint256 sighash = QuantumSignatureHash(tx_to, i, spent_outputs, quantum_chain_id);
         std::vector<uint8_t> private_key_bytes(private_key.begin(), private_key.end());
         std::vector<uint8_t> signature;
         if (!ML_DSA::Sign(private_key_bytes, sighash.begin(), uint256::size(), signature)) {
@@ -2665,6 +2666,7 @@ bool CWallet::SignQuantumTransaction(CMutableTransaction& tx, const std::map<COu
     const CTransaction tx_const{tx};
     PrecomputedTransactionData txdata;
     txdata.Init(tx_const, std::move(spent_outputs), true);
+    txdata.m_quantum_sighash_chain_id = quantum_chain_id;
 
     for (unsigned int i = 0; i < tx.vin.size(); ++i) {
         const auto coin_it = coins.find(tx.vin[i].prevout);
@@ -2883,7 +2885,8 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
         }
     }
 
-    const PrecomputedTransactionData txdata = PrecomputePSBTData(psbtx);
+    PrecomputedTransactionData txdata = PrecomputePSBTData(psbtx);
+    txdata.m_quantum_sighash_chain_id = Params().GetConsensus().nQuantumSighashChainId;
 
     for (unsigned int i = 0; i < psbtx.tx->vin.size(); ++i) {
         const PSBTInput& input = psbtx.inputs.at(i);
@@ -2967,7 +2970,7 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
             }
 
             const CTransaction tx_to{*psbtx.tx};
-            const uint256 sighash = QuantumSignatureHash(tx_to, i, txdata.m_spent_outputs);
+            const uint256 sighash = QuantumSignatureHash(tx_to, i, txdata.m_spent_outputs, txdata.m_quantum_sighash_chain_id);
             std::vector<uint8_t> private_key_bytes(private_key.begin(), private_key.end());
             std::vector<uint8_t> signature;
             if (!ML_DSA::Sign(private_key_bytes, sighash.begin(), uint256::size(), signature)) {

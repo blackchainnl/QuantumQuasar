@@ -51,6 +51,11 @@ To install, run the following from your terminal:
 brew install automake libtool boost pkg-config libevent
 ```
 
+Blackcoin V4 release binaries must use the pinned `liboqs` build supplied by
+`depends`. Do not install or link a Homebrew or other system `liboqs` for
+release builds. A host `liboqs` can only be selected with
+`--with-system-liboqs` for local development testing.
+
 ### 4. Clone Blackcoin repository
 
 `git` should already be installed by default on your system.

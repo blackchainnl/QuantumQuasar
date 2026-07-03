@@ -2258,7 +2258,7 @@ static CAmount GetUndoAwareBlockSubsidy(const CBlockIndex& pindex, const CBlock&
     }
 
     const int64_t mtp = pindex.pprev ? pindex.pprev->GetMedianTimePast() : pindex.GetBlockTime();
-    const bool coldstake_active = consensus.IsProtocolV4(mtp);
+    const bool coldstake_active = IsQuantumWitnessSpendActive(consensus, mtp, pindex.nHeight);
     const bool coldstake = coldstake_active &&
                            block.vtx.size() > 1 &&
                            blockUndo.vtxundo.size() > 0 &&

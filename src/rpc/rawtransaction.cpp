@@ -1556,7 +1556,8 @@ static RPCHelpMan signrawtransactionwithquantumkey()
         }
 
         const CTransaction tx_to{mtx};
-        const uint256 sighash = QuantumSignatureHash(tx_to, i, spent_outputs);
+        const uint32_t quantum_chain_id = chainman.GetConsensus().nQuantumSighashChainId;
+        const uint256 sighash = QuantumSignatureHash(tx_to, i, spent_outputs, quantum_chain_id);
         std::vector<uint8_t> signature;
         if (!ML_DSA::Sign(key_it->second.private_key, sighash.begin(), uint256::size(), signature)) {
             input_errors[i] = "ML-DSA signing failed";
@@ -1579,6 +1580,7 @@ static RPCHelpMan signrawtransactionwithquantumkey()
     const CTransaction tx_const{mtx};
     PrecomputedTransactionData txdata;
     txdata.Init(tx_const, std::move(spent_outputs), true);
+    txdata.m_quantum_sighash_chain_id = chainman.GetConsensus().nQuantumSighashChainId;
 
     for (unsigned int i = 0; i < mtx.vin.size(); ++i) {
         if (input_errors.count(i)) continue;
@@ -2944,6 +2946,7 @@ static RPCHelpMan verifyeutxospend()
     }
     PrecomputedTransactionData txdata;
     txdata.Init(tx, std::move(spent_outputs), true);
+    txdata.m_quantum_sighash_chain_id = chainman.GetConsensus().nQuantumSighashChainId;
 
     unsigned int verify_flags = STANDARD_SCRIPT_VERIFY_FLAGS;
     if (v4_active) {

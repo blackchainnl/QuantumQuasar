@@ -30,7 +30,7 @@ bool ContainsLegacySignatureOpcode(const CScript& script)
     for (CScript::const_iterator pc = script.begin(); pc != script.end();) {
         opcodetype opcode;
         std::vector<unsigned char> data;
-        if (!script.GetOp(pc, opcode, data)) return false;
+        if (!script.GetOp(pc, opcode, data)) return true;
         if (opcode == OP_CHECKSIG ||
             opcode == OP_CHECKSIGVERIFY ||
             opcode == OP_CHECKMULTISIG ||
@@ -1707,6 +1707,7 @@ uint256 QuantumSignatureHashWithCache(const T& txTo, unsigned int nIn, const Pre
 {
     HashWriter ss{};
     ss << std::string("Quantum Quasar ML-DSA spend v2");
+    ss << (cache ? cache->m_quantum_sighash_chain_id : uint32_t{0});
     ss << TX_NO_WITNESS(txTo);
     ss << nIn;
     if (cache && cache->m_spent_outputs_ready && cache->m_spent_outputs.size() == txTo.vin.size()) {
@@ -1718,34 +1719,35 @@ uint256 QuantumSignatureHashWithCache(const T& txTo, unsigned int nIn, const Pre
 }
 
 template <class T>
-uint256 QuantumSignatureHashForSpentOutputs(const T& txTo, unsigned int nIn, const std::vector<CTxOut>& spent_outputs)
+uint256 QuantumSignatureHashForSpentOutputs(const T& txTo, unsigned int nIn, const std::vector<CTxOut>& spent_outputs, uint32_t chain_id)
 {
     HashWriter ss{};
     ss << std::string("Quantum Quasar ML-DSA spend v2");
+    ss << chain_id;
     ss << TX_NO_WITNESS(txTo);
     ss << nIn;
     ss << spent_outputs;
     return ss.GetHash();
 }
 
-uint256 QuantumSignatureHash(const CTransaction& tx_to, unsigned int n_in, const CTxOut& spent_output)
+uint256 QuantumSignatureHash(const CTransaction& tx_to, unsigned int n_in, const CTxOut& spent_output, uint32_t chain_id)
 {
-    return QuantumSignatureHashForSpentOutputs(tx_to, n_in, std::vector<CTxOut>{spent_output});
+    return QuantumSignatureHashForSpentOutputs(tx_to, n_in, std::vector<CTxOut>{spent_output}, chain_id);
 }
 
-uint256 QuantumSignatureHash(const CMutableTransaction& tx_to, unsigned int n_in, const CTxOut& spent_output)
+uint256 QuantumSignatureHash(const CMutableTransaction& tx_to, unsigned int n_in, const CTxOut& spent_output, uint32_t chain_id)
 {
-    return QuantumSignatureHashForSpentOutputs(tx_to, n_in, std::vector<CTxOut>{spent_output});
+    return QuantumSignatureHashForSpentOutputs(tx_to, n_in, std::vector<CTxOut>{spent_output}, chain_id);
 }
 
-uint256 QuantumSignatureHash(const CTransaction& tx_to, unsigned int n_in, const std::vector<CTxOut>& spent_outputs)
+uint256 QuantumSignatureHash(const CTransaction& tx_to, unsigned int n_in, const std::vector<CTxOut>& spent_outputs, uint32_t chain_id)
 {
-    return QuantumSignatureHashForSpentOutputs(tx_to, n_in, spent_outputs);
+    return QuantumSignatureHashForSpentOutputs(tx_to, n_in, spent_outputs, chain_id);
 }
 
-uint256 QuantumSignatureHash(const CMutableTransaction& tx_to, unsigned int n_in, const std::vector<CTxOut>& spent_outputs)
+uint256 QuantumSignatureHash(const CMutableTransaction& tx_to, unsigned int n_in, const std::vector<CTxOut>& spent_outputs, uint32_t chain_id)
 {
-    return QuantumSignatureHashForSpentOutputs(tx_to, n_in, spent_outputs);
+    return QuantumSignatureHashForSpentOutputs(tx_to, n_in, spent_outputs, chain_id);
 }
 
 template <class T>

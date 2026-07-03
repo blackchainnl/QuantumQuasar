@@ -1932,9 +1932,13 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
         pvChecks->reserve(tx.vin.size());
     }
 
+    const uint32_t quantum_sighash_chain_id = Params().GetConsensus().nQuantumSighashChainId;
     uint256 hashCacheEntry;
     CSHA256 hasher = g_scriptExecutionCacheHasher;
-    hasher.Write(UCharCast(tx.GetWitnessHash().begin()), 32).Write((unsigned char*)&flags, sizeof(flags)).Finalize(hashCacheEntry.begin());
+    hasher.Write(UCharCast(tx.GetWitnessHash().begin()), 32)
+        .Write((unsigned char*)&flags, sizeof(flags))
+        .Write((unsigned char*)&quantum_sighash_chain_id, sizeof(quantum_sighash_chain_id))
+        .Finalize(hashCacheEntry.begin());
     AssertLockHeld(cs_main); //TODO: Remove this requirement by making CuckooCache not require external locks
 
     if (!txdata.m_spent_outputs_ready) {
@@ -1949,6 +1953,7 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
         }
         txdata.Init(tx, std::move(spent_outputs));
     }
+    txdata.m_quantum_sighash_chain_id = quantum_sighash_chain_id;
     assert(txdata.m_spent_outputs.size() == tx.vin.size());
 
     bool spends_quantum_migration_output = false;
@@ -3363,18 +3368,18 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, demurrage_reject_reason.empty() ? "bad-demurrage-state" : demurrage_reject_reason);
     }
 
-    const int64_t cs_v4_mtp = pindex->pprev ? pindex->pprev->GetMedianTimePast() : pindex->GetBlockTime();
-    const bool coldstake_v4_active = params.GetConsensus().IsProtocolV4(cs_v4_mtp);
+    const int64_t coldstake_mtp = pindex->pprev ? pindex->pprev->GetMedianTimePast() : pindex->GetBlockTime();
+    const bool coldstake_rules_active = IsQuantumWitnessSpendActive(params.GetConsensus(), coldstake_mtp, pindex->nHeight);
     bool coinstake_spends_cold_stake = false;
     if (block.IsProofOfStake()) {
-        if (coldstake_v4_active && !blockundo.vtxundo.empty()) {
+        if (coldstake_rules_active && !blockundo.vtxundo.empty()) {
             coinstake_spends_cold_stake = HasColdStakeInputs(*block.vtx[1], blockundo.vtxundo.front());
         }
 
         // Cold-staking covenant: a coinstake spending a QCS output must preserve
         // the delegated principal to the same script. vtxundo.front() holds the
         // spent coins for the coinstake (vtx[1]).
-        if (coldstake_v4_active && !blockundo.vtxundo.empty()) {
+        if (coldstake_rules_active && !blockundo.vtxundo.empty()) {
             std::string coldstake_reject_reason;
             if (!CheckColdStakeCovenant(*block.vtx[1], blockundo.vtxundo.front(), {}, Params().GetDevRewardScript(), coldstake_reject_reason)) {
                 return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, coldstake_reject_reason);

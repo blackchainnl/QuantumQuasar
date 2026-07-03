@@ -142,6 +142,7 @@ public:
         consensus.nProtocolV4Time = Consensus::QUANTUM_QUASAR_MAINNET_V4_TIME; // Future date for mainnet
         consensus.nGoldRushEndTime = consensus.nProtocolV4Time + Consensus::QUANTUM_QUASAR_GOLD_RUSH_SECONDS;
         consensus.nQuantumMigrationDeadlineTime = consensus.nGoldRushEndTime + Consensus::QUANTUM_QUASAR_MIGRATION_SECONDS;
+        consensus.nQuantumSighashChainId = 0x424c4b00; // "BLK\0": mainnet ML-DSA replay domain
         consensus.nDemurrageMinActivationHeight = SHADOW_REWARD_END_HEIGHT + 1;
         consensus.nLastPOWBlock = 10000;
         consensus.nStakeTimestampMask = 0xf; // 15
@@ -286,6 +287,7 @@ public:
         consensus.nProtocolV4Time = 0; // Instantly active on testnet
         consensus.nGoldRushEndTime = Consensus::QUANTUM_QUASAR_MAINNET_V4_TIME + Consensus::QUANTUM_QUASAR_GOLD_RUSH_SECONDS;
         consensus.nQuantumMigrationDeadlineTime = consensus.nGoldRushEndTime + Consensus::QUANTUM_QUASAR_MIGRATION_SECONDS;
+        consensus.nQuantumSighashChainId = 0x424c4b01; // "BLK\1": testnet ML-DSA replay domain
         if (opts.quantum_v4_time) consensus.nProtocolV4Time = *opts.quantum_v4_time;
         if (opts.quantum_gold_rush_end_time) consensus.nGoldRushEndTime = *opts.quantum_gold_rush_end_time;
         if (opts.quantum_migration_deadline_time) consensus.nQuantumMigrationDeadlineTime = *opts.quantum_migration_deadline_time;
@@ -465,6 +467,7 @@ public:
         consensus.nProtocolV4Time = 0; // Instantly active on signet
         consensus.nGoldRushEndTime = Consensus::QUANTUM_QUASAR_MAINNET_V4_TIME + Consensus::QUANTUM_QUASAR_GOLD_RUSH_SECONDS;
         consensus.nQuantumMigrationDeadlineTime = consensus.nGoldRushEndTime + Consensus::QUANTUM_QUASAR_MIGRATION_SECONDS;
+        consensus.nQuantumSighashChainId = 0x424c4b02; // "BLK\2": signet ML-DSA replay domain
         consensus.nDemurrageMinActivationHeight = SHADOW_REWARD_END_HEIGHT + 1;
         consensus.nLastPOWBlock = 0x7fffffff;
         consensus.nStakeTimestampMask = 0xf;
@@ -575,6 +578,7 @@ public:
         // 0 means "unset" in the phase helpers (Consensus::Params::IsGoldRushEpoch etc.).
         consensus.nGoldRushEndTime = 0;
         consensus.nQuantumMigrationDeadlineTime = 0;
+        consensus.nQuantumSighashChainId = 0x424c4b03; // "BLK\3": regtest ML-DSA replay domain
         if (opts.quantum_v4_time) consensus.nProtocolV4Time = *opts.quantum_v4_time;
         if (opts.quantum_gold_rush_end_time) consensus.nGoldRushEndTime = *opts.quantum_gold_rush_end_time;
         if (opts.quantum_migration_deadline_time) consensus.nQuantumMigrationDeadlineTime = *opts.quantum_migration_deadline_time;

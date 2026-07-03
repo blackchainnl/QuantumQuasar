@@ -351,6 +351,12 @@ AC_ARG_ENABLE([lto],
     [enable_lto=$enableval],
     [enable_lto=no])
 
+AC_ARG_WITH([system-liboqs],
+  [AS_HELP_STRING([--with-system-liboqs],
+  [allow an exact-version host liboqs instead of the pinned depends build (development only; not for release binaries)])],
+  [with_system_liboqs=$withval],
+  [with_system_liboqs=no])
+
 AC_LANG_PUSH([C++])
 
 dnl Check for a flag to turn compiler warnings into errors. This is helpful for checks which may
@@ -1376,9 +1382,19 @@ if test "$enable_fuzz_binary" = "yes"; then
   CHECK_RUNTIME_LIB
 fi
 
-PKG_CHECK_MODULES([LIBOQS], [liboqs >= 0.15.0], [
+PKG_CHECK_MODULES([LIBOQS], [liboqs = 0.15.0], [
   LIBOQS_LIBS="$($PKG_CONFIG --static --libs liboqs)"
-], [AC_MSG_ERROR([liboqs version 0.15.0 or greater not found. Install liboqs to build Blackcoin post-quantum consensus support.])])
+  LIBOQS_PC_DIR="$($PKG_CONFIG --variable=pcfiledir liboqs 2>/dev/null)"
+  case "$LIBOQS_PC_DIR" in
+    "$prefix"/*) ;;
+    *)
+      if test "$with_system_liboqs" != "yes"; then
+        AC_MSG_ERROR([Blackcoin V4 consensus requires the pinned depends liboqs 0.15.0 build. Build depends and configure with --prefix=\$PWD/depends/<host>, or pass --with-system-liboqs only for local development.])
+      fi
+      AC_MSG_WARN([using host liboqs outside the configured prefix; do not use this build for release binaries])
+      ;;
+  esac
+], [AC_MSG_ERROR([liboqs exactly 0.15.0 not found. Build the pinned depends liboqs package before configuring Blackcoin post-quantum consensus support.])])
 if test "$suppress_external_warnings" != "no" ; then
   LIBOQS_CFLAGS=SUPPRESS_WARNINGS($LIBOQS_CFLAGS)
 fi
