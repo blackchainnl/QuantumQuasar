@@ -72,6 +72,20 @@ static void CommitWalletTransactionOrThrow(CWallet& wallet, const CTransactionRe
     }
 }
 
+static bool HasUnconfirmedWalletShadowSignal(const CWallet& wallet) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
+{
+    for (const auto& [txid, wtx] : wallet.mapWallet) {
+        const auto comment = wtx.mapValue.find("comment");
+        if (comment == wtx.mapValue.end() ||
+            (comment->second != "PoS Claim" && comment->second != "Quantum PoS Claim")) {
+            continue;
+        }
+        if (wtx.isAbandoned() || wtx.isConflicted()) continue;
+        if (wallet.GetTxDepthInMainChain(wtx) == 0) return true;
+    }
+    return false;
+}
+
 static UniValue QuantumOperatorBondInfoToJSON(const interfaces::WalletQuantumOperatorBondInfo& info)
 {
     UniValue obj(UniValue::VOBJ);
@@ -1106,6 +1120,9 @@ static RPCHelpMan sendshadowsignal()
             if (!has_solver_activity) {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "referenced solve is not an active Gold Rush solver marker for this address");
             }
+            if (GetActiveShadowSignalPayouts(chainman.ActiveChainstate().CoinsTip(), tip).count(target)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "address already has an active Gold Rush PoS signal");
+            }
         }
     }
 
@@ -1122,6 +1139,13 @@ static RPCHelpMan sendshadowsignal()
     if (!request.params[4].isNull()) {
         coin_control.m_feerate = FeeRateFromSatVbValue(request.params[4]);
         coin_control.fOverrideFeeRate = true;
+    }
+
+    {
+        LOCK(pwallet->cs_wallet);
+        if (HasUnconfirmedWalletShadowSignal(*pwallet)) {
+            throw JSONRPCError(RPC_WALLET_ERROR, "wallet already has an unconfirmed Gold Rush PoS signal; wait for it to confirm before creating another");
+        }
     }
 
     CMutableTransaction signal_tx;

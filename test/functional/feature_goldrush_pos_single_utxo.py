@@ -161,6 +161,16 @@ class GoldRushPosSingleUtxoTest(BitcoinTestFramework):
         assert signal["txid"] in node.getrawmempool()
         decoded_signal = node.decoderawtransaction(signal["hex"])
         assert any(QQSIGNAL_HEX in vout["scriptPubKey"]["hex"] for vout in decoded_signal["vout"])
+        duplicate_payout_address = wallet.getnewquantumaddress("single-utxo-duplicate-pos-payout")["address"]
+        assert_raises_rpc_error(
+            -4,
+            "wallet already has an unconfirmed Gold Rush PoS signal",
+            wallet.sendshadowsignal,
+            signal_address,
+            solve_height,
+            solve_block_hash,
+            duplicate_payout_address,
+        )
 
         self.log.info("Mining a PoS block with the pending signal does not double-spend the signaling input")
         payout_block_hash = self._mine_pos_block(wallet, expected_txids=[signal["txid"]])
