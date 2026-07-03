@@ -61,6 +61,9 @@
 
 namespace {
 constexpr uint16_t OPERATOR_COMMITMENT_BLOCKS = 40500;
+constexpr int OPERATOR_REGISTRY_PUBKEY_ROLE = Qt::UserRole;
+constexpr int OPERATOR_REGISTRY_PUBKEY_HASH_ROLE = Qt::UserRole + 1;
+constexpr int OPERATOR_REGISTRY_SELECTABLE_ROLE = Qt::UserRole + 2;
 const QString DONATION_PERCENT_SETTING = QStringLiteral("StakingMiningDonationPercent");
 const QString DONATION_USER_CONFIGURED_SETTING = QStringLiteral("StakingMiningDonationUserConfigured");
 const QString DONATION_POST_MIGRATION_DEFAULT_SETTING = QStringLiteral("StakingMiningDonationPostMigrationDefaultApplied");
@@ -1821,9 +1824,15 @@ void StakingMiningPage::onUseRegistryOperatorForDelegation()
     const int row = selected.front()->row();
     QTableWidgetItem* operator_item = m_operator_registry->item(row, 0);
     if (!operator_item) return;
-    const QString pubkey = operator_item->data(Qt::UserRole).toString();
+    if (!operator_item->data(OPERATOR_REGISTRY_SELECTABLE_ROLE).toBool()) {
+        const QString msg = tr("This cold-staking node is not selectable for new delegation right now. Use a verified under-cap node, or refresh after the node bond confirms. If every verified node is over the 20% wallet-policy cap, the selector unlocks all verified nodes for bootstrap.");
+        m_operator_registry_status->setText(msg);
+        QMessageBox::information(this, tr("Node not selectable"), msg);
+        return;
+    }
+    const QString pubkey = operator_item->data(OPERATOR_REGISTRY_PUBKEY_ROLE).toString();
     if (pubkey.isEmpty()) return;
-    const QString pubkey_hash = operator_item->data(Qt::UserRole + 1).toString();
+    const QString pubkey_hash = operator_item->data(OPERATOR_REGISTRY_PUBKEY_HASH_ROLE).toString();
 
     setColdStakeOperatorSelection(pubkey, operator_item->text(), pubkey_hash);
 }
@@ -1999,6 +2008,7 @@ void StakingMiningPage::refreshOperatorRegistry()
     m_coldstake_operator_selector->clear();
 
     if (!pool.available) {
+        m_operator_registry_has_under_cap_candidate = false;
         m_coldstake_operator_selector->addItem(tr("Node registry busy; try Refresh again"), QString());
         m_operator_registry_status->setText(tr("Node registry is busy. No delegation node is selected."));
         m_operator_registry_loaded = false;
@@ -2009,6 +2019,9 @@ void StakingMiningPage::refreshOperatorRegistry()
 
     int selectable_count = 0;
     int previous_registry_row = -1;
+    m_operator_registry_has_under_cap_candidate = std::any_of(pool.operators.begin(), pool.operators.end(), [](const interfaces::WalletQuantumPoolOperatorInfo& op) {
+        return !op.staking_pubkey.empty() && op.operator_commitment_verified && !op.over_cap;
+    });
     m_operator_registry->setRowCount(static_cast<int>(pool.operators.size()));
     for (int row = 0; row < static_cast<int>(pool.operators.size()); ++row) {
         const interfaces::WalletQuantumPoolOperatorInfo& op = pool.operators.at(row);
@@ -2019,11 +2032,17 @@ void StakingMiningPage::refreshOperatorRegistry()
         const QString bond = op.operator_commitment_verified
             ? (op.verified_value > 0 ? tr("ready") : tr("ready; no delegations yet"))
             : tr("missing bond");
-        const QString cap = op.over_cap ? tr("over 20%") : tr("ok");
+        const bool selectable_node = !pubkey.isEmpty() &&
+                                     op.operator_commitment_verified &&
+                                     (!op.over_cap || !m_operator_registry_has_under_cap_candidate);
+        const QString cap = op.over_cap
+            ? (m_operator_registry_has_under_cap_candidate ? tr("over 20%; choose under-cap node") : tr("over 20%; bootstrap allowed"))
+            : tr("ok");
 
         auto* operator_item = new QTableWidgetItem(label);
-        operator_item->setData(Qt::UserRole, pubkey);
-        operator_item->setData(Qt::UserRole + 1, QString::fromStdString(op.staking_pubkey_hash));
+        operator_item->setData(OPERATOR_REGISTRY_PUBKEY_ROLE, pubkey);
+        operator_item->setData(OPERATOR_REGISTRY_PUBKEY_HASH_ROLE, QString::fromStdString(op.staking_pubkey_hash));
+        operator_item->setData(OPERATOR_REGISTRY_SELECTABLE_ROLE, selectable_node);
         operator_item->setToolTip(!pubkey.isEmpty() ? pubkey : QString::fromStdString(op.staking_pubkey_hash));
         m_operator_registry->setItem(row, 0, operator_item);
         m_operator_registry->setItem(row, 1, new QTableWidgetItem(formatBLK(op.verified_value)));
@@ -2031,7 +2050,7 @@ void StakingMiningPage::refreshOperatorRegistry()
         m_operator_registry->setItem(row, 3, new QTableWidgetItem(bond));
         m_operator_registry->setItem(row, 4, new QTableWidgetItem(cap));
 
-        if (!pubkey.isEmpty()) {
+        if (selectable_node) {
             const QString selector_label = tr("%1  |  %2 delegated  |  %3 share  |  %4")
                 .arg(label)
                 .arg(formatBLK(op.verified_value))
@@ -2053,9 +2072,9 @@ void StakingMiningPage::refreshOperatorRegistry()
             if (previous_registry_row >= 0) m_operator_registry->selectRow(previous_registry_row);
         } else {
             const QString label = previous_label.trimmed().isEmpty() || previous_label == tr("No verified nodes discovered")
-                ? tr("%1  |  selected, not yet verified in registry").arg(shortenHex(previous_selection.toStdString()))
-                : tr("%1  |  selected, not yet verified in registry").arg(previous_label);
-            m_coldstake_operator_selector->addItem(label, previous_selection);
+                ? tr("%1  |  not currently selectable").arg(shortenHex(previous_selection.toStdString()))
+                : tr("%1  |  not currently selectable").arg(previous_label);
+            m_coldstake_operator_selector->addItem(label, QString());
             m_coldstake_operator_selector->setCurrentIndex(m_coldstake_operator_selector->count() - 1);
         }
     } else if (selectable_count == 0) {
@@ -2069,8 +2088,9 @@ void StakingMiningPage::refreshOperatorRegistry()
 
     m_operator_registry_status->setText(pool.operators.empty()
         ? tr("No cold-staking nodes are published in this node's local registry. Use getquantumpoolinfo in the console to inspect the same data.")
-        : tr("%1 node(s) discovered. Total delegated cold stake: %2. Nodes become available after normal confirmations; the 30-day bond is the unbonding commitment. Wallet cap: %3.")
+        : tr("%1 node(s) discovered. %2 selectable for new delegation. Total delegated cold stake: %3. Nodes become available after normal confirmations; the 30-day bond is the unbonding commitment. Wallet cap: %4.")
               .arg(static_cast<int>(pool.operators.size()))
+              .arg(selectable_count)
               .arg(formatBLK(pool.total_coldstake))
               .arg(formatBps(pool.cap_bps)));
     m_operator_registry_loaded = true;
@@ -2308,7 +2328,9 @@ void StakingMiningPage::updateStatus()
                                                migration.goldrush_reward_outputs_needing_move == 0;
         applyDonationDefaults(wallet_migration_complete);
         refreshDonationControls();
-        m_coldstake_fund_available = direct_delegation_balance > 0;
+        m_coldstake_fund_available = direct_delegation_balance > 0 ||
+                                     (migration.goldrush_remigration_active &&
+                                      migration.goldrush_reward_amount_needing_move > 0);
         const QString staked_note = migration.staked_quantum_amount > 0
             ? tr(" %1 is already bonded or delegated for staking.")
                   .arg(formatBLK(migration.staked_quantum_amount))
@@ -2897,7 +2919,9 @@ void StakingMiningPage::refreshControlsEnabled()
     if (m_operator_registry && !m_operator_registry->selectedItems().empty()) {
         const int row = m_operator_registry->selectedItems().front()->row();
         QTableWidgetItem* operator_item = m_operator_registry->item(row, 0);
-        registry_selection_has_pubkey = operator_item && !operator_item->data(Qt::UserRole).toString().isEmpty();
+        registry_selection_has_pubkey = operator_item &&
+                                        operator_item->data(OPERATOR_REGISTRY_SELECTABLE_ROLE).toBool() &&
+                                        !operator_item->data(OPERATOR_REGISTRY_PUBKEY_ROLE).toString().isEmpty();
     }
     m_operator_registry_use->setEnabled(has_wallet && registry_selection_has_pubkey);
     bool has_selectable_coldstake_operator{false};

@@ -952,12 +952,28 @@ util::Result<WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
             return util::Error{_("Error: Wallet must hold the owner key before funding a cold-stake delegation")};
         }
 
+        const CCoinsViewCache& view = wallet.chain().chainman().ActiveChainstate().CoinsTip();
+        const node::QuantumPoolShare share = node::ComputeQuantumPoolShare(
+            view,
+            delegation->staker_pubkey_hash,
+            node::GetQuantumPoolClaims(delegation->staker_pubkey_hash));
+        const bool would_exceed_cap = node::WouldQuantumPoolExceedCap(
+            share.total_coldstake,
+            share.operator_share.verified_value,
+            amount);
+        const bool cap_filter_unlocked = would_exceed_cap &&
+            !node::HasQuantumPoolUnderCapCandidate(view, amount, {delegation->staker_pubkey_hash});
+        if (would_exceed_cap && !cap_filter_unlocked) {
+            return util::Error{strprintf(
+                _("Error: This delegation would push the selected cold-staking node above the 20%% wallet-policy cap. Select an under-cap verified node or retry only if every verified node is over cap. Current selected node share: %d bps."),
+                node::QuantumPoolShareBps(share.operator_share.verified_value, share.total_coldstake))};
+        }
+
         CCoinControl coin_control;
         coin_control.m_input_family = CCoinControl::InputFamily::QUANTUM_MIGRATION;
         coin_control.m_exclude_generated_quantum_inputs = true;
         coin_control.m_allow_other_inputs = true;
 
-        const CCoinsViewCache& view = wallet.chain().chainman().ActiveChainstate().CoinsTip();
         const ColdStakeFundingInputs funding = ScanColdStakeFundingInputs(wallet, view);
         if (funding.eligible_inputs == 0) {
             if (funding.goldrush_reward_inputs > 0) {

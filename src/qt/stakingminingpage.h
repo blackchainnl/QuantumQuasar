@@ -95,6 +95,7 @@ private:
     bool m_pow_pending_enabled{false};
     bool m_pow_settings_dirty{false};
     bool m_operator_registry_loaded{false};
+    bool m_operator_registry_has_under_cap_candidate{false};
     int m_operator_registry_refresh_seconds{0};
     int m_status_refresh_tick{0};
     bool m_force_full_refresh{true};

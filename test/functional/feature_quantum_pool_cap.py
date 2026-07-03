@@ -198,6 +198,15 @@ class QuantumPoolCapTest(BitcoinTestFramework):
         funder.sendtoaddress(q_small, Decimal("5"))
         funder.sendtoaddress(q_large, Decimal("100"))
         self._generate(1, funder_address)
+        self.log.info("Cold-stake funding refuses over-cap inflow when an under-cap verified node exists")
+        assert_raises_rpc_error(
+            -4,
+            "20% wallet-policy cap",
+            owner_a.fundquantumcoldstakeaddress,
+            over["address"],
+            Decimal("1"),
+        )
+
         minimal_delegation = owner_a.getnewquantumcoldstakingaddress(staker_c_key["public_key"], "minimal-direct")
         minimal_fund = owner_a.fundquantumcoldstakeaddress(minimal_delegation["address"], Decimal("1"))
         minimal_tx = node.decoderawtransaction(node.getrawtransaction(minimal_fund["txid"]))
