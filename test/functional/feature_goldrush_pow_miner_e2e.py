@@ -19,7 +19,7 @@ from test_framework.util import assert_equal, assert_raises_rpc_error
 
 
 GOLD_RUSH_END_TIME = 2_000_000_000
-MIGRATION_DEADLINE_TIME = GOLD_RUSH_END_TIME + 400
+MIGRATION_DEADLINE_TIME = GOLD_RUSH_END_TIME + 40_000
 QQSPROOF_HEX = "51515350524f4f46"
 QUANTUM_SPEND_FEE = Decimal("0.01")
 MINER_FUNDING = Decimal("1.0")
@@ -98,10 +98,11 @@ class GoldRushPowMinerE2ETest(BitcoinTestFramework):
     def _mine_until_phase(self, phase, target_time, address):
         node = self.nodes[0]
         self._set_mocktime(target_time)
-        for _ in range(20):
+        for _ in range(1000):
             self.generatetoaddress(node, 1, address, sync_fun=self.no_op)
             self._bump_mocktime(16)
-            if node.getquantumquasarinfo()["phase"] == phase:
+            info = node.getquantumquasarinfo()
+            if info["phase"] == phase and (phase != "migration" or info["quantum_spend_enforcement_active"]):
                 return
         raise AssertionError(f"timed out waiting for phase {phase}")
 

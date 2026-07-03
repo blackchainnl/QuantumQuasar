@@ -22,7 +22,7 @@ from test_framework.util import assert_equal, assert_raises_rpc_error
 
 
 GOLD_RUSH_END_TIME = 2_000_000_000
-MIGRATION_DEADLINE_TIME = GOLD_RUSH_END_TIME + 400
+MIGRATION_DEADLINE_TIME = GOLD_RUSH_END_TIME + 40_000
 QUANTUM_SPEND_FEE = Decimal("0.01")
 LEGACY_SPEND_FEE = Decimal("0.01")
 GOLD_RUSH_PAYOUT_MARKER_DOMAIN = b"Quantum Quasar Direct Gold Rush Payout"
@@ -103,10 +103,11 @@ class QuantumLifecycleTest(BitcoinTestFramework):
     def _mine_until_phase(self, phase, target_time, address):
         node = self.nodes[0]
         self._set_mocktime(target_time)
-        for _ in range(20):
+        for _ in range(1000):
             self.generatetoaddress(node, 1, address, sync_fun=self.no_op)
             self._bump_mocktime(16)
-            if node.getquantumquasarinfo()["phase"] == phase:
+            info = node.getquantumquasarinfo()
+            if info["phase"] == phase and (phase != "migration" or info["quantum_spend_enforcement_active"]):
                 return
         raise AssertionError(f"timed out waiting for phase {phase}")
 
@@ -220,7 +221,7 @@ class QuantumLifecycleTest(BitcoinTestFramework):
         self.generatetoaddress(node, COINBASE_MATURITY + 2, staking_address, sync_fun=self.no_op)
         self.generatetoaddress(node, COINBASE_MATURITY + 2, staking_address_b, sync_fun=self.no_op)
         self._sync_mocktime_to_tip()
-        self._assert_phase_status(wallet, "gold_rush", quantum_spends_active=True, remigration_active=True, deadline_passed=False)
+        self._assert_phase_status(wallet, "gold_rush", quantum_spends_active=False, remigration_active=False, deadline_passed=False)
 
         legacy_lockout_utxo = wallet.listunspent(1, 9999999, [legacy_lockout_address])[0]
         claim_b_funding_utxo = wallet.listunspent(1, 9999999, [claim_address_b])[0]
@@ -246,35 +247,34 @@ class QuantumLifecycleTest(BitcoinTestFramework):
         self._sync_mocktime_to_tip()
         payout_utxo_a = self._wait_for_quantum_utxo(wallet, payout_address_a, min_conf=COINBASE_MATURITY + 1)
         payout_utxo_b = self._wait_for_quantum_utxo(wallet, payout_address_b, min_conf=COINBASE_MATURITY + 1)
-        self._assert_phase_status(wallet, "gold_rush", quantum_spends_active=True, remigration_active=True, deadline_passed=False)
+        self._assert_phase_status(wallet, "gold_rush", quantum_spends_active=False, remigration_active=False, deadline_passed=False)
         assert_equal(wallet.getmigrationstatus()["goldrush_reward_outputs_needing_move"], 2)
 
-        self.log.info("Gold Rush payout spends can move to a fresh quantum address during Gold Rush")
+        self.log.info("Gold Rush payout spends stay disabled during the legacy-compatible Gold Rush")
         migration_destination_a = wallet.getnewquantumaddress()["address"]
         _, same_goldrush_signed = self._build_quantum_spend(wallet, payout_utxo_a, payout_address_a)
-        assert_equal(same_goldrush_signed["complete"], True)
-        same_goldrush_accept = node.testmempoolaccept([same_goldrush_signed["hex"]])[0]
-        assert_equal(same_goldrush_accept["allowed"], False)
-        assert_equal(same_goldrush_accept["reject-reason"], "goldrush-remigration-same-address")
-        self._assert_generateblock_rejects(same_goldrush_signed["hex"], node.get_deterministic_priv_key().address, "goldrush-remigration-same-address")
-
-        valid_raw, valid_signed = self._build_quantum_spend(wallet, payout_utxo_a, migration_destination_a)
-        assert_equal(valid_signed["complete"], True)
-        valid_accept = node.testmempoolaccept([valid_signed["hex"]])[0]
-        if not valid_accept["allowed"]:
-            raise AssertionError(f"Gold Rush reward move rejected: {valid_accept}")
-        spend_txid = node.sendrawtransaction(valid_signed["hex"])
-        spend_block_hash = self.generatetoaddress(node, 1, node.get_deterministic_priv_key().address, sync_fun=self.no_op)[0]
-        assert spend_txid in node.getblock(spend_block_hash)["tx"]
-        assert node.gettxout(payout_utxo_a["txid"], payout_utxo_a["vout"], False) is None
-        assert node.gettxout(payout_utxo_b["txid"], payout_utxo_b["vout"], False) is not None
-        assert_equal(wallet.getmigrationstatus()["goldrush_reward_outputs_needing_move"], 1)
+        assert_equal(same_goldrush_signed["complete"], False)
+        _, valid_goldrush_signed = self._build_quantum_spend(wallet, payout_utxo_a, migration_destination_a)
+        assert_equal(valid_goldrush_signed["complete"], False)
 
         self.log.info("Crossing the Gold Rush end boundary into the migration window")
         migration_mining_address = wallet.getnewquantumaddress()["address"]
         self._mine_until_phase("migration", GOLD_RUSH_END_TIME + 16, migration_mining_address)
         migration_tip = node.getbestblockhash()
         self._assert_phase_status(wallet, "migration", quantum_spends_active=True, remigration_active=True, deadline_passed=False)
+
+        self.log.info("Gold Rush payout spends can move to a fresh quantum address during migration")
+        valid_raw, valid_signed = self._build_quantum_spend(wallet, payout_utxo_a, migration_destination_a)
+        assert_equal(valid_signed["complete"], True)
+        valid_accept = node.testmempoolaccept([valid_signed["hex"]])[0]
+        if not valid_accept["allowed"]:
+            raise AssertionError(f"Gold Rush reward move rejected: {valid_accept}")
+        spend_txid = node.sendrawtransaction(valid_signed["hex"])
+        spend_block_hash = self.generatetoaddress(node, 1, migration_mining_address, sync_fun=self.no_op)[0]
+        assert spend_txid in node.getblock(spend_block_hash)["tx"]
+        assert node.gettxout(payout_utxo_a["txid"], payout_utxo_a["vout"], False) is None
+        assert node.gettxout(payout_utxo_b["txid"], payout_utxo_b["vout"], False) is not None
+        assert_equal(wallet.getmigrationstatus()["goldrush_reward_outputs_needing_move"], 1)
 
         self.log.info("Gold Rush payouts must move to a different quantum address during migration")
         _, same_signed = self._build_quantum_spend(wallet, payout_utxo_b, payout_address_b)

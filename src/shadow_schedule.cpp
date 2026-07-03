@@ -27,8 +27,20 @@ void SetShadowRegtestSchedule(int whitelist_height, int gold_rush_blocks)
     SetShadowTestSchedule(whitelist_height, whitelist_height + 1, gold_rush_blocks);
 }
 
+bool IsShadowGoldRushRewardHeight(int nHeight)
+{
+    return nHeight >= SHADOW_REWARD_START_HEIGHT && nHeight <= SHADOW_REWARD_END_HEIGHT;
+}
+
+bool IsShadowGoldRushRewardActive(const Consensus::Params& consensus, int64_t nMedianTimePast, int nHeight)
+{
+    if (!IsShadowGoldRushRewardHeight(nHeight)) return false;
+    return !consensus.IsQuantumFinalLockout(nMedianTimePast);
+}
+
 bool IsQuantumWitnessSpendActive(const Consensus::Params& consensus, int64_t nMedianTimePast, int nSpendHeight)
 {
+    if (nSpendHeight <= SHADOW_REWARD_END_HEIGHT) return false;
     if (consensus.IsQuantumSpendEnforcementActive(nMedianTimePast)) return true;
-    return consensus.IsProtocolV4(nMedianTimePast) && nSpendHeight >= SHADOW_REWARD_START_HEIGHT;
+    return false;
 }

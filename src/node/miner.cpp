@@ -127,7 +127,7 @@ size_t BlockAssembler::MaxActiveBlockWeight() const
 {
     AssertLockHeld(::cs_main);
     const CBlockIndex* tip = m_chainstate.m_chain.Tip();
-    const bool expanded_block_limits = tip && chainparams.GetConsensus().IsQuantumSpendEnforcementActive(tip->GetMedianTimePast());
+    const bool expanded_block_limits = tip && IsQuantumWitnessSpendActive(chainparams.GetConsensus(), tip->GetMedianTimePast(), tip->nHeight + 1);
     const size_t consensus_limit = expanded_block_limits ? V4_MAX_BLOCK_WEIGHT : MAX_BLOCK_WEIGHT;
     return std::min(m_options.nBlockMaxWeight, consensus_limit - 4000);
 }
@@ -136,7 +136,7 @@ int64_t BlockAssembler::MaxActiveBlockSigOpsCost() const
 {
     AssertLockHeld(::cs_main);
     const CBlockIndex* tip = m_chainstate.m_chain.Tip();
-    return (tip && chainparams.GetConsensus().IsQuantumSpendEnforcementActive(tip->GetMedianTimePast())) ? V4_MAX_BLOCK_SIGOPS_COST : MAX_BLOCK_SIGOPS_COST;
+    return (tip && IsQuantumWitnessSpendActive(chainparams.GetConsensus(), tip->GetMedianTimePast(), tip->nHeight + 1)) ? V4_MAX_BLOCK_SIGOPS_COST : MAX_BLOCK_SIGOPS_COST;
 }
 
 BlockAssembler::BlockAssembler(Chainstate& chainstate, const CTxMemPool* mempool, const Options& options)
@@ -374,7 +374,7 @@ bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& packa
     std::set<COutPoint> spent_outpoints;
     const bool defer_pre_migration_quantum_spends =
         m_building_pos_template &&
-        !chainparams.GetConsensus().IsQuantumSpendEnforcementActive(tip->GetMedianTimePast());
+        !IsQuantumWitnessSpendActive(chainparams.GetConsensus(), tip->GetMedianTimePast(), tip->nHeight + 1);
 
     for (CTxMemPool::txiter selected : inBlock) {
         for (const CTxIn& txin : selected->GetTx().vin) {
@@ -735,14 +735,14 @@ static std::vector<unsigned char> QuantumProgramForPubkey(const std::vector<unsi
 
 // peercoin: sign block
 typedef std::vector<unsigned char> valtype;
-bool SignBlock(CBlock& block, const CWallet& keystore, const Consensus::Params& consensus, int64_t prev_mtp)
+bool SignBlock(CBlock& block, const CWallet& keystore, const Consensus::Params& consensus, int64_t prev_mtp, int next_height)
 {
     std::vector<valtype> vSolutions;
     const CTxOut& txout = block.IsProofOfStake() ? block.vtx[1]->vout[1] : block.vtx[0]->vout[0];
 
     std::vector<unsigned char> quantum_pubkey;
     if (block.IsProofOfStake() && ExtractQuantumBlockSigningPubKey(txout.scriptPubKey, quantum_pubkey)) {
-        if (!consensus.IsQuantumStakeRulesActive(prev_mtp)) {
+        if (!IsQuantumWitnessSpendActive(consensus, prev_mtp, next_height)) {
             return false;
         }
         const std::vector<unsigned char> witness_program = QuantumProgramForPubkey(quantum_pubkey);
@@ -905,7 +905,7 @@ void PoSMiner(CWallet *pwallet)
             {
                 {
                     LOCK2(pwallet->cs_wallet, cs_main);
-                    if (!SignBlock(*pblock, *pwallet, Params().GetConsensus(), pindexPrev->GetMedianTimePast()))
+                    if (!SignBlock(*pblock, *pwallet, Params().GetConsensus(), pindexPrev->GetMedianTimePast(), pindexPrev->nHeight + 1))
                     {
                         pwallet->WalletLogPrintf("PoSMiner: failed to sign PoS block\n");
                         continue;

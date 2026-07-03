@@ -921,7 +921,8 @@ static RPCHelpMan getblocktemplate()
     result.pushKV("mutable", aMutable);
     result.pushKV("noncerange", "00000000ffffffff");
     const int64_t template_mtp = pindexPrev->GetMedianTimePast();
-    const bool expanded_block_limits = consensusParams.IsQuantumSpendEnforcementActive(template_mtp);
+    const int template_height = pindexPrev->nHeight + 1;
+    const bool expanded_block_limits = IsQuantumWitnessSpendActive(consensusParams, template_mtp, template_height);
     int64_t nSigOpLimit = expanded_block_limits ? V4_MAX_BLOCK_SIGOPS_COST : MAX_BLOCK_SIGOPS_COST;
     int64_t nSizeLimit = expanded_block_limits ? V4_MAX_BLOCK_SERIALIZED_SIZE : MAX_BLOCK_SERIALIZED_SIZE;
     if (fPreSegWit) {
@@ -936,13 +937,12 @@ static RPCHelpMan getblocktemplate()
         result.pushKV("weightlimit", (int64_t)(expanded_block_limits ? V4_MAX_BLOCK_WEIGHT : MAX_BLOCK_WEIGHT));
     }
     UniValue quantumquasar(UniValue::VOBJ);
-    const int template_height = pindexPrev->nHeight + 1;
     const bool quantum_spend_active = IsQuantumWitnessSpendActive(consensusParams, template_mtp, template_height);
     const bool new_network_stake_only = consensusParams.IsNewNetworkStakeOnly(template_mtp);
     const bool base_network_stake_compatible = consensusParams.IsBaseNetworkStakeCompatible(template_mtp);
-    const bool shadow_merge_mining_active = consensusParams.IsGoldRushEpoch(template_mtp);
+    const bool shadow_merge_mining_active = IsShadowGoldRushRewardActive(consensusParams, template_mtp, template_height);
     const bool final_lockout_active = consensusParams.IsQuantumFinalLockout(template_mtp);
-    const bool shadow_reward_height_active = template_height >= SHADOW_REWARD_START_HEIGHT && template_height <= SHADOW_REWARD_END_HEIGHT;
+    const bool shadow_reward_height_active = IsShadowGoldRushRewardHeight(template_height);
     quantumquasar.pushKV("phase", gbt_blackcoin_phase_name(consensusParams.GetQuantumQuasarPhase(template_mtp)));
     quantumquasar.pushKV("v4_activation_time", consensusParams.nProtocolV4Time);
     quantumquasar.pushKV("gold_rush_end_time", consensusParams.nGoldRushEndTime);
@@ -1233,9 +1233,7 @@ static RPCHelpMan getshadowpowwork()
     const CCoinsViewCache& view = active.CoinsTip();
     const ShadowGoldRushInfo info = GetShadowGoldRushInfo(view, tip);
     const int next_height = tip->nHeight + 1;
-    const bool active_phase = consensus.IsGoldRushEpoch(tip->GetMedianTimePast())
-                              && next_height >= SHADOW_REWARD_START_HEIGHT
-                              && next_height <= SHADOW_REWARD_END_HEIGHT;
+    const bool active_phase = IsShadowGoldRushRewardActive(consensus, tip->GetMedianTimePast(), next_height);
     const CAmount next_pow_payout = active_phase ? info.pow_amount + ShadowBaseReward(next_height) / 2 : info.pow_amount;
 
     UniValue obj(UniValue::VOBJ);

@@ -13,7 +13,7 @@ from test_framework.util import assert_equal
 
 
 GOLD_RUSH_END_TIME = 2_000_000_000
-MIGRATION_DEADLINE_TIME = GOLD_RUSH_END_TIME + 400
+MIGRATION_DEADLINE_TIME = GOLD_RUSH_END_TIME + 40_000
 WALLET_NAME = "goldrush_coldstake_auto_migration"
 
 
@@ -91,6 +91,17 @@ class GoldRushColdStakeAutoMigrationTest(BitcoinTestFramework):
         self.wait_until(lambda: len(wallet.listunspent(min_conf, 9999999, [address], True, options)) == 1, timeout=30)
         return wallet.listunspent(min_conf, 9999999, [address], True, options)[0]
 
+    def _mine_until_quantum_spends_active(self, address):
+        node = self.nodes[0]
+        self._set_mocktime(GOLD_RUSH_END_TIME + 16)
+        for _ in range(1000):
+            self.generatetoaddress(node, 1, address, sync_fun=self.no_op)
+            self._bump_mocktime(16)
+            info = node.getquantumquasarinfo()
+            if info["phase"] == "migration" and info["quantum_spend_enforcement_active"]:
+                return
+        raise AssertionError("timed out waiting for post-Gold-Rush quantum spend activation")
+
     def run_test(self):
         node = self.nodes[0]
         self._set_mocktime((int(time.time()) & ~0xf) + 16)
@@ -115,9 +126,16 @@ class GoldRushColdStakeAutoMigrationTest(BitcoinTestFramework):
         self._mine_pos_block_with_claim(wallet, claim["txid"])
         self.generatetoaddress(node, COINBASE_MATURITY, node.get_deterministic_priv_key().address, sync_fun=self.no_op)
         self._sync_mocktime_to_tip()
-        self._wait_for_quantum_utxo(wallet, payout_address, min_conf=COINBASE_MATURITY + 1)
+        payout_utxo = self._wait_for_quantum_utxo(wallet, payout_address, min_conf=COINBASE_MATURITY + 1)
         status = wallet.getmigrationstatus()
         assert_equal(status["goldrush_reward_outputs_needing_move"], 1)
+        for utxo in wallet.listunspent(1, 9999999):
+            if utxo["txid"] == payout_utxo["txid"] and utxo["vout"] == payout_utxo["vout"]:
+                continue
+            wallet.lockunspent(False, [{"txid": utxo["txid"], "vout": utxo["vout"]}])
+
+        self.log.info("Advancing to migration before auto-migrating the Gold Rush reward into cold stake")
+        self._mine_until_quantum_spends_active(node.get_deterministic_priv_key().address)
 
         self.log.info("Default cold-stake funding first migrates the Gold Rush reward")
         staker_key = wallet.dumpquantumkey(wallet.getnewquantumaddress()["address"])

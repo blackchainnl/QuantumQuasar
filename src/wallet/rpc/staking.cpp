@@ -1095,7 +1095,7 @@ static RPCHelpMan sendshadowsignal()
             throw JSONRPCError(RPC_CLIENT_NOT_CONNECTED, "No active chain tip");
         }
         const Consensus::Params& consensus = Params().GetConsensus();
-        if (!consensus.IsGoldRushEpoch(tip->GetMedianTimePast())) {
+        if (!IsShadowGoldRushRewardActive(consensus, tip->GetMedianTimePast(), tip->nHeight + 1)) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Shadow signaling is only active during the Gold Rush epoch");
         }
         if (solve_height > static_cast<uint32_t>(tip->nHeight)) {
@@ -1336,7 +1336,7 @@ static RPCHelpMan sendshadowpowclaim()
             throw JSONRPCError(RPC_CLIENT_NOT_CONNECTED, "No active chain tip");
         }
         const Consensus::Params& consensus = Params().GetConsensus();
-        if (!consensus.IsGoldRushEpoch(tip->GetMedianTimePast())) {
+        if (!IsShadowGoldRushRewardActive(consensus, tip->GetMedianTimePast(), tip->nHeight + 1)) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Shadow PoW claims are only active during the Gold Rush epoch");
         }
         const CCoinsViewCache& view = chainman.ActiveChainstate().CoinsTip();
@@ -1410,7 +1410,7 @@ static RPCHelpMan sendshadowpowclaim()
         const CBlockIndex* tip = chainman.ActiveChain().Tip();
         const Consensus::Params& consensus = Params().GetConsensus();
         if (!tip || tip->GetBlockHash() != pow_work.prev_hash ||
-            !consensus.IsGoldRushEpoch(tip->GetMedianTimePast())) {
+            !IsShadowGoldRushRewardActive(consensus, tip->GetMedianTimePast(), tip->nHeight + 1)) {
             throw JSONRPCError(RPC_VERIFY_REJECTED, "Active chain tip changed while grinding; retry the PoW claim");
         }
     }
@@ -1592,7 +1592,7 @@ static RPCHelpMan getgoldrushinfo()
         tip_height = tip->nHeight;
         tip_time = tip->GetBlockTime();
         mtp = tip->GetMedianTimePast();
-        active = consensus.IsGoldRushEpoch(mtp);
+        active = IsShadowGoldRushRewardActive(consensus, mtp, tip->nHeight + 1);
         shadow_info = GetShadowGoldRushInfo(active_chainstate.CoinsTip(), tip);
         recent_solvers = GetRecentShadowSolverActivity(active_chainstate.CoinsTip(), tip);
         active_signalers = GetActiveShadowSignalCount(active_chainstate.CoinsTip(), tip);
@@ -1927,9 +1927,7 @@ static RPCHelpMan getpowmininginfo()
         if (tip) {
             const Consensus::Params& consensus = Params().GetConsensus();
             const int next_height = tip->nHeight + 1;
-            epoch_active = consensus.IsGoldRushEpoch(tip->GetMedianTimePast()) &&
-                           next_height >= SHADOW_REWARD_START_HEIGHT &&
-                           next_height <= SHADOW_REWARD_END_HEIGHT;
+            epoch_active = IsShadowGoldRushRewardActive(consensus, tip->GetMedianTimePast(), next_height);
             blocks_remaining = epoch_active ? std::max(0, SHADOW_REWARD_END_HEIGHT - next_height + 1) : 0;
             accrued = GetShadowGoldRushInfo(chainman.ActiveChainstate().CoinsTip(), tip).pow_amount;
             next_claim = epoch_active ? accrued + ShadowBaseReward(next_height) / 2 : accrued;

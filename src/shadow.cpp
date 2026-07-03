@@ -26,6 +26,7 @@ using valtype = std::vector<unsigned char>;
 static const valtype SHADOW_PREFIX{'Q', 'Q', 'S', 'P', 'R', 'O', 'O', 'F'};
 static const valtype SIGNAL_PREFIX{'Q', 'Q', 'S', 'I', 'G', 'N', 'A', 'L'};
 static const valtype MARKER_WHITELIST{'Q', 'Q', 'W', 'L'};
+static const valtype MARKER_WHITELIST_READY{'Q', 'Q', 'W', 'L', 'R', 'E', 'A', 'D', 'Y'};
 static const valtype MARKER_POOL{'Q', 'Q', 'P', 'O', 'O', 'L'};
 static const valtype MARKER_DIRECT_CLAIM{'Q', 'Q', 'D', 'C', 'L', 'A', 'I', 'M'};
 static const valtype MARKER_GOLD_RUSH_PAYOUT{'Q', 'Q', 'G', 'R', 'P', 'A', 'Y'};
@@ -181,6 +182,11 @@ CScript CanonicalLegacyStakeScript(const CScript& script)
 COutPoint WhitelistOutpoint(const CScript& script)
 {
     return COutPoint{TaggedHash("Quantum Quasar Legacy Whitelist", {script.begin(), script.end()}), 0};
+}
+
+COutPoint WhitelistReadyOutpoint()
+{
+    return COutPoint{TaggedHash("Quantum Quasar Legacy Whitelist Ready", {}), 0};
 }
 
 COutPoint PoolOutpoint()
@@ -1308,6 +1314,7 @@ bool DecodeShadowClaimMarker(const CTxOut& txout, ShadowClaimMarkerInfo& info)
 bool IsShadowMarkerScript(const CScript& script)
 {
     return ParseMarkerScript(script, MARKER_WHITELIST) ||
+           ParseMarkerScript(script, MARKER_WHITELIST_READY) ||
            ParseMarkerScript(script, MARKER_POOL) ||
            ParseMarkerScript(script, MARKER_DIRECT_CLAIM) ||
            ParseMarkerScript(script, MARKER_GOLD_RUSH_PAYOUT) ||
@@ -1572,6 +1579,19 @@ void ApplyLegacyWhitelistSnapshot(CCoinsViewCache& view, const CBlockIndex* pind
         coin.nTime = pindex->GetBlockTime();
         view.AddCoin(WhitelistOutpoint(script), std::move(coin), true);
     }
+    const uint256 snapshot_hash = pindex->GetBlockHash();
+    valtype ready_payload(4 + uint256::size() + 4);
+    WriteLE32(ready_payload.data(), static_cast<uint32_t>(pindex->nHeight));
+    std::copy(snapshot_hash.begin(), snapshot_hash.end(), ready_payload.begin() + 4);
+    WriteLE32(ready_payload.data() + 4 + uint256::size(), static_cast<uint32_t>(whitelist.size()));
+    Coin ready_coin;
+    ready_coin.out.nValue = 0;
+    ready_coin.out.scriptPubKey = MarkerScript(MARKER_WHITELIST_READY, ready_payload);
+    ready_coin.fCoinBase = true;
+    ready_coin.fCoinStake = false;
+    ready_coin.nHeight = pindex->nHeight;
+    ready_coin.nTime = pindex->GetBlockTime();
+    view.AddCoin(WhitelistReadyOutpoint(), std::move(ready_coin), true);
     if (dump_path) SaveLegacyWhitelist(*dump_path, whitelist);
     LogPrintf("Quantum Quasar: Applied deterministic legacy whitelist snapshot with %u entries\n", whitelist.size());
 }
@@ -1583,7 +1603,13 @@ void UndoLegacyWhitelistSnapshot(CCoinsViewCache& view, const CBlockIndex* pinde
     for (const COutPoint& outpoint : FindMarkerCoins(view, MARKER_WHITELIST, pindex)) {
         if (view.SpendCoin(outpoint)) ++removed;
     }
+    view.SpendCoin(WhitelistReadyOutpoint());
     LogPrintf("Quantum Quasar: Removed %u legacy whitelist snapshot markers during reorg\n", removed);
+}
+
+bool HasLegacyWhitelistSnapshot(const CCoinsViewCache& view)
+{
+    return view.HaveCoin(WhitelistReadyOutpoint());
 }
 
 bool IsWhitelisted(const CCoinsViewCache& view, const CScript& scriptPubKey)

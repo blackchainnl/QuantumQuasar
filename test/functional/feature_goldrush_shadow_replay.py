@@ -16,14 +16,16 @@ from test_framework.util import assert_equal
 
 
 COIN = 100_000_000
-FUTURE_V4_TIME = 2_000_000_000
-FUTURE_GOLD_RUSH_END_TIME = FUTURE_V4_TIME + 1_000
 GOLD_RUSH_BLOCKS = 20
 REWARD_BLOCKS_CONNECTED = 5
 BASE_ARGS = [
     "-shadowwhitelistheight=1",
     f"-shadowgoldrushblocks={GOLD_RUSH_BLOCKS}",
-    f"-qqgoldrushendtime={FUTURE_GOLD_RUSH_END_TIME}",
+]
+PRE_UPGRADE_ARGS = [
+    "-shadowwhitelistheight=100",
+    "-shadowgoldrushstartheight=101",
+    f"-shadowgoldrushblocks={GOLD_RUSH_BLOCKS}",
 ]
 
 
@@ -31,7 +33,7 @@ class GoldRushShadowReplayTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 1
         self.setup_clean_chain = True
-        self.extra_args = [BASE_ARGS + [f"-qqv4time={FUTURE_V4_TIME}"]]
+        self.extra_args = [PRE_UPGRADE_ARGS]
 
     def run_test(self):
         node = self.nodes[0]

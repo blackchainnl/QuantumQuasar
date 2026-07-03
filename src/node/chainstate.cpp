@@ -118,7 +118,7 @@ static ChainstateLoadResult CompleteChainstateInitialization(
             return {ChainstateLoadStatus::FAILURE, _("Unable to replay blocks. You will need to rebuild the database using -reindex-chainstate.")};
         }
         if (!chainstate->ReplayShadowBlocks()) {
-            return {ChainstateLoadStatus::FAILURE, _("Unable to replay Quantum Quasar Gold Rush state. You will need to rebuild the database using -reindex-chainstate.")};
+            return {ChainstateLoadStatus::FAILURE, _("Unable to replay Quantum Quasar Gold Rush state. Restart with -reindex to rebuild from local block files; pruned nodes that no longer have the whitelist snapshot block must redownload that history.")};
         }
 
         // The on-disk coinsdb is now in a good state, create the cache

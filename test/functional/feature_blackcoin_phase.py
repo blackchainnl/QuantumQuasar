@@ -25,8 +25,6 @@ LEGACY_BLOCK_WEIGHT = 4_000_000
 LEGACY_BLOCK_SIGOPS = 80_000
 V4_BLOCK_WEIGHT = 32_000_000
 V4_BLOCK_SIGOPS = 640_000
-QQSIGNAL_HEX = "51515349474e414c"
-
 
 class BlackcoinPhaseTest(BitcoinTestFramework):
     def add_options(self, parser):
@@ -36,9 +34,9 @@ class BlackcoinPhaseTest(BitcoinTestFramework):
         self.num_nodes = 3
         self.setup_clean_chain = True
         self.extra_args = [
-            [],
-            ["-qqgoldrushendtime=1"],
-            ["-qqgoldrushendtime=1", "-qqmigrationdeadlinetime=2"],
+            ["-shadowwhitelistheight=1", "-shadowgoldrushblocks=500"],
+            ["-shadowwhitelistheight=1", "-shadowgoldrushblocks=1", "-qqgoldrushendtime=1"],
+            ["-shadowwhitelistheight=1", "-shadowgoldrushblocks=1", "-qqgoldrushendtime=1", "-qqmigrationdeadlinetime=2"],
         ]
 
     def setup_network(self):
@@ -106,29 +104,19 @@ class BlackcoinPhaseTest(BitcoinTestFramework):
         assert signed["complete"]
         return signed["hex"]
 
-    def _assert_shadow_signal_rpc(self, node):
+    def _assert_goldrush_info_rpc(self, node):
         if not self.is_wallet_compiled():
             return
         wallet_name = "shadow_signal"
         node.createwallet(wallet_name=wallet_name)
         wallet = node.get_wallet_rpc(wallet_name)
         address = wallet.getnewaddress()
-        block_hashes = self.generatetoaddress(node, 101, address, sync_fun=self.no_op)
-        solve_hash = block_hashes[-1]
-        solve_height = node.getblock(solve_hash)["height"]
+        self.generatetoaddress(node, 101, address, sync_fun=self.no_op)
         node.setmocktime(node.getblockheader(node.getbestblockhash())["time"] + 1)
         info = wallet.getgoldrushinfo()
         assert_equal(info["active"], True)
         assert info["pow_target_bits"] >= 10
         assert any(entry["address"] == address for entry in info["wallet_scripts"])
-        quantum_address = wallet.getnewquantumaddress()["address"]
-        result = wallet.sendshadowsignal(address, solve_height, solve_hash, quantum_address)
-        assert_equal(result["quantum_address"], quantum_address)
-        assert result["txid"] in node.getrawmempool()
-        decoded = node.decoderawtransaction(result["hex"])
-        assert_equal(len(decoded["vin"]), 1)
-        assert any(QQSIGNAL_HEX in vout["scriptPubKey"]["hex"] for vout in decoded["vout"])
-        assert any(vout["value"] > 0 and vout["scriptPubKey"].get("address") == address for vout in decoded["vout"])
 
     def _assert_rgb_commitment_rpc(self, node):
         state_hash = "11" * 32
@@ -151,14 +139,17 @@ class BlackcoinPhaseTest(BitcoinTestFramework):
         gold_rush = self.nodes[0].getquantumquasarinfo()
         assert_equal(gold_rush["phase"], "gold_rush")
         assert_equal(gold_rush["base_network_stake_compatible"], True)
-        assert_equal(gold_rush["shadow_merge_mining_active"], True)
+        assert_equal(gold_rush["shadow_merge_mining_active"], False)
+        assert_equal(gold_rush["shadow_reward_height_active"], False)
+        assert_equal(gold_rush["shadow_reward_next_height"], 1)
         assert_equal(gold_rush["new_network_stake_only"], False)
         assert_equal(gold_rush["replay_protection_active"], False)
+        assert_equal(gold_rush["quantum_spend_enforcement_active"], False)
         assert_equal(self._default_signature_has_forkid(self.nodes[0]), False)
         gold_rush_template = self.nodes[0].getblocktemplate({"rules": ["segwit"]})
         assert_equal(gold_rush_template["weightlimit"], LEGACY_BLOCK_WEIGHT)
         assert_equal(gold_rush_template["sigoplimit"], LEGACY_BLOCK_SIGOPS)
-        self._assert_shadow_signal_rpc(self.nodes[0])
+        self._assert_goldrush_info_rpc(self.nodes[0])
         self._assert_rgb_commitment_rpc(self.nodes[0])
         assert_raises_rpc_error(
             -25,
@@ -173,6 +164,7 @@ class BlackcoinPhaseTest(BitcoinTestFramework):
         assert_equal(gold_rush_eutxo["reject-reason"], "eutxo-output-premature")
 
         self.log.info("Migration phase activates quantum spends while legacy staking remains accepted")
+        self.generatetoaddress(self.nodes[1], 3, self.nodes[1].get_deterministic_priv_key().address, sync_fun=self.no_op)
         migration = self.nodes[1].getquantumquasarinfo()
         assert_equal(migration["phase"], "migration")
         assert_equal(migration["base_network_stake_compatible"], True)

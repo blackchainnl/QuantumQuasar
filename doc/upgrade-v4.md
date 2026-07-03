@@ -20,12 +20,15 @@ The V4 transition is designed to run in phases.
 2. Gold Rush period, approximately six months.
    Upgraded wallets can participate in Gold Rush reward accounting while the
    base block flow remains legacy-compatible. Rewards are credited to quantum
-   addresses on the upgraded ledger.
+   addresses on the upgraded ledger, but ML-DSA quantum spends and larger
+   post-quantum script elements remain disabled until after the Gold Rush
+   reward-height window.
 
 3. Quantum migration period, approximately eighteen months after Gold Rush.
-   Users move spendable value to quantum migration addresses. Legacy chain
-   activity remains tracked during this period so users can still upgrade and
-   migrate later.
+   Users move spendable value to quantum migration addresses. This is the
+   hard-fork spend phase: legacy-only nodes do not validate ML-DSA quantum
+   spends or upgraded UTXO-set credits, so stake-majority coordination must be
+   complete before this phase begins.
 
 4. Final lockout.
    After the migration deadline, non-migrated legacy spends are disabled on the
@@ -69,6 +72,11 @@ The primary wallet flow is:
 3. Confirm the migrated output is wallet-backed and spendable.
 4. For Gold Rush rewards credited during the Gold Rush period, move those coins
    to a fresh quantum wallet during the migration period.
+
+Gold Rush reward outputs are intentionally held until quantum witness spends
+activate after the Gold Rush reward-height window. This keeps the Gold Rush
+bridge legacy-compatible while still forcing every reward holder to perform the
+required fresh quantum move before normal use.
 
 Wallets and UI surfaces should clearly separate legacy receiving addresses from
 quantum migration addresses so users do not confuse pre-migration legacy sends
@@ -157,4 +165,3 @@ Run core validation checks with:
 make -C src -j8 check
 python3 test/functional/test_runner.py
 ```
-

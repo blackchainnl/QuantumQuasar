@@ -1434,7 +1434,7 @@ static RPCHelpMan signrawtransactionwithquantumkey()
             const auto& consensus = chainman.GetConsensus();
             v4_active = consensus.IsProtocolV4(tip_mtp);
             quantum_spend_active = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
-            eutxo_spend_active = consensus.IsQuantumSpendEnforcementActive(tip_mtp);
+            eutxo_spend_active = quantum_spend_active;
             final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp);
             stake_tiers_active = consensus.IsStakeTiersActive(tip->nHeight + 1);
         }
@@ -1464,7 +1464,7 @@ static RPCHelpMan signrawtransactionwithquantumkey()
         if (quantum_inputs[i] || quantum_coldstake_inputs[i]) {
             spends_quantum_migration_output = true;
             if (!quantum_spend_active) {
-                input_errors[i] = "Quantum-protected spends are not active until Gold Rush rewards begin";
+                input_errors[i] = "Quantum-protected spends are not active until the post-Gold-Rush migration window";
                 continue;
             }
             mtx.vin[i].scriptSig.clear();
@@ -1592,12 +1592,12 @@ static RPCHelpMan signrawtransactionwithquantumkey()
         if (v4_active) {
             verify_flags |= SCRIPT_VERIFY_ISCOINSTAKE;
             verify_flags |= SCRIPT_VERIFY_STRICTENC;
-            verify_flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
         }
         if (final_lockout_active) {
             verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
         }
         if (quantum_spend_active) {
+            verify_flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
             verify_flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
             verify_flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
         }
@@ -2925,7 +2925,7 @@ static RPCHelpMan verifyeutxospend()
             const int64_t tip_mtp = tip->GetMedianTimePast();
             const auto& consensus = chainman.GetConsensus();
             v4_active = consensus.IsProtocolV4(tip_mtp);
-            enforced = consensus.IsQuantumSpendEnforcementActive(tip_mtp);
+            enforced = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
             final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp);
             new_network_stake_only = consensus.IsNewNetworkStakeOnly(tip_mtp);
             stake_tiers_active = consensus.IsStakeTiersActive(tip->nHeight + 1);
@@ -2949,12 +2949,12 @@ static RPCHelpMan verifyeutxospend()
     if (v4_active) {
         verify_flags |= SCRIPT_VERIFY_ISCOINSTAKE;
         verify_flags |= SCRIPT_VERIFY_STRICTENC;
-        verify_flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
     }
     if (new_network_stake_only) {
         verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
     }
     if (enforced) {
+        verify_flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
         verify_flags |= SCRIPT_VERIFY_EUTXO;
         verify_flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
         verify_flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;

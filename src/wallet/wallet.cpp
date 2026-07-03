@@ -2526,7 +2526,7 @@ bool CWallet::SignQuantumTransaction(CMutableTransaction& tx, const std::map<COu
 
     for (const unsigned int i : quantum_inputs) {
         if (!quantum_spend_active || !(verify_flags & SCRIPT_VERIFY_QUANTUM_ML_DSA)) {
-            input_errors[i] = _("Quantum migration spends are not active until Gold Rush rewards begin");
+            input_errors[i] = _("Quantum migration spends are not active until the post-Gold-Rush migration window");
             continue;
         }
 
@@ -2725,15 +2725,15 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
             if (consensus.IsProtocolV4(tip_mtp)) {
                 verify_flags |= SCRIPT_VERIFY_ISCOINSTAKE;
                 verify_flags |= SCRIPT_VERIFY_STRICTENC;
-                verify_flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
             }
             if (consensus.IsNewNetworkStakeOnly(tip_mtp)) {
                 active_sighash = (active_sighash == SIGHASH_DEFAULT ? SIGHASH_ALL : active_sighash) | SIGHASH_FORKID;
                 verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
             }
             quantum_spend_active = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
-            eutxo_spend_active = consensus.IsQuantumSpendEnforcementActive(tip_mtp);
+            eutxo_spend_active = quantum_spend_active;
             if (quantum_spend_active) {
+                verify_flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
                 verify_flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
                 verify_flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
             }
@@ -2792,13 +2792,12 @@ unsigned int CWallet::GetActiveScriptVerifyFlags() const
             if (consensus.IsProtocolV4(tip_mtp)) {
                 flags |= SCRIPT_VERIFY_ISCOINSTAKE;
                 flags |= SCRIPT_VERIFY_STRICTENC;
-                flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
             }
             if (consensus.IsNewNetworkStakeOnly(tip_mtp)) {
                 flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
             }
             quantum_spend_active = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
-            eutxo_spend_active = consensus.IsQuantumSpendEnforcementActive(tip_mtp);
+            eutxo_spend_active = quantum_spend_active;
             final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp);
             if (consensus.IsStakeTiersActive(tip->nHeight + 1)) {
                 flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
@@ -2806,6 +2805,7 @@ unsigned int CWallet::GetActiveScriptVerifyFlags() const
         }
     }
     if (quantum_spend_active) {
+        flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
         flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
         flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
     }
@@ -2841,14 +2841,13 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
             if (consensus.IsProtocolV4(tip_mtp)) {
                 psbt_verify_flags |= SCRIPT_VERIFY_ISCOINSTAKE;
                 psbt_verify_flags |= SCRIPT_VERIFY_STRICTENC;
-                psbt_verify_flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
             }
             if (consensus.IsNewNetworkStakeOnly(tip_mtp)) {
                 active_sighash = (active_sighash == SIGHASH_DEFAULT ? SIGHASH_ALL : active_sighash) | SIGHASH_FORKID;
                 psbt_verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
             }
             quantum_spend_active = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
-            eutxo_spend_active = consensus.IsQuantumSpendEnforcementActive(tip_mtp);
+            eutxo_spend_active = quantum_spend_active;
             final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp);
             if (consensus.IsStakeTiersActive(tip->nHeight + 1)) {
                 psbt_verify_flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
@@ -2856,6 +2855,7 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
         }
     }
     if (quantum_spend_active) {
+        psbt_verify_flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
         psbt_verify_flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
         psbt_verify_flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
     }
@@ -6959,9 +6959,7 @@ void CWallet::ThreadShadowPoWMiner(int worker_id)
             } else {
                 const Consensus::Params& consensus = Params().GetConsensus();
                 const int next_height = tip->nHeight + 1;
-                const bool active = consensus.IsGoldRushEpoch(tip->GetMedianTimePast()) &&
-                                    next_height >= SHADOW_REWARD_START_HEIGHT &&
-                                    next_height <= SHADOW_REWARD_END_HEIGHT;
+                const bool active = IsShadowGoldRushRewardActive(consensus, tip->GetMedianTimePast(), next_height);
                 if (!active) {
                     m_pow_hashrate = 0.0;
                     loop_sleep = std::chrono::seconds{2};

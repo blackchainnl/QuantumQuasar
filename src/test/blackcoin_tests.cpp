@@ -20,6 +20,7 @@
 #include <script/script.h>
 #include <script/script_error.h>
 #include <script/solver.h>
+#include <shadow.h>
 #include <sync.h>
 #include <test/util/setup_common.h>
 #include <uint256.h>
@@ -75,6 +76,11 @@ BOOST_AUTO_TEST_CASE(phase_schedule_boundaries)
     BOOST_CHECK(!consensus.IsQuantumSpendEnforcementActive(consensus.nGoldRushEndTime));
     BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nGoldRushEndTime + 1));
     BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nQuantumMigrationDeadlineTime + 1));
+    BOOST_CHECK(IsShadowGoldRushRewardActive(consensus, consensus.nProtocolV4Time - 1, SHADOW_REWARD_START_HEIGHT));
+    BOOST_CHECK(IsShadowGoldRushRewardActive(consensus, consensus.nGoldRushEndTime + 1, SHADOW_REWARD_END_HEIGHT));
+    BOOST_CHECK(!IsShadowGoldRushRewardActive(consensus, consensus.nQuantumMigrationDeadlineTime + 1, SHADOW_REWARD_START_HEIGHT));
+    BOOST_CHECK(!IsQuantumWitnessSpendActive(consensus, consensus.nGoldRushEndTime + 1, SHADOW_REWARD_END_HEIGHT));
+    BOOST_CHECK(IsQuantumWitnessSpendActive(consensus, consensus.nGoldRushEndTime + 1, SHADOW_REWARD_END_HEIGHT + 1));
 
     consensus.nQuantumMigrationDeadlineTime = 0;
     BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nGoldRushEndTime + 1) == Consensus::QuantumQuasarPhase::MIGRATION);

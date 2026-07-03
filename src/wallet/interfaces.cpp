@@ -2222,9 +2222,7 @@ public:
             if (tip) {
                 const Consensus::Params& consensus = Params().GetConsensus();
                 const int next_height = tip->nHeight + 1;
-                info.epoch_active = consensus.IsGoldRushEpoch(tip->GetMedianTimePast()) &&
-                                    next_height >= SHADOW_REWARD_START_HEIGHT &&
-                                    next_height <= SHADOW_REWARD_END_HEIGHT;
+                info.epoch_active = IsShadowGoldRushRewardActive(consensus, tip->GetMedianTimePast(), next_height);
                 info.blocks_remaining = info.epoch_active ? std::max(0, SHADOW_REWARD_END_HEIGHT - next_height + 1) : 0;
                 const ShadowGoldRushInfo shadow_info = GetShadowGoldRushInfo(active.CoinsTip(), tip);
                 info.accrued_jackpot = shadow_info.pow_amount;

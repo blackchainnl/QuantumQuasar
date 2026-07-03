@@ -10,6 +10,8 @@ release.
 
 - V4 activation opens the Gold Rush phase.
 - Gold Rush runs for the configured six-month epoch.
+- Quantum witness spends activate after the Gold Rush reward-height window,
+  during the migration phase.
 - The quantum migration window follows for the configured eighteen-month epoch.
 - After the migration deadline, final lockout rules disable remaining legacy
   spends according to the consensus schedule.
@@ -39,6 +41,13 @@ fee-paying, legacy-valid OP_RETURN transactions for Gold Rush participation;
 legacy nodes can still relay and mine the underlying transactions, while
 upgraded nodes interpret the `QQSIGNAL` and `QQSPROOF` payloads as shadow-ledger
 credits.
+
+Gold Rush reward credits are not spendable on the base legacy rules. Upgraded
+nodes keep those credits in the upgraded UTXO set and defer ML-DSA quantum
+spends, EUTXO spends, and larger post-quantum script elements until the
+post-Gold-Rush migration phase. This keeps the Gold Rush bridge
+legacy-compatible; the hard-fork spend phase begins when migration spends are
+enabled.
 
 Whitelisted recent PoS solvers signal with `QQSIGNAL` to link a qualifying
 legacy address to a quantum migration payout address. Argon2id PoW claim

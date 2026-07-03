@@ -318,8 +318,9 @@ bool CheckProofOfStake(CBlockIndex* pindexPrev, const CTransaction& tx, unsigned
 
     const Consensus::Params& consensus = Params().GetConsensus();
     const int64_t stake_mtp = pindexPrev->GetMedianTimePast();
+    const int stake_height = pindexPrev->nHeight + 1;
     const bool quantum_stake = IsQuantumMigrationScript(coinPrev.out.scriptPubKey) || IsQuantumColdStakeScript(coinPrev.out.scriptPubKey);
-    const bool quantum_stake_rules_active = consensus.IsQuantumStakeRulesActive(stake_mtp);
+    const bool quantum_stake_rules_active = IsQuantumWitnessSpendActive(consensus, stake_mtp, stake_height);
     std::vector<unsigned char> quantum_block_pubkey;
     const bool quantum_block_signature = tx.vout.size() >= 2 && ExtractQuantumBlockSigningPubKey(tx.vout[1].scriptPubKey, quantum_block_pubkey);
     if (consensus.IsNewNetworkStakeOnly(stake_mtp) && !quantum_stake) {
@@ -340,21 +341,21 @@ bool CheckProofOfStake(CBlockIndex* pindexPrev, const CTransaction& tx, unsigned
     if (consensus.IsProtocolV4(stake_mtp)) {
         script_verify_flags |= SCRIPT_VERIFY_ISCOINSTAKE;
         script_verify_flags |= SCRIPT_VERIFY_STRICTENC;
-        script_verify_flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
     }
     if (consensus.IsNewNetworkStakeOnly(stake_mtp)) {
         script_verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
     }
-    if (IsQuantumWitnessSpendActive(consensus, stake_mtp, pindexPrev->nHeight + 1)) {
+    if (IsQuantumWitnessSpendActive(consensus, stake_mtp, stake_height)) {
         script_verify_flags |= SCRIPT_VERIFY_P2SH;
         script_verify_flags |= SCRIPT_VERIFY_WITNESS;
+        script_verify_flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
         script_verify_flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
         script_verify_flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
     }
-    if (consensus.IsQuantumSpendEnforcementActive(stake_mtp)) {
+    if (IsQuantumWitnessSpendActive(consensus, stake_mtp, stake_height)) {
         script_verify_flags |= SCRIPT_VERIFY_EUTXO;
     }
-    if (consensus.IsStakeTiersActive(pindexPrev->nHeight + 1)) {
+    if (consensus.IsStakeTiersActive(stake_height)) {
         script_verify_flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
     }
     if (consensus.IsQuantumFinalLockout(stake_mtp)) {

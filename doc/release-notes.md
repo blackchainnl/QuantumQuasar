@@ -55,6 +55,9 @@ Notable changes
 - Gold Rush staking and PoW claim paths credit the upgraded shadow ledger to
   quantum addresses while preserving legacy-compatible base block rewards during
   the bridge period.
+- ML-DSA quantum spends, EUTXO spends, larger post-quantum script elements, and
+  expanded block limits are deferred until after the Gold Rush reward-height
+  window, during the migration/final-lockout phases.
 - Legacy data-directory migration remains in place so existing Blackcoin users
   can move to Blackcoin without manually relocating wallet or chain data.
 

@@ -110,6 +110,16 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
         )
         return next(u for u in self._get_quantum_utxos(wallet, address, min_conf=min_conf) if u["txid"] == txid and u["vout"] == vout)
 
+    def _advance_to_quantum_spends_active(self):
+        node = self.nodes[0]
+        self._set_mocktime(GOLD_RUSH_END_TIME + 16)
+        for _ in range(700):
+            self.generatetoaddress(node, 1, node.get_deterministic_priv_key().address, sync_fun=self.no_op)
+            self._bump_mocktime(16)
+            if node.getquantumquasarinfo()["quantum_spend_enforcement_active"]:
+                return
+        raise AssertionError("timed out waiting for quantum spend activation")
+
     def _assert_no_quantum_utxo(self, wallet, address):
         assert_equal(self._get_quantum_utxos(wallet, address), [])
 
@@ -268,16 +278,13 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
         lookback_utxo = next(u for u in lookback_utxos if u["txid"] != payout_utxo["txid"] or u["vout"] != payout_utxo["vout"])
         assert Decimal(str(lookback_utxo["amount"])) > 0
 
-        self.log.info("Rejecting immature QQSIGNAL payout spends during Gold Rush")
+        self.log.info("QQSIGNAL payout spends remain disabled during Gold Rush")
         next_quantum = wallet.getnewquantumaddress()["address"]
         _, premature_signed = self._build_quantum_spend(wallet, payout_utxo, next_quantum)
-        assert_equal(premature_signed["complete"], True)
-        premature_accept = node.testmempoolaccept([premature_signed["hex"]])[0]
-        assert_equal(premature_accept["allowed"], False)
-        assert_equal(premature_accept["reject-reason"], "bad-txns-premature-spend-of-coinbase")
+        assert_equal(premature_signed["complete"], False)
 
-        self.log.info("Maturing and spending the QQSIGNAL payout to a fresh quantum address")
-        self.generatetoaddress(node, COINBASE_MATURITY, node.get_deterministic_priv_key().address, sync_fun=self.no_op)
+        self.log.info("Advancing to migration, maturing, and spending the QQSIGNAL payout to a fresh quantum address")
+        self._advance_to_quantum_spends_active()
         self._sync_mocktime_to_tip()
         matured_utxo = self._wait_for_specific_quantum_utxo(
             wallet,

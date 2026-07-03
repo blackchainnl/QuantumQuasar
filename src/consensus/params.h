@@ -51,7 +51,7 @@ enum class QuantumQuasarPhase : uint8_t {
 
 static constexpr int64_t QUANTUM_QUASAR_GOLD_RUSH_SECONDS = 180 * 24 * 60 * 60;
 static constexpr int64_t QUANTUM_QUASAR_MIGRATION_SECONDS = 540 * 24 * 60 * 60;
-static constexpr int64_t QUANTUM_QUASAR_MAINNET_V4_TIME = 1800000000;
+static constexpr int64_t QUANTUM_QUASAR_MAINNET_V4_TIME = 1783835299; // Expected mainnet height 5,950,000 (2026-07-12 05:48:19 UTC)
 
 /**
  * Struct for each individual consensus rule change using BIP9.

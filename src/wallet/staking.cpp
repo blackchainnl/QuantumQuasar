@@ -219,9 +219,8 @@ bool FindAutoShadowSignalCandidate(CWallet& wallet, AutoShadowSignalCandidate& c
     const CBlockIndex* tip = wallet.chain().getTip();
     if (!tip) return false;
     const Consensus::Params& consensus = Params().GetConsensus();
-    if (!consensus.IsGoldRushEpoch(tip->GetMedianTimePast()) ||
-        tip->nHeight < SHADOW_REWARD_START_HEIGHT ||
-        tip->nHeight > SHADOW_REWARD_END_HEIGHT) {
+    const int next_height = tip->nHeight + 1;
+    if (!IsShadowGoldRushRewardActive(consensus, tip->GetMedianTimePast(), next_height)) {
         LogPrint(BCLog::COINSTAKE, "Gold Rush PoS auto-signal: inactive at height=%d\n", tip->nHeight);
         return false;
     }
@@ -1609,11 +1608,12 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
     CAmount nValueIn = 0;
     CAmount nAllowedBalance = nBalance - wallet.m_reserve_balance;
     const int64_t stake_mtp = pindexPrev->GetMedianTimePast();
+    const int stake_height = pindexPrev->nHeight + 1;
     const Consensus::Params& consensus = Params().GetConsensus();
-    const bool quantum_stake_rules_active = consensus.IsQuantumStakeRulesActive(stake_mtp);
+    const bool quantum_stake_rules_active = IsQuantumWitnessSpendActive(consensus, stake_mtp, stake_height);
     const bool new_network_stake_only = consensus.IsNewNetworkStakeOnly(stake_mtp);
     const bool final_quantum_lockout = consensus.IsQuantumFinalLockout(stake_mtp);
-    const bool stake_reward_split_active = consensus.IsStakeRewardSplitActive(pindexPrev->nHeight + 1);
+    const bool stake_reward_split_active = consensus.IsStakeRewardSplitActive(stake_height);
 
     // Select coins with suitable depth
     if (!SelectCoinsForStaking(wallet, nAllowedBalance, setCoins, nValueIn))
@@ -1942,8 +1942,7 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
         txNew.vout.push_back(CTxOut(nOperatorCredit, operatorRewardScript));
     }
 
-    if (pindexPrev->nHeight + 1 >= SHADOW_REWARD_START_HEIGHT &&
-        consensus.IsProtocolV4(stake_mtp) &&
+    if (IsShadowGoldRushRewardActive(consensus, stake_mtp, stake_height) &&
         !final_quantum_lockout) {
         txNew.vout.push_back(CTxOut(0, BuildQuantumQuasarBlockNoticeScript()));
     }

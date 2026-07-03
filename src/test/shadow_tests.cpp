@@ -370,9 +370,11 @@ BOOST_AUTO_TEST_CASE(legacy_whitelist_snapshot_undo_removes_markers)
     CBlockIndex whitelist_index;
     InitIndex(whitelist_index, SHADOW_WHITELIST_HEIGHT, nullptr, whitelist_hash);
     ApplyLegacyWhitelistSnapshot(view, &whitelist_index);
+    BOOST_CHECK(HasLegacyWhitelistSnapshot(view));
     BOOST_CHECK(IsWhitelisted(view, target));
 
     UndoLegacyWhitelistSnapshot(view, &whitelist_index);
+    BOOST_CHECK(!HasLegacyWhitelistSnapshot(view));
     BOOST_CHECK(!IsWhitelisted(view, target));
 }
 

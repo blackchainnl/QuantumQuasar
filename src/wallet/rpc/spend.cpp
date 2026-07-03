@@ -1999,7 +1999,7 @@ RPCHelpMan migrategoldrushrewards()
 {
     return RPCHelpMan{"migrategoldrushrewards",
         "\nMove wallet-owned Gold Rush reward outputs to a fresh Blackcoin ML-DSA\n"
-        "migration address once quantum reward spends are active, including during Gold Rush, and before the final lockout deadline.\n",
+        "migration address once quantum reward spends are active in the post-Gold-Rush migration window, and before the final lockout deadline.\n",
         {
             {"options", RPCArg::Type::OBJ_NAMED_PARAMS, RPCArg::Optional::OMITTED, "",
                 {

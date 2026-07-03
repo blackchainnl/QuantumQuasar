@@ -117,8 +117,15 @@ class GoldRushValuePathTest(BitcoinTestFramework):
             self.generatetoaddress(node, 1, node.get_deterministic_priv_key().address, sync_fun=self.no_op)
             self._bump_mocktime(16)
             generated += 1
-            assert generated < COINBASE_MATURITY, "migration phase should activate before the synthetic payout matures"
-        assert_equal(node.getquantumquasarinfo()["phase"], "migration")
+            assert generated < 1000, "migration phase should activate after the configured Gold Rush window"
+        while not node.getquantumquasarinfo()["quantum_spend_enforcement_active"]:
+            self.generatetoaddress(node, 1, node.get_deterministic_priv_key().address, sync_fun=self.no_op)
+            self._bump_mocktime(16)
+            generated += 1
+            assert generated < 1000, "quantum spends should activate after the configured Gold Rush window"
+        info = node.getquantumquasarinfo()
+        assert_equal(info["phase"], "migration")
+        assert_equal(info["quantum_spend_enforcement_active"], True)
 
     def _build_quantum_spend(self, wallet, utxo, destination):
         node = self.nodes[0]
@@ -213,13 +220,10 @@ class GoldRushValuePathTest(BitcoinTestFramework):
         self.wait_until(lambda: node.getbestblockhash() == claim_block_hash)
         payout_utxo = self._wait_for_quantum_utxo(wallet, payout_address)
 
-        self.log.info("Immature Gold Rush payout spends are rejected during Gold Rush")
+        self.log.info("Gold Rush payout spends are disabled during Gold Rush")
         next_quantum = wallet.getnewquantumaddress()["address"]
         _, premature_signed = self._build_quantum_spend(wallet, payout_utxo, next_quantum)
-        assert_equal(premature_signed["complete"], True)
-        premature_accept = node.testmempoolaccept([premature_signed["hex"]])[0]
-        assert_equal(premature_accept["allowed"], False)
-        assert_equal(premature_accept["reject-reason"], "bad-txns-premature-spend-of-coinbase")
+        assert_equal(premature_signed["complete"], False)
 
         self.log.info("Maturing the synthetic coin during Gold Rush")
         self.generatetoaddress(node, COINBASE_MATURITY, node.get_deterministic_priv_key().address, sync_fun=self.no_op)
@@ -246,7 +250,8 @@ class GoldRushValuePathTest(BitcoinTestFramework):
         matured_utxo = self._wait_for_quantum_utxo(wallet, payout_address)
         assert matured_utxo["confirmations"] > COINBASE_MATURITY
 
-        self.log.info("Spending the matured payout to a new quantum address")
+        self.log.info("Advancing to migration before spending the matured payout to a new quantum address")
+        self._advance_to_migration_window()
         raw, signed = self._build_quantum_spend(wallet, matured_utxo, next_quantum)
         assert_equal(signed["complete"], True)
         accepted = node.testmempoolaccept([signed["hex"]])[0]

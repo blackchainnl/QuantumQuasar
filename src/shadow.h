@@ -76,8 +76,13 @@ void SetShadowTestSchedule(int whitelist_height, int reward_start_height, int go
 /** Legacy regtest helper: shift the reward window to whitelist_height + 1. */
 void SetShadowRegtestSchedule(int whitelist_height, int gold_rush_blocks);
 
-/** Quantum witness spends activate when Gold Rush rewards can first materialize,
- * then stay active through the migration and final lockout phases. */
+/** Gold Rush reward accounting is height-gated so the legacy-compatible
+ * distribution window cannot be skipped by an MTP schedule mismatch. */
+bool IsShadowGoldRushRewardHeight(int nHeight);
+bool IsShadowGoldRushRewardActive(const Consensus::Params& consensus, int64_t nMedianTimePast, int nHeight);
+
+/** Quantum witness spends stay disabled through the legacy-compatible Gold Rush
+ * and activate only after the reward-height window and in the migration/final-lockout phases. */
 bool IsQuantumWitnessSpendActive(const Consensus::Params& consensus, int64_t nMedianTimePast, int nSpendHeight);
 static constexpr unsigned int SHADOW_EQUAL_FOOTING_TIME = 1713938400;
 static constexpr CAmount SHADOW_WHITELIST_MIN_BALANCE = 10000 * COIN;
@@ -102,6 +107,7 @@ bool LoadLegacyWhitelist(const fs::path& path, std::set<CScript>& whitelist);
 /** Apply/remove deterministic chainstate markers for the legacy whitelist snapshot. */
 void ApplyLegacyWhitelistSnapshot(CCoinsViewCache& view, const CBlockIndex* pindex, const fs::path* dump_path = nullptr);
 void UndoLegacyWhitelistSnapshot(CCoinsViewCache& view, const CBlockIndex* pindex);
+bool HasLegacyWhitelistSnapshot(const CCoinsViewCache& view);
 
 /** Check if a script is in the deterministic height-5,920,000 whitelist. */
 bool IsWhitelisted(const CCoinsViewCache& view, const CScript& scriptPubKey);

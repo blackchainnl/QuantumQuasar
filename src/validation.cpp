@@ -821,9 +821,7 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     const Consensus::Params& consensus = m_active_chainstate.m_chainman.GetConsensus();
     const int next_height = tip ? tip->nHeight + 1 : 0;
     const bool gold_rush_active = tip &&
-                                  consensus.IsGoldRushEpoch(tip->GetMedianTimePast()) &&
-                                  next_height >= SHADOW_REWARD_START_HEIGHT &&
-                                  next_height <= SHADOW_REWARD_END_HEIGHT;
+                                  IsShadowGoldRushRewardActive(consensus, tip->GetMedianTimePast(), next_height);
     if (!CheckShadowPowClaimForMempool(tx, tip, m_view, gold_rush_active, shadow_reject_reason)) {
         return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, shadow_reject_reason);
     }
@@ -1960,11 +1958,11 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
         const bool is_quantum_spend = is_quantum_migration_spend || is_quantum_coldstake_spend;
         const bool is_eutxo_spend = IsEUTXOScript(txdata.m_spent_outputs[i].scriptPubKey);
         if (is_quantum_migration_spend && !(flags & SCRIPT_VERIFY_QUANTUM_ML_DSA)) {
-            return state.Invalid(TxValidationResult::TX_CONSENSUS, "blackcoin-migration-spend-premature", "Quantum migration spends are not active until Gold Rush rewards begin");
+            return state.Invalid(TxValidationResult::TX_CONSENSUS, "blackcoin-migration-spend-premature", "Quantum migration spends are not active until the post-Gold-Rush migration window");
         }
         if (is_quantum_coldstake_spend &&
             (!(flags & SCRIPT_VERIFY_QUANTUM_ML_DSA) || !(flags & SCRIPT_VERIFY_QUANTUM_COLDSTAKE))) {
-            return state.Invalid(TxValidationResult::TX_CONSENSUS, "blackcoin-coldstake-spend-premature", "Quantum cold-stake spends are not active until Gold Rush rewards begin");
+            return state.Invalid(TxValidationResult::TX_CONSENSUS, "blackcoin-coldstake-spend-premature", "Quantum cold-stake spends are not active until the post-Gold-Rush migration window");
         }
         spends_quantum_migration_output = spends_quantum_migration_output || is_quantum_spend;
         if (is_eutxo_spend && !(flags & SCRIPT_VERIFY_EUTXO)) {
@@ -2846,7 +2844,7 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
     // current solver marker. Do this before transaction input restoration moves
     // prevout coins out of blockUndo.
     const int64_t shadow_mtp = pindex->pprev ? pindex->pprev->GetMedianTimePast() : pindex->GetBlockTime();
-    const bool shadow_gold_rush_active = m_chainman.GetConsensus().IsGoldRushEpoch(shadow_mtp);
+    const bool shadow_gold_rush_active = IsShadowGoldRushRewardActive(m_chainman.GetConsensus(), shadow_mtp, pindex->nHeight);
     if (!UndoShadowBlock(view, block, pindex, &blockUndo, shadow_gold_rush_active)) {
         error("DisconnectBlock(): failed to undo Quantum Quasar shadow state at height %d", pindex->nHeight);
         return DISCONNECT_FAILED;
@@ -2988,16 +2986,15 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const Ch
 
     const int64_t v4_mtp = block_index.pprev ? block_index.pprev->GetMedianTimePast() : block_index.GetBlockTime();
 
-    // Gold Rush and migration coinstakes remain legacy-signature compatible so
-    // upgraded stakers can keep legacy wallets securing the chain until final
-    // lockout. Basic quantum witness spends begin when Gold Rush rewards can
-    // materialize; EUTXO spends and larger post-quantum limits remain reserved
-    // for the migration/final-lockout phases. FORKID replay protection is
-    // reserved for the final quantum-only phase.
+    // Gold Rush coinstakes remain legacy-signature compatible so upgraded
+    // stakers can keep legacy wallets securing the chain while reward credits
+    // accrue in the upgraded shadow ledger. Quantum witness spends, EUTXO
+    // spends, and larger post-quantum script elements are reserved for the
+    // migration/final-lockout phases. FORKID replay protection is reserved for
+    // the final quantum-only phase.
     if (consensusparams.IsProtocolV4(v4_mtp)) {
         flags |= SCRIPT_VERIFY_ISCOINSTAKE;
         flags |= SCRIPT_VERIFY_STRICTENC;
-        flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
     }
 
     if (consensusparams.IsNewNetworkStakeOnly(v4_mtp)) {
@@ -3006,11 +3003,12 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const Ch
 
     if (IsQuantumWitnessSpendActive(consensusparams, v4_mtp, block_index.nHeight)) {
         flags |= SCRIPT_VERIFY_WITNESS;
+        flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
         flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
         flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
     }
 
-    if (consensusparams.IsQuantumSpendEnforcementActive(v4_mtp)) {
+    if (IsQuantumWitnessSpendActive(consensusparams, v4_mtp, block_index.nHeight)) {
         flags |= SCRIPT_VERIFY_EUTXO;
     }
 
@@ -3032,7 +3030,6 @@ static unsigned int ApplyNextBlockV4ScriptFlags(unsigned int flags, const CBlock
     if (consensusparams.IsProtocolV4(next_block_mtp)) {
         flags |= SCRIPT_VERIFY_ISCOINSTAKE;
         flags |= SCRIPT_VERIFY_STRICTENC;
-        flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
     } else {
         flags &= ~SCRIPT_VERIFY_ISCOINSTAKE;
         flags &= ~SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
@@ -3044,13 +3041,15 @@ static unsigned int ApplyNextBlockV4ScriptFlags(unsigned int flags, const CBlock
     }
     if (IsQuantumWitnessSpendActive(consensusparams, next_block_mtp, next_height)) {
         flags |= SCRIPT_VERIFY_WITNESS;
+        flags |= SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
         flags |= SCRIPT_VERIFY_QUANTUM_ML_DSA;
         flags |= SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
     } else {
+        flags &= ~SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
         flags &= ~SCRIPT_VERIFY_QUANTUM_ML_DSA;
         flags &= ~SCRIPT_VERIFY_QUANTUM_COLDSTAKE;
     }
-    if (consensusparams.IsQuantumSpendEnforcementActive(next_block_mtp)) {
+    if (IsQuantumWitnessSpendActive(consensusparams, next_block_mtp, next_height)) {
         flags |= SCRIPT_VERIFY_EUTXO;
     } else {
         flags &= ~SCRIPT_VERIFY_EUTXO;
@@ -3220,7 +3219,7 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     unsigned int flags{GetBlockScriptFlags(*pindex, m_chainman)};
     const int64_t block_mtp = pindex->pprev ? pindex->pprev->GetMedianTimePast() : pindex->GetBlockTime();
     const bool is_v4{params.GetConsensus().IsProtocolV4(block_mtp)};
-    const bool expanded_block_limits{params.GetConsensus().IsQuantumSpendEnforcementActive(block_mtp)};
+    const bool expanded_block_limits{IsQuantumWitnessSpendActive(params.GetConsensus(), block_mtp, pindex->nHeight)};
     const unsigned int maxBlockWeight{expanded_block_limits ? V4_MAX_BLOCK_WEIGHT : MAX_BLOCK_WEIGHT};
     const unsigned int maxBlockSerializedSize{expanded_block_limits ? V4_MAX_BLOCK_SERIALIZED_SIZE : MAX_BLOCK_SERIALIZED_SIZE};
     if (GetBlockWeight(block) > maxBlockWeight || ::GetSerializeSize(TX_WITH_WITNESS(block)) > maxBlockSerializedSize) {
@@ -3355,7 +3354,7 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     // notes are legacy-valid fee-paying transactions; upgraded nodes interpret them into
     // a parallel shadow ledger, but they do not enlarge the base coinstake subsidy.
     const int64_t shadow_mtp = pindex->pprev ? pindex->pprev->GetMedianTimePast() : pindex->GetBlockTime();
-    const bool shadow_gold_rush_active = params.GetConsensus().IsGoldRushEpoch(shadow_mtp);
+    const bool shadow_gold_rush_active = IsShadowGoldRushRewardActive(params.GetConsensus(), shadow_mtp, pindex->nHeight);
     if (!ApplyShadowBlock(view, block, pindex, &blockundo, shadow_gold_rush_active)) {
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-shadow-state");
     }
@@ -5055,12 +5054,13 @@ static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& stat
     // the block hash, so we couldn't mark the block as permanently
     // failed).
     const int64_t block_mtp = pindexPrev ? pindexPrev->GetMedianTimePast() : block.GetBlockTime();
+    const int block_height = pindexPrev ? pindexPrev->nHeight + 1 : 0;
     std::vector<unsigned char> quantum_pubkey;
-    if (ExtractQuantumBlockSigningPubKey(block, quantum_pubkey) && !consensusParams.IsQuantumStakeRulesActive(block_mtp)) {
+    if (ExtractQuantumBlockSigningPubKey(block, quantum_pubkey) && !IsQuantumWitnessSpendActive(consensusParams, block_mtp, block_height)) {
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "blackcoin-blocksig-premature", strprintf("%s : quantum block signatures are not active", __func__));
     }
 
-    const bool expanded_block_limits = consensusParams.IsQuantumSpendEnforcementActive(block_mtp);
+    const bool expanded_block_limits = IsQuantumWitnessSpendActive(consensusParams, block_mtp, block_height);
     const unsigned int maxBlockWeight = expanded_block_limits ? V4_MAX_BLOCK_WEIGHT : MAX_BLOCK_WEIGHT;
     const unsigned int maxBlockSerializedSize = expanded_block_limits ? V4_MAX_BLOCK_SERIALIZED_SIZE : MAX_BLOCK_SERIALIZED_SIZE;
     if (GetBlockWeight(block) > maxBlockWeight || ::GetSerializeSize(TX_WITH_WITNESS(block)) > maxBlockSerializedSize) {
@@ -5739,7 +5739,7 @@ bool Chainstate::RollforwardBlock(const CBlockIndex* pindex, CCoinsViewCache& in
         ApplyLegacyWhitelistSnapshot(inputs, pindex);
     }
     const int64_t shadow_mtp = pindex->pprev ? pindex->pprev->GetMedianTimePast() : pindex->GetBlockTime();
-    const bool shadow_gold_rush_active = m_chainman.GetConsensus().IsGoldRushEpoch(shadow_mtp);
+    const bool shadow_gold_rush_active = IsShadowGoldRushRewardActive(m_chainman.GetConsensus(), shadow_mtp, pindex->nHeight);
     if (!ApplyShadowBlock(inputs, block, pindex, &shadow_undo, shadow_gold_rush_active)) {
         return error("RollforwardBlock(): failed to apply Quantum Quasar shadow state at height %d", pindex->nHeight);
     }
@@ -5835,7 +5835,7 @@ static std::optional<CAmount> GetExpectedShadowObligation(const Consensus::Param
         const CBlockIndex* pindex = pindexTip->GetAncestor(height);
         if (!pindex) return std::nullopt;
         const int64_t mtp = pindex->pprev ? pindex->pprev->GetMedianTimePast() : pindex->GetBlockTime();
-        if (!consensus.IsGoldRushEpoch(mtp)) continue;
+        if (!IsShadowGoldRushRewardActive(consensus, mtp, height)) continue;
         const CAmount reward = ShadowBaseReward(height);
         auto next_total = AddMoney(total, reward);
         if (!next_total) return std::nullopt;
@@ -5870,14 +5870,15 @@ bool Chainstate::ReplayShadowBlocks()
     const CBlockIndex* pindexTip = &tip_it->second;
 
     CCoinsViewCache cache(&db);
+    const bool whitelist_missing = pindexTip->nHeight >= SHADOW_WHITELIST_HEIGHT &&
+                                   !HasLegacyWhitelistSnapshot(cache);
     int first_active_height{0};
     const auto expected = GetExpectedShadowObligation(m_chainman.GetConsensus(), pindexTip, &first_active_height);
     if (!expected) return error("ReplayShadowBlocks(): failed to compute expected Quantum Quasar shadow obligation");
-    if (*expected == 0 || first_active_height == 0) return true;
 
     const auto current = GetCurrentShadowObligation(cache, pindexTip);
     if (!current) return error("ReplayShadowBlocks(): failed to read current Quantum Quasar shadow obligation");
-    if (*current == *expected) return true;
+    if (!whitelist_missing && *current == *expected) return true;
 
     const int fork_height = std::max(0, SHADOW_WHITELIST_HEIGHT - 1);
     const CBlockIndex* pindexFork = pindexTip->GetAncestor(fork_height);
@@ -5886,8 +5887,8 @@ bool Chainstate::ReplayShadowBlocks()
     }
 
     m_chainman.GetNotifications().progress(_("Replaying Quantum Quasar Gold Rush state…"), 0, false);
-    LogPrintf("Quantum Quasar: shadow ledger obligation mismatch at height %d (current=%s expected=%s); replaying blocks %d..%d from local block files\n",
-              pindexTip->nHeight, FormatMoney(*current), FormatMoney(*expected), fork_height + 1, pindexTip->nHeight);
+    LogPrintf("Quantum Quasar: shadow replay required at height %d (whitelist_missing=%d current=%s expected=%s); replaying blocks %d..%d from local block files\n",
+              pindexTip->nHeight, whitelist_missing, FormatMoney(*current), FormatMoney(*expected), fork_height + 1, pindexTip->nHeight);
 
     const CBlockIndex* pindexOld = pindexTip;
     while (pindexOld != pindexFork) {
@@ -5915,6 +5916,9 @@ bool Chainstate::ReplayShadowBlocks()
     const auto repaired = GetCurrentShadowObligation(cache, pindexTip);
     if (!repaired || *repaired != *expected) {
         return error("ReplayShadowBlocks(): Quantum Quasar shadow obligation still mismatched after replay");
+    }
+    if (pindexTip->nHeight >= SHADOW_WHITELIST_HEIGHT && !HasLegacyWhitelistSnapshot(cache)) {
+        return error("ReplayShadowBlocks(): Quantum Quasar whitelist snapshot marker still missing after replay");
     }
     cache.SetBestBlock(pindexTip->GetBlockHash());
     if (!cache.Flush()) return error("ReplayShadowBlocks(): failed to flush replayed Quantum Quasar shadow state");
