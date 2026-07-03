@@ -189,7 +189,11 @@ class WalletSendTest(BitcoinTestFramework):
             assert_equal(from_balance_before, from_balance)
 
         if to_wallet:
-            self.sync_mempools()
+            # This inherited wallet test can run under heavy parallel load in
+            # the full standard suite. The send path is deterministic, but
+            # mempool relay can exceed the default 60s sync window on loaded
+            # hosts; keep the assertion while giving relay more time.
+            self.sync_mempools(timeout=120)
             if add_to_wallet:
                 if not subtract_fee_from_outputs:
                     assert_equal(to_wallet.getbalances()["mine"]["untrusted_pending"], to_untrusted_pending_before + Decimal(amount if amount else 0))
