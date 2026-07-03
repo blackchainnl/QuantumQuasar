@@ -179,6 +179,8 @@ bool HasPendingShadowSignal(CWallet& wallet) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_
 
 bool EnsureShadowSignalPayout(CWallet& wallet, CScript& payout_script, std::string& payout_address, bilingual_str& error)
 {
+    std::optional<CTxDestination> reused_dest;
+    bool relabel_reused_dest{false};
     {
         LOCK(wallet.cs_wallet);
         for (const auto& [dest, entry] : wallet.m_address_book) {
@@ -188,8 +190,17 @@ bool EnsureShadowSignalPayout(CWallet& wallet, CScript& payout_script, std::stri
             if (wallet.IsMine(dest) == ISMINE_NO) continue;
             payout_address = EncodeDestination(dest);
             payout_script = GetScriptForDestination(dest);
-            return true;
+            reused_dest = dest;
+            relabel_reused_dest = label != SHADOW_SIGNAL_PAYOUT_LABEL;
+            break;
         }
+    }
+    if (reused_dest) {
+        if (relabel_reused_dest && !wallet.SetAddressBook(*reused_dest, SHADOW_SIGNAL_PAYOUT_LABEL, AddressPurpose::RECEIVE)) {
+            error = _("Failed to update Gold Rush PoS payout address label.");
+            return false;
+        }
+        return true;
     }
 
     auto dest = wallet.GetNewQuantumDestination(SHADOW_SIGNAL_PAYOUT_LABEL);

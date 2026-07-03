@@ -219,6 +219,7 @@ class GoldRushPosSignalTest(BitcoinTestFramework):
             if tx.get("txid") == signal_txid and tx.get("comment") == "PoS Claim"
         ]
         assert_equal(len(wallet_signals), 1)
+        assert_equal(wallet.getaddressinfo(payout_address)["labels"], ["PoS - Quantum Stake Address"])
         self._assert_no_onchain_block_output_to(payout_block_hash, payout_address)
         self._assert_no_onchain_block_output_to(payout_block_hash, pow_payout_address)
 

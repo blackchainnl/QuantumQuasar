@@ -1034,6 +1034,8 @@ RPCHelpMan getaddressinfo()
                         {RPCResult::Type::NUM, "witness_version", /*optional=*/true, "The version number of the witness program."},
                         {RPCResult::Type::STR_HEX, "witness_program", /*optional=*/true, "The hex value of the witness program."},
                         {RPCResult::Type::BOOL, "isquantummigration", /*optional=*/true, "Whether this is a Blackcoin migration address."},
+                        {RPCResult::Type::BOOL, "fundable_now", /*optional=*/true, "Whether ordinary wallet/RPC policy currently permits funding this address type."},
+                        {RPCResult::Type::STR, "migration_note", /*optional=*/true, "Quantum migration status note."},
                         {RPCResult::Type::BOOL, "hasquantumkey", /*optional=*/true, "Whether this wallet contains the ML-DSA key for this migration address."},
                         {RPCResult::Type::STR_HEX, "quantum_public_key", /*optional=*/true, "The wallet ML-DSA-44 public key for this migration address."},
                         {RPCResult::Type::BOOL, "quantum_key_encrypted", /*optional=*/true, "Whether the wallet stores this ML-DSA key encrypted."},
@@ -1137,6 +1139,9 @@ RPCHelpMan getaddressinfo()
 
     UniValue detail = DescribeWalletAddress(*pwallet, dest);
     ret.pushKVs(detail);
+    if (!ret.exists("isscript")) {
+        ret.pushKV("isscript", false);
+    }
 
     if (IsQuantumMigrationDestination(dest)) {
         ret.pushKV("hasquantumkey", quantum_info.has_value());
