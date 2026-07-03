@@ -54,7 +54,7 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTabWidget>
-#include <QTextBrowser>
+#include <QTextEdit>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QVariant>
@@ -3068,9 +3068,9 @@ void StakingMiningPage::showHelpDialog(const QString& title, const QString& html
     dialog.setMinimumSize(620, 440);
 
     auto* layout = new QVBoxLayout(&dialog);
-    auto* browser = new QTextBrowser(&dialog);
-    browser->setOpenExternalLinks(false);
+    auto* browser = new QTextEdit(&dialog);
     browser->setReadOnly(true);
+    browser->setTextInteractionFlags(Qt::TextBrowserInteraction);
     browser->setHtml(tr(
         "<html><body style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; line-height: 1.45;\">"
         "<style>"
