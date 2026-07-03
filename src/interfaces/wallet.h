@@ -383,6 +383,9 @@ public:
     //! Create and broadcast a demurrage liveness attestation for a wallet-backed quantum address.
     virtual util::Result<WalletQuantumActionTx> sendDemurrageAttestation(const std::string& address) = 0;
 
+    //! Sweep all currently decaying direct quantum outputs to a fresh wallet-backed quantum address.
+    virtual util::Result<WalletQuantumActionTx> sweepDemurrageDecay() = 0;
+
     //! Return whether is a legacy wallet
     virtual bool isLegacy() = 0;
 

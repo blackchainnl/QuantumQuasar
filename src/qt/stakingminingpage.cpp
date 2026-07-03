@@ -245,6 +245,7 @@ StakingMiningPage::StakingMiningPage(const PlatformStyle* platformStyle, QWidget
     connect(m_migration_legacy_sweep, &QPushButton::clicked, this, &StakingMiningPage::onMigrateLegacyToQuantum);
     connect(m_migration_goldrush_sweep, &QPushButton::clicked, this, &StakingMiningPage::onMigrateGoldRushRewards);
     connect(m_demurrage_attest, &QPushButton::clicked, this, &StakingMiningPage::onSendDemurrageAttestation);
+    connect(m_demurrage_sweep, &QPushButton::clicked, this, &StakingMiningPage::onSweepDemurrageDecay);
     connect(m_rgb_copy_contract, &QPushButton::clicked, this, &StakingMiningPage::onCopySelectedRGBContract);
     connect(m_rgb_assets, &QTableWidget::itemSelectionChanged, this, [this]() { refreshControlsEnabled(); });
     connect(m_selfstake_selector, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
@@ -1015,6 +1016,9 @@ void StakingMiningPage::setupUi()
     m_demurrage_attest = new QPushButton(tr("Attest selected quantum address"), migrationBox);
     m_demurrage_attest->setObjectName(QStringLiteral("demurrageAttest"));
     m_demurrage_attest->setToolTip(tr("Create a fee-paying liveness attestation for the selected wallet-backed quantum address."));
+    m_demurrage_sweep = new QPushButton(tr("Sweep decaying outputs"), migrationBox);
+    m_demurrage_sweep->setObjectName(QStringLiteral("demurrageSweep"));
+    m_demurrage_sweep->setToolTip(tr("Move currently decaying wallet-owned quantum outputs to a fresh quantum address, realizing the demurrage burn."));
 
     m_rgb_assets = new QTableWidget(migrationBox);
     m_rgb_assets->setObjectName(QStringLiteral("rgbAssets"));
@@ -1121,8 +1125,9 @@ void StakingMiningPage::setupUi()
     mgrid->addWidget(new QLabel(tr("Exposure:"), migrationBox), r, 0);
     mgrid->addWidget(m_demurrage_amounts, r++, 1, 1, 3);
     mgrid->addWidget(new QLabel(tr("Guards:"), migrationBox), r, 0);
-    mgrid->addWidget(m_demurrage_guards, r, 1, 1, 2);
-    mgrid->addWidget(m_demurrage_attest, r++, 3);
+    mgrid->addWidget(m_demurrage_guards, r++, 1, 1, 3);
+    mgrid->addWidget(m_demurrage_attest, r, 1);
+    mgrid->addWidget(m_demurrage_sweep, r++, 2, 1, 2);
     mgrid->addWidget(new QLabel(tr("RGB assets:"), migrationBox), r, 0);
     mgrid->addWidget(m_rgb_copy_contract, r++, 3);
     mgrid->addWidget(m_rgb_assets, r++, 0, 1, 4);
@@ -1531,6 +1536,41 @@ void StakingMiningPage::onSendDemurrageAttestation()
     m_demurrage_status->setText(tr("Demurrage attestation broadcast: %1. Fee: %2.")
         .arg(QString::fromStdString(result->txid))
         .arg(formatBLK(result->fee)));
+    m_force_full_refresh = true;
+    updateStatus();
+}
+
+void StakingMiningPage::onSweepDemurrageDecay()
+{
+    if (!m_wallet_model) return;
+    const int rc = QMessageBox::question(
+        this,
+        tr("Sweep decaying quantum outputs"),
+        tr("This will create a fresh wallet-backed quantum address, spend all currently decaying direct quantum outputs, realize the demurrage burn, and move the remaining effective value minus fees to the fresh address.\n\nContinue?"));
+    if (rc != QMessageBox::Yes) return;
+
+    WalletModel::UnlockContext ctx(m_wallet_model->requestUnlock());
+    if (!ctx.isValid()) return;
+
+    auto result = m_wallet_model->wallet().sweepDemurrageDecay();
+    if (!result) {
+        const QString msg = QString::fromStdString(util::ErrorString(result).original);
+        m_demurrage_status->setText(msg);
+        QMessageBox::warning(this, tr("Sweep decaying outputs"), msg);
+        return;
+    }
+
+    m_quantum_address->setText(QString::fromStdString(result->address));
+    QString status = tr("Demurrage sweep broadcast: %1. Fresh quantum address: %2. Swept %3 from %4 output(s); fee %5.")
+        .arg(QString::fromStdString(result->txid))
+        .arg(QString::fromStdString(result->address))
+        .arg(formatBLK(result->amount))
+        .arg(result->selected_inputs)
+        .arg(formatBLK(result->fee));
+    if (!result->warning.empty()) {
+        status += QStringLiteral("\n") + QString::fromStdString(result->warning);
+    }
+    m_demurrage_status->setText(status);
     m_force_full_refresh = true;
     updateStatus();
 }
@@ -2113,6 +2153,7 @@ void StakingMiningPage::updateStatus()
         m_operator_withdraw_available = false;
         m_coldstake_fund_available = false;
         m_coldstake_withdraw_available = false;
+        m_demurrage_sweep_available = false;
     }
 
     interfaces::Wallet& w = m_wallet_model->wallet();
@@ -2371,10 +2412,14 @@ void StakingMiningPage::updateStatus()
         m_demurrage_guards->setText(tr("Height guard: %1   |   Post-migration guard: %2")
             .arg(demurrage.demurrage_height_guard_satisfied ? tr("yes") : tr("no"))
             .arg(demurrage.demurrage_post_migration_guard_satisfied ? tr("yes") : tr("no")));
+        m_demurrage_sweep_available = demurrage.demurrage_active &&
+                                      demurrage.decaying_outputs > 0 &&
+                                      demurrage.effective_amount > 0;
     } else {
         m_demurrage_status->setText(tr("Demurrage status is busy; it will refresh shortly."));
         m_demurrage_amounts->setText(QStringLiteral("-"));
         m_demurrage_guards->setText(QStringLiteral("-"));
+        m_demurrage_sweep_available = false;
     }
 
     const std::vector<interfaces::WalletRGBAssetInfo> rgb_assets = w.listRGBAssets(/*include_spent=*/false);
@@ -2807,6 +2852,7 @@ void StakingMiningPage::resetStatusForNoWallet()
     m_demurrage_status->setText(tr("Load a wallet to view demurrage status."));
     m_demurrage_amounts->setText(QStringLiteral("-"));
     m_demurrage_guards->setText(QStringLiteral("-"));
+    m_demurrage_sweep_available = false;
     m_rgb_assets->setRowCount(0);
     m_rgb_status->setText(tr("Load a wallet to view RGB assets."));
     m_eutxo_states->setRowCount(0);
@@ -2896,6 +2942,7 @@ void StakingMiningPage::refreshControlsEnabled()
     m_migration_legacy_sweep->setEnabled(can_create_quantum);
     m_migration_goldrush_sweep->setEnabled(can_create_quantum);
     m_demurrage_attest->setEnabled(can_create_quantum && m_quantum_address && !m_quantum_address->text().isEmpty());
+    m_demurrage_sweep->setEnabled(can_create_quantum && m_demurrage_sweep_available);
     m_rgb_copy_contract->setEnabled(has_wallet && m_rgb_assets && !m_rgb_assets->selectedItems().empty());
     m_selfstake_lock_period->setEnabled(can_create_quantum);
     m_selfstake_selector->setEnabled(has_wallet && m_selfstake_selector->count() > 1);

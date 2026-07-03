@@ -67,6 +67,7 @@ private Q_SLOTS:
     void onMigrateLegacyToQuantum();
     void onMigrateGoldRushRewards();
     void onSendDemurrageAttestation();
+    void onSweepDemurrageDecay();
     void onCopySelectedRGBContract();
     void onCreateSelfStakeAddress();
     void onCopySelfStakeAddress();
@@ -103,6 +104,7 @@ private:
     bool m_operator_withdraw_available{false};
     bool m_coldstake_fund_available{false};
     bool m_coldstake_withdraw_available{false};
+    bool m_demurrage_sweep_available{false};
     bool m_coldstake_operator_user_selected{false};
     QString m_selfstake_last_action_status;
     QString m_operator_last_action_status;
@@ -160,6 +162,7 @@ private:
     QLabel* m_demurrage_amounts{nullptr};
     QLabel* m_demurrage_guards{nullptr};
     QPushButton* m_demurrage_attest{nullptr};
+    QPushButton* m_demurrage_sweep{nullptr};
     QTableWidget* m_rgb_assets{nullptr};
     QPushButton* m_rgb_copy_contract{nullptr};
     QLabel* m_rgb_status{nullptr};
