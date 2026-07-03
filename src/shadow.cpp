@@ -951,12 +951,17 @@ ShadowClaimResult FindPowShadowClaim(const CBlock& block, const CBlockIndex* pin
     return result;
 }
 
+bool IsValidDirectClaimMarker(const CBlockIndex* pindex, const ShadowClaim& claim)
+{
+    return pindex && claim.amount > 0 && MoneyRange(claim.amount) &&
+        IsDirectQuantumMigrationScript(claim.target) &&
+        claim.target.size() <= std::numeric_limits<uint16_t>::max();
+}
+
 bool AddClaimMarker(CCoinsViewCache& view, const CBlockIndex* pindex, uint32_t marker_index, ShadowClaim claim)
 {
     claim.direct = true;
-    if (!pindex || claim.amount <= 0 || !MoneyRange(claim.amount) ||
-        !IsDirectQuantumMigrationScript(claim.target) ||
-        claim.target.size() > std::numeric_limits<uint16_t>::max()) {
+    if (!IsValidDirectClaimMarker(pindex, claim)) {
         return false;
     }
 
@@ -1014,7 +1019,7 @@ void AddSolverMarker(CCoinsViewCache& view, const CBlockIndex* pindex, const CSc
     view.AddCoin(SolverOutpoint(solver, pindex->nHeight, pindex->GetBlockHash()), std::move(coin), true);
 }
 
-bool AddActiveSignalMarkers(CCoinsViewCache& view, const CBlockIndex* pindex, const std::map<CScript, CScript>& signals)
+bool ValidateActiveSignalMarkers(const CBlockIndex* pindex, const std::map<CScript, CScript>& signals)
 {
     if (!pindex) return false;
     uint32_t marker_index = 0;
@@ -1026,6 +1031,16 @@ bool AddActiveSignalMarkers(CCoinsViewCache& view, const CBlockIndex* pindex, co
             payout_script.size() > std::numeric_limits<uint16_t>::max()) {
             return false;
         }
+        ++marker_index;
+    }
+    return true;
+}
+
+bool AddActiveSignalMarkers(CCoinsViewCache& view, const CBlockIndex* pindex, const std::map<CScript, CScript>& signals)
+{
+    if (!ValidateActiveSignalMarkers(pindex, signals)) return false;
+    uint32_t marker_index = 0;
+    for (const auto& [target, payout_script] : signals) {
         Coin coin;
         coin.out.nValue = 0;
         coin.out.scriptPubKey = MarkerScript(MARKER_ACTIVE_SIGNAL, EncodeActiveSignalMarker(target, payout_script, pindex->nHeight));
@@ -1762,15 +1777,12 @@ bool ApplyShadowBlock(CCoinsViewCache& view, const CBlock& block, const CBlockIn
     }
 
     const ShadowPoolState credited_pool = pool;
-    uint32_t claim_marker_index = 0;
 
     const std::optional<CScript> current_solver = GetCurrentSolverScript(view, block, blockundo);
-    if (current_solver) {
-        AddSolverMarker(view, pindex, *current_solver);
-    }
     const std::map<CScript, CScript> current_signals = FindValidShadowSignalsInBlock(view, block, pindex, blockundo);
-    if (!AddActiveSignalMarkers(view, pindex, current_signals)) return false;
-    std::map<CScript, ShadowActiveSignal> active_signal_state = ReadActiveShadowSignals(view, pindex, pindex->nHeight);
+    if (!ValidateActiveSignalMarkers(pindex, current_signals)) return false;
+    std::map<CScript, ShadowActiveSignal> active_signal_state = ReadActiveShadowSignals(view, pindex->pprev, pindex->nHeight);
+    UpsertActiveSignals(active_signal_state, current_signals, pindex->nHeight);
     const std::map<CScript, CScript> active_signals = ActiveSignalPayoutScripts(active_signal_state);
     ShadowClaimResult pow_claim = FindPowShadowClaim(block, pindex, blockundo, credited_pool);
     if (pow_claim.internal_error) return false;
@@ -1791,6 +1803,7 @@ bool ApplyShadowBlock(CCoinsViewCache& view, const CBlock& block, const CBlockIn
     CAmount pos_payout_total{0};
     if (!BuildPosPayouts(credited_pool, current_solver, active_signals, /*require_quantum_payouts=*/true, pos_payouts, pos_payout_total)) return false;
 
+    std::vector<ShadowClaim> claims_to_apply;
     if (pos_payout_total > 0) {
         if (!AddClaimedAmount(pool, pos_payout_total)) {
             LogPrintf("ERROR: Quantum Quasar POS shadow claim exceeds emission cap at height %d\n", pindex->nHeight);
@@ -1798,7 +1811,9 @@ bool ApplyShadowBlock(CCoinsViewCache& view, const CBlock& block, const CBlockIn
         }
         for (const auto& [payout_script, amount] : pos_payouts) {
             if (amount <= 0) continue;
-            if (!AddClaimMarker(view, pindex, claim_marker_index++, ShadowClaim{payout_script, amount, ShadowProofMode::POS, undo_pool, true})) return false;
+            ShadowClaim claim{payout_script, amount, ShadowProofMode::POS, undo_pool, true};
+            if (!IsValidDirectClaimMarker(pindex, claim)) return false;
+            claims_to_apply.push_back(std::move(claim));
         }
         AddSolvedProof(pool, ShadowProofMode::POS, pindex->nHeight);
         pool.pos_amount = 0;
@@ -1813,7 +1828,8 @@ bool ApplyShadowBlock(CCoinsViewCache& view, const CBlock& block, const CBlockIn
             LogPrintf("ERROR: Quantum Quasar POW shadow claim exceeds emission cap at height %d\n", pindex->nHeight);
             return false;
         }
-        if (!AddClaimMarker(view, pindex, claim_marker_index++, *pow_claim.claim)) return false;
+        if (!IsValidDirectClaimMarker(pindex, *pow_claim.claim)) return false;
+        claims_to_apply.push_back(*pow_claim.claim);
         AddSolvedProof(pool, ShadowProofMode::POW, pindex->nHeight);
         pool.pow_amount = 0;
         LogPrintf("Quantum Quasar: Accepted quantum-linked POW shadow-ledger credit at height %d for %d satoshis\n",
@@ -1823,6 +1839,14 @@ bool ApplyShadowBlock(CCoinsViewCache& view, const CBlock& block, const CBlockIn
     if (!ShadowObligationWithinCap(pool)) {
         LogPrintf("ERROR: Quantum Quasar shadow obligation cap exceeded at height %d\n", pindex->nHeight);
         return false;
+    }
+    if (current_solver) {
+        AddSolverMarker(view, pindex, *current_solver);
+    }
+    if (!AddActiveSignalMarkers(view, pindex, current_signals)) return false;
+    uint32_t claim_marker_index = 0;
+    for (const ShadowClaim& claim : claims_to_apply) {
+        if (!AddClaimMarker(view, pindex, claim_marker_index++, claim)) return false;
     }
     WritePool(view, pindex, pool);
     return true;

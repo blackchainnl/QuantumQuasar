@@ -19,6 +19,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -376,6 +377,59 @@ BOOST_AUTO_TEST_CASE(legacy_whitelist_snapshot_undo_removes_markers)
     UndoLegacyWhitelistSnapshot(view, &whitelist_index);
     BOOST_CHECK(!HasLegacyWhitelistSnapshot(view));
     BOOST_CHECK(!IsWhitelisted(view, target));
+}
+
+BOOST_AUTO_TEST_CASE(legacy_whitelist_snapshot_matches_replayed_builder)
+{
+    CCoinsView first_base;
+    CCoinsViewCache first_view{&first_base, true};
+    CCoinsView replay_base;
+    CCoinsViewCache replay_view{&replay_base, true};
+
+    const CPubKey pubkey{ParseHex("033d79776a0fbf7204f8c584c3e9acdc1b130473012d0c402f2145784c94e2d5b3")};
+    const CScript p2pk = CScript{} << ToByteVector(pubkey) << OP_CHECKSIG;
+    const CScript p2pkh = GetScriptForDestination(PKHash(pubkey));
+    const CScript multisig = CScript{} << OP_1 << ToByteVector(pubkey) << OP_1 << OP_CHECKMULTISIG;
+    const CScript below_threshold = CScript{} << OP_2;
+    const CScript direct_quantum = QuantumScript(0x39);
+
+    const std::vector<std::tuple<COutPoint, CAmount, CScript>> fixtures{
+        {COutPoint{uint256::ONE, 0}, 5'500 * COIN, p2pkh},
+        {COutPoint{uint256::ONE, 1}, 4'500 * COIN, p2pk},
+        {COutPoint{uint256::ONE, 2}, 10'000 * COIN, multisig},
+        {COutPoint{uint256::ONE, 3}, 9'999 * COIN, below_threshold},
+        {COutPoint{uint256::ONE, 4}, 50'000 * COIN, direct_quantum},
+    };
+    for (const auto& [outpoint, amount, script] : fixtures) {
+        AddCoinForScript(first_view, outpoint, amount, script);
+        AddCoinForScript(replay_view, outpoint, amount, script);
+    }
+
+    uint256 first_hash;
+    CBlockIndex first_index;
+    InitIndex(first_index, SHADOW_WHITELIST_HEIGHT, nullptr, first_hash);
+    ApplyLegacyWhitelistSnapshot(first_view, &first_index);
+
+    uint256 replay_hash;
+    CBlockIndex replay_index;
+    InitIndex(replay_index, SHADOW_WHITELIST_HEIGHT, nullptr, replay_hash);
+    ApplyLegacyWhitelistSnapshot(replay_view, &replay_index);
+
+    const std::set<CScript> expected = BuildLegacyWhitelist(replay_view);
+    BOOST_CHECK_EQUAL(expected.size(), 2U);
+    BOOST_CHECK(expected.count(p2pkh));
+    BOOST_CHECK(expected.count(multisig));
+    BOOST_CHECK(!expected.count(p2pk));
+    BOOST_CHECK(!expected.count(below_threshold));
+    BOOST_CHECK(!expected.count(direct_quantum));
+
+    for (const CScript& script : expected) {
+        BOOST_CHECK(IsWhitelisted(first_view, script));
+        BOOST_CHECK(IsWhitelisted(replay_view, script));
+    }
+    BOOST_CHECK(IsWhitelisted(first_view, p2pk));
+    BOOST_CHECK(IsWhitelisted(replay_view, p2pk));
+    BOOST_CHECK_EQUAL(HasLegacyWhitelistSnapshot(first_view), HasLegacyWhitelistSnapshot(replay_view));
 }
 
 BOOST_AUTO_TEST_CASE(blackcoin_block_notice_matches_release_message)
@@ -1282,6 +1336,20 @@ BOOST_AUTO_TEST_CASE(shadow_emission_schedule_within_cap)
     BOOST_CHECK_EQUAL(ShadowBaseReward(SHADOW_REWARD_END_HEIGHT + 1), CAmount{0});
 }
 
+BOOST_AUTO_TEST_CASE(shadow_base_reward_boundaries_are_pinned)
+{
+    BOOST_CHECK_EQUAL(ShadowBaseReward(SHADOW_REWARD_START_HEIGHT), 580 * COIN);
+    BOOST_CHECK_EQUAL(ShadowBaseReward(SHADOW_REWARD_START_HEIGHT + 43'199), 580 * COIN);
+    BOOST_CHECK_EQUAL(ShadowBaseReward(SHADOW_REWARD_START_HEIGHT + 43'200), 290 * COIN);
+    BOOST_CHECK_EQUAL(ShadowBaseReward(SHADOW_REWARD_START_HEIGHT + 86'400), 145 * COIN);
+    BOOST_CHECK_EQUAL(ShadowBaseReward(SHADOW_REWARD_START_HEIGHT + 129'600), (580 * COIN) >> 3);
+    BOOST_CHECK_EQUAL(ShadowBaseReward(SHADOW_REWARD_START_HEIGHT + 172'800), (580 * COIN) >> 4);
+    BOOST_CHECK_EQUAL(ShadowBaseReward(SHADOW_REWARD_START_HEIGHT + 216'000), (580 * COIN) >> 5);
+    BOOST_CHECK_EQUAL(ShadowBaseReward(SHADOW_PHASE1_END_HEIGHT), (580 * COIN) >> 5);
+    BOOST_CHECK_EQUAL(ShadowBaseReward(SHADOW_PHASE1_END_HEIGHT + 1), 463 * COIN);
+    BOOST_CHECK_EQUAL(ShadowBaseReward(SHADOW_REWARD_END_HEIGHT), 463 * COIN);
+}
+
 BOOST_AUTO_TEST_CASE(shadow_apply_rejects_pool_obligation_over_emission_cap)
 {
     CCoinsView base;
@@ -1303,6 +1371,113 @@ BOOST_AUTO_TEST_CASE(shadow_apply_rejects_pool_obligation_over_emission_cap)
     BOOST_CHECK_EQUAL(info.pow_amount, 0);
     BOOST_CHECK_EQUAL(info.pos_amount, 0);
     BOOST_CHECK_EQUAL(info.claimed_amount, SHADOW_MAX_EMISSION - ShadowBaseReward(SHADOW_REWARD_START_HEIGHT) + 1);
+}
+
+BOOST_AUTO_TEST_CASE(shadow_final_cap_block_accepts_dual_venue_claims_and_undoes_cleanly)
+{
+    CCoinsView base;
+    CCoinsViewCache view{&base, true};
+
+    const CScript pos_target = CScript{} << OP_TRUE;
+    const CScript pow_target = CScript{} << OP_2;
+    const CScript pos_payout = QuantumScript(0x6a);
+    const CScript pow_payout = QuantumScript(0x6b);
+    AddCoinForScript(view, COutPoint{uint256::ONE, 0}, 10'000 * COIN, pos_target);
+
+    uint256 whitelist_hash;
+    CBlockIndex whitelist_index;
+    InitIndex(whitelist_index, SHADOW_WHITELIST_HEIGHT, nullptr, whitelist_hash);
+    ApplyLegacyWhitelistSnapshot(view, &whitelist_index);
+
+    uint256 solve_hash;
+    CBlockIndex solve_index;
+    InitIndex(solve_index, SHADOW_REWARD_START_HEIGHT, &whitelist_index, solve_hash);
+    CBlock solve_block;
+    solve_block.vtx.push_back(MakeCoinbaseTx(CScript{} << OP_3));
+    solve_block.vtx.push_back(MakeCoinstakeTx(pos_target));
+    CBlockUndo solve_undo = MakeUndoWithInputScripts(solve_block, {{1, pos_target}});
+    BOOST_REQUIRE(ApplyShadowBlock(view, solve_block, &solve_index, &solve_undo));
+
+    // Simulate the last possible credited block: carried first-block PoW+PoS
+    // pools plus this block's scheduled credit exactly fill the emission cap.
+    AddPoolForTest(view,
+                   solve_index,
+                   290 * COIN,
+                   290 * COIN,
+                   SHADOW_MAX_EMISSION - (580 * COIN) - ShadowBaseReward(SHADOW_REWARD_START_HEIGHT + 1));
+
+    std::vector<unsigned char> signal;
+    BOOST_REQUIRE(BuildShadowSignalData(pos_target, pos_payout, solve_index.nHeight, solve_index.GetBlockHash(), signal));
+    std::vector<unsigned char> pow_proof;
+    BOOST_REQUIRE(MineShadowProofData(pow_target, pow_payout, &solve_index, view, 50'000, pow_proof));
+
+    uint256 claim_hash;
+    CBlockIndex claim_index;
+    InitIndex(claim_index, SHADOW_REWARD_START_HEIGHT + 1, &solve_index, claim_hash);
+    CBlock claim_block;
+    claim_block.vtx.push_back(MakeCoinbaseTx(CScript{} << OP_4));
+    claim_block.vtx.push_back(MakeCoinstakeTx(pos_target));
+    claim_block.vtx.push_back(MakeSignalTx(pos_target, signal));
+    claim_block.vtx.push_back(MakePowClaimTx(pow_target, pow_proof));
+    CBlockUndo claim_undo = MakeUndoWithInputScripts(claim_block, {{1, pos_target}, {2, pos_target}, {3, pow_target}});
+
+    BOOST_REQUIRE(ApplyShadowBlock(view, claim_block, &claim_index, &claim_undo));
+    const ShadowGoldRushInfo accepted_info = GetShadowGoldRushInfo(view, &claim_index);
+    BOOST_CHECK_EQUAL(accepted_info.claimed_amount, SHADOW_MAX_EMISSION);
+    BOOST_CHECK_EQUAL(accepted_info.pow_amount, 0);
+    BOOST_CHECK_EQUAL(accepted_info.pos_amount, 0);
+    BOOST_CHECK_EQUAL(ScanShadowClaimMarkers(view, pos_payout).total, 580 * COIN);
+    BOOST_CHECK_EQUAL(ScanShadowClaimMarkers(view, pow_payout).total, 580 * COIN);
+    BOOST_CHECK_EQUAL(ScanSpendableCoins(view, pos_payout).total, 580 * COIN);
+    BOOST_CHECK_EQUAL(ScanSpendableCoins(view, pow_payout).total, 580 * COIN);
+
+    BOOST_REQUIRE(UndoShadowBlock(view, claim_block, &claim_index, &claim_undo));
+    BOOST_CHECK_EQUAL(ScanShadowClaimMarkers(view, pos_payout).count, 0U);
+    BOOST_CHECK_EQUAL(ScanShadowClaimMarkers(view, pow_payout).count, 0U);
+    BOOST_CHECK_EQUAL(ScanSpendableCoins(view, pos_payout).count, 0U);
+    BOOST_CHECK_EQUAL(ScanSpendableCoins(view, pow_payout).count, 0U);
+}
+
+BOOST_AUTO_TEST_CASE(shadow_cap_rejects_without_creating_dual_venue_markers)
+{
+    CCoinsView base;
+    CCoinsViewCache view{&base, true};
+
+    const CScript pos_target = CScript{} << OP_TRUE;
+    const CScript pow_target = CScript{} << OP_2;
+    const CScript pos_payout = QuantumScript(0x6c);
+    const CScript pow_payout = QuantumScript(0x6d);
+    AddCoinForScript(view, COutPoint{uint256::ONE, 0}, 10'000 * COIN, pos_target);
+
+    uint256 solve_hash;
+    CBlockIndex solve_index;
+    InitIndex(solve_index, SHADOW_REWARD_START_HEIGHT, nullptr, solve_hash);
+    AddPoolForTest(view,
+                   solve_index,
+                   290 * COIN,
+                   290 * COIN,
+                   SHADOW_MAX_EMISSION - (580 * COIN) - ShadowBaseReward(SHADOW_REWARD_START_HEIGHT + 1) + 1);
+
+    std::vector<unsigned char> signal;
+    BOOST_REQUIRE(BuildShadowSignalData(pos_target, pos_payout, solve_index.nHeight, solve_index.GetBlockHash(), signal));
+    std::vector<unsigned char> pow_proof;
+    BOOST_REQUIRE(MineShadowProofData(pow_target, pow_payout, &solve_index, view, 50'000, pow_proof));
+
+    uint256 claim_hash;
+    CBlockIndex claim_index;
+    InitIndex(claim_index, SHADOW_REWARD_START_HEIGHT + 1, &solve_index, claim_hash);
+    CBlock claim_block;
+    claim_block.vtx.push_back(MakeCoinbaseTx(CScript{} << OP_4));
+    claim_block.vtx.push_back(MakeCoinstakeTx(pos_target));
+    claim_block.vtx.push_back(MakeSignalTx(pos_target, signal));
+    claim_block.vtx.push_back(MakePowClaimTx(pow_target, pow_proof));
+    CBlockUndo claim_undo = MakeUndoWithInputScripts(claim_block, {{1, pos_target}, {2, pos_target}, {3, pow_target}});
+
+    BOOST_CHECK(!ApplyShadowBlock(view, claim_block, &claim_index, &claim_undo));
+    BOOST_CHECK_EQUAL(ScanShadowClaimMarkers(view, pos_payout).count, 0U);
+    BOOST_CHECK_EQUAL(ScanShadowClaimMarkers(view, pow_payout).count, 0U);
+    BOOST_CHECK_EQUAL(ScanSpendableCoins(view, pos_payout).count, 0U);
+    BOOST_CHECK_EQUAL(ScanSpendableCoins(view, pow_payout).count, 0U);
 }
 
 // The legacy direct-emission ceiling helper is retained for stale marker cleanup and
