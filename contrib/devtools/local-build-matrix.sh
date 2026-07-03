@@ -18,6 +18,7 @@ Targets:
   linux-64-bit
   windows-64-bit
   macos-64-bit
+  macos-arm-64-bit
   linux-arm-64-bit
 
 Environment:
@@ -75,7 +76,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-    TARGETS=(linux-64-bit windows-64-bit macos-64-bit linux-arm-64-bit)
+    TARGETS=(linux-64-bit windows-64-bit macos-64-bit macos-arm-64-bit linux-arm-64-bit)
 fi
 
 if [[ "$ALLOW_DIRTY" -ne 1 ]] && [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
@@ -107,6 +108,13 @@ target_vars() {
             HOST="x86_64-apple-darwin"
             PACKAGES="curl bsdmainutils cmake libz-dev python3-setuptools libtinfo5 xorriso zip"
             CONFIG_OPTS="--enable-sse2"
+            GOAL="deploy"
+            SDK="12.2-12B45b"
+            ;;
+        macos-arm-64-bit)
+            HOST="aarch64-apple-darwin"
+            PACKAGES="curl bsdmainutils cmake libz-dev python3-setuptools libtinfo5 xorriso zip"
+            CONFIG_OPTS=""
             GOAL="deploy"
             SDK="12.2-12B45b"
             ;;
