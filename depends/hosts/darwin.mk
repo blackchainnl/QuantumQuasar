@@ -76,6 +76,7 @@ darwin_CC=env -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH \
               -u OBJC_INCLUDE_PATH -u OBJCPLUS_INCLUDE_PATH -u CPATH \
               -u LIBRARY_PATH \
             $(clang_prog) --target=$(host) -mmacosx-version-min=$(OSX_MIN_VERSION) \
+              -Qunused-arguments \
               -B$(build_prefix)/bin -mlinker-version=$(LD64_VERSION) \
               -isysroot$(OSX_SDK) -nostdlibinc \
               -iwithsysroot/usr/include -iframeworkwithsysroot/System/Library/Frameworks
@@ -84,13 +85,14 @@ darwin_CXX=env -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH \
                -u OBJC_INCLUDE_PATH -u OBJCPLUS_INCLUDE_PATH -u CPATH \
                -u LIBRARY_PATH \
              $(clangxx_prog) --target=$(host) -mmacosx-version-min=$(OSX_MIN_VERSION) \
+               -Qunused-arguments \
                -B$(build_prefix)/bin -mlinker-version=$(LD64_VERSION) \
                -isysroot$(OSX_SDK) -nostdlibinc \
                -iwithsysroot/usr/include/c++/v1 \
                -iwithsysroot/usr/include -iframeworkwithsysroot/System/Library/Frameworks
 
-darwin_CFLAGS=-pipe -std=$(C_STANDARD)
-darwin_CXXFLAGS=-pipe -std=$(CXX_STANDARD)
+darwin_CFLAGS=-Qunused-arguments -pipe -std=$(C_STANDARD)
+darwin_CXXFLAGS=-Qunused-arguments -pipe -std=$(CXX_STANDARD)
 
 ifneq ($(LTO),)
 darwin_CFLAGS += -flto
