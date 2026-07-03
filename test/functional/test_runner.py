@@ -135,6 +135,7 @@ BASE_SCRIPTS = [
     'feature_maxtipage.py',
     'wallet_multiwallet.py --legacy-wallet',
     'wallet_multiwallet.py --descriptors',
+    'wallet_pos_multiwallet_staking.py',
     'wallet_multiwallet.py --usecli',
     'p2p_dns_seeds.py',
     'wallet_groups.py --legacy-wallet',

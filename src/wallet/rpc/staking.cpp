@@ -358,13 +358,17 @@ static RPCHelpMan getstakinginfo()
                     {
                         {RPCResult::Type::BOOL, "enabled", "'true' if staking is enabled"},
                         {RPCResult::Type::BOOL, "staking", "'true' if wallet is currently staking"},
-                        {RPCResult::Type::STR, "errors", "error messages"},
+                        {RPCResult::Type::NUM, "blocks", "Current active-chain height"},
+                        {RPCResult::Type::NUM, "currentblockweight", /*optional=*/true, "Weight of the last assembled block template"},
+                        {RPCResult::Type::NUM, "currentblocktx", /*optional=*/true, "Transaction count of the last assembled block template"},
                         {RPCResult::Type::NUM, "pooledtx", "The size of the mempool"},
                         {RPCResult::Type::NUM, "difficulty", "The current difficulty"},
                         {RPCResult::Type::NUM, "search-interval", "The staker search interval"},
                         {RPCResult::Type::NUM, "weight", "The staker weight"},
                         {RPCResult::Type::NUM, "netstakeweight", "Network stake weight"},
                         {RPCResult::Type::NUM, "expectedtime", "Expected time to earn reward"},
+                        {RPCResult::Type::STR, "chain", "Current chain name"},
+                        {RPCResult::Type::STR, "warnings", "Current network and wallet warnings"},
                     }
                 },
                 RPCExamples{
