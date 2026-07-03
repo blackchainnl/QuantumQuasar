@@ -10,6 +10,11 @@
 #import <objc/runtime.h>
 #include <Cocoa/Cocoa.h>
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 // Add an obj-c category (extension) to return the expected bundle identifier
 @implementation NSBundle(returnCorrectIdentifier)
 - (NSString *)__bundleIdentifier
@@ -45,6 +50,9 @@ bool MacNotificationHandler::hasUserNotificationCenterSupport(void)
     return false;
 }
 
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 MacNotificationHandler *MacNotificationHandler::instance()
 {
