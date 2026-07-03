@@ -157,6 +157,26 @@ See [dependencies.md](dependencies.md) for a complete overview, and
 [depends](/depends/README.md) on how to compile them yourself, if you wish to
 not use the packages of your Linux distribution.
 
+### liboqs
+
+Protocol V4 consensus requires liboqs 0.15.0 for ML-DSA quantum signatures.
+Release builds must use the pinned dependency tree:
+
+```bash
+make -C depends
+./autogen.sh
+./configure --prefix="$PWD/depends/$(./depends/config.guess)"
+make -j8
+```
+
+For local development only, an exact-version host liboqs can be used instead:
+
+```bash
+./autogen.sh
+./configure --with-system-liboqs
+make -j8
+```
+
 ### Berkeley DB
 
 The legacy wallet uses Berkeley DB. To ensure backwards compatibility it is

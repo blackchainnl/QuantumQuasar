@@ -1,11 +1,8 @@
 # Blackcoin
 
-This repository contains the working Protocol V4 upgrade for Blackcoin. It keeps
-the legacy chain history and migration path while adding the Quantum Quasar V4
-feature set for active testnet validation.
-
-This branch is not a final mainnet release. Treat it as pre-release validation
-code until consensus, wallet, packaging, and testnet validation are complete.
+This repository contains the Protocol V4 upgrade for Blackcoin. It keeps the
+legacy chain history and migration path while adding the Quantum Quasar V4
+feature set for the PoSV4.0 upgrade release.
 
 ## Current Upgrade Scope
 
@@ -44,9 +41,21 @@ before testing this fork.
 
 ## Build
 
+Protocol V4 consensus requires liboqs 0.15.0 for ML-DSA quantum
+signatures. Release builds must use the pinned dependency tree:
+
+```bash
+make -C depends
+./autogen.sh
+./configure --prefix="$PWD/depends/$(./depends/config.guess)"
+make -j8
+```
+
+For local development only, an exact-version host liboqs can be used instead:
+
 ```bash
 ./autogen.sh
-./configure
+./configure --with-system-liboqs
 make -j8
 ```
 
