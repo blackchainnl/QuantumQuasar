@@ -658,8 +658,11 @@ void SendCoinsDialog::setBalance(const interfaces::WalletBalances& balances)
             balance = balances.watch_only_balance;
             ui->labelBalanceName->setText(tr("Watch-only balance:"));
         } else if (m_spend_source_combo && m_spend_source_combo->currentData().toInt() == SPEND_SOURCE_QUANTUM) {
-            balance = balances.quantum_balance;
-            ui->labelBalanceName->setText(tr("Selected quantum balance:"));
+            CCoinControl source_control;
+            source_control.m_input_family = CCoinControl::InputFamily::QUANTUM_MIGRATION;
+            source_control.m_exclude_generated_quantum_inputs = true;
+            balance = model->getAvailableBalance(&source_control);
+            ui->labelBalanceName->setText(tr("Direct quantum spendable:"));
         } else {
             ui->labelBalanceName->setText(tr("Selected legacy balance:"));
         }

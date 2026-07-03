@@ -2241,7 +2241,7 @@ public:
     }
     util::Result<WalletQuantumOperatorBondTx> fundQuantumColdStakeAddress(const std::string& coldstake_address, CAmount amount) override
     {
-        return FundColdStakeDelegationAddress(*m_wallet, coldstake_address, amount);
+        return FundColdStakeDelegationAddress(*m_wallet, coldstake_address, amount, /*allow_goldrush_migration=*/true);
     }
     util::Result<WalletQuantumOperatorBondTx> withdrawQuantumColdStakeAddress(const std::string& coldstake_address) override
     {

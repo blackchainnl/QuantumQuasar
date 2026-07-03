@@ -336,6 +336,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "withdrawquantumstakeaddress", 1, "outpoint" },
     { "fundquantumoperatorbond", 1, "amount" },
     { "fundquantumcoldstakeaddress", 1, "amount" },
+    { "fundquantumcoldstakeaddress", 2, "options" },
     { "senddemurrageattestation", 1, "options" },
     { "sweepdemurragedecay", 0, "options" },
     { "sweepdemurragedecay", 0, "dry_run" },

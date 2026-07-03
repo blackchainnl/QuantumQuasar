@@ -40,7 +40,7 @@ QString GoldRushWalletControlLabel(const interfaces::WalletTx& wtx)
 {
     const auto it = wtx.value_map.find("comment");
     if (it == wtx.value_map.end()) return {};
-    if (it->second == "Blackcoin shadow signal" || it->second == "pos-goldrush-test") return QObject::tr("PoS Claim");
+    if (it->second == "Blackcoin shadow signal" || it->second == "pos-goldrush-test") return QObject::tr("PoS Signal");
     if (it->second == "Quantum Quasar built-in shadow PoW claim" ||
         it->second == "Blackcoin shadow PoW claim" ||
         it->second == "Gold Rush PoW claim" ||
@@ -54,8 +54,8 @@ QString GoldRushClaimLabel(const interfaces::WalletTx& wtx)
 {
     const auto it = wtx.value_map.find("comment");
     if (it == wtx.value_map.end()) return {};
-    if (it->second == "PoS - Quantum Stake") return QObject::tr("Quantum PoS Reward");
-    if (it->second == "PoW - Quantum Claim") return QObject::tr("Quantum PoW Reward");
+    if (it->second == "PoS - Quantum Stake") return QObject::tr("PoS - Quantum Stake");
+    if (it->second == "PoW - Quantum Claim") return QObject::tr("PoW - Quantum Claim");
     return {};
 }
 

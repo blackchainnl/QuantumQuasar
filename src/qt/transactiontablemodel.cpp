@@ -364,7 +364,7 @@ QString ShortClaimDestination(const QString& address)
 
 bool IsQuantumClaimControlLabel(const std::string& address)
 {
-    return address == "PoW Claim" || address == "PoS Claim" ||
+    return address == "PoW Claim" || address == "PoS Claim" || address == "PoS Signal" ||
            address == "Quantum PoW Claim" || address == "Quantum PoS Claim" ||
            address == "Gold Rush PoW claim" || address == "Gold Rush signal" ||
            address == "goldrush-pow" || address == "pos-goldrush-test";
@@ -373,7 +373,8 @@ bool IsQuantumClaimControlLabel(const std::string& address)
 QString QuantumClaimControlType(const std::string& address)
 {
     if (address.find("PoW") != std::string::npos || address == "goldrush-pow") return QObject::tr("PoW Claim");
-    if (address.find("PoS") != std::string::npos || address.find("signal") != std::string::npos || address == "pos-goldrush-test") return QObject::tr("PoS Claim");
+    if (address.find("Signal") != std::string::npos || address.find("signal") != std::string::npos || address == "pos-goldrush-test") return QObject::tr("PoS Signal");
+    if (address.find("PoS") != std::string::npos) return QObject::tr("PoS Signal");
     return QObject::tr("Quantum Claim");
 }
 } // namespace
@@ -407,8 +408,8 @@ QString TransactionTableModel::formatGoldRushClaimType(const TransactionRecord *
 QString TransactionTableModel::formatGoldRushToAddress(const TransactionRecord *wtx, bool tooltip) const
 {
     const QString reward_type = wtx->type == TransactionRecord::GoldRushPowClaim ?
-        tr("Quantum PoW Reward") :
-        tr("Quantum PoS Reward");
+        tr("PoW - Quantum Claim") :
+        tr("PoS - Quantum Stake");
     if (wtx->address.empty()) return reward_type;
 
     const QString address = QString::fromStdString(wtx->address);
@@ -431,9 +432,9 @@ QString TransactionTableModel::formatTxType(const TransactionRecord *wtx) const
     case TransactionRecord::Staked:
         return tr("Staked");
     case TransactionRecord::GoldRushPosStake:
-        return formatGoldRushClaimType(wtx, tr("Quantum PoS Reward"));
+        return formatGoldRushClaimType(wtx, tr("PoS - Quantum Stake"));
     case TransactionRecord::GoldRushPowClaim:
-        return formatGoldRushClaimType(wtx, tr("Quantum PoW Reward"));
+        return formatGoldRushClaimType(wtx, tr("PoW - Quantum Claim"));
     case TransactionRecord::Other:
         if (IsQuantumClaimControlLabel(wtx->address)) return QuantumClaimControlType(wtx->address);
         return tr("Other");

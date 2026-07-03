@@ -16,9 +16,12 @@
 #include <qt/platformstyle.h>
 #include <qt/walletmodel.h>
 
+#include <addresstype.h>
+#include <crypto/mldsa.h>
 #include <interfaces/node.h>
 #include <key_io.h>
 #include <policy/policy.h>
+#include <serialize.h>
 #include <wallet/coincontrol.h>
 #include <wallet/coinselection.h>
 #include <wallet/wallet.h>
@@ -43,6 +46,61 @@ bool CCoinControlWidgetItem::operator<(const QTreeWidgetItem &other) const {
         return data(column, Qt::UserRole).toLongLong() < other.data(column, Qt::UserRole).toLongLong();
     return QTreeWidgetItem::operator<(other);
 }
+
+namespace {
+int QuantumWitnessInputVBytes(int witness_version, const std::vector<unsigned char>& witness_program)
+{
+    if (IsQuantumMigrationWitnessProgram(witness_version, witness_program)) {
+        const int64_t non_witness = 32 + 4 + 1 + 4;
+        const int64_t witness = GetSizeOfCompactSize(2) +
+                                GetSizeOfCompactSize(ML_DSA::SIGNATURE_BYTES) + ML_DSA::SIGNATURE_BYTES +
+                                GetSizeOfCompactSize(ML_DSA::PUBLICKEY_BYTES) + ML_DSA::PUBLICKEY_BYTES;
+        return GetVirtualTransactionSize(non_witness * WITNESS_SCALE_FACTOR + witness, 0, 0);
+    }
+    if (IsQuantumColdStakeWitnessProgram(witness_version, witness_program)) {
+        const int64_t non_witness = 32 + 4 + 1 + 4;
+        const int64_t witness = GetSizeOfCompactSize(4) +
+                                GetSizeOfCompactSize(ML_DSA::SIGNATURE_BYTES) + ML_DSA::SIGNATURE_BYTES +
+                                GetSizeOfCompactSize(ML_DSA::PUBLICKEY_BYTES) + ML_DSA::PUBLICKEY_BYTES +
+                                GetSizeOfCompactSize(uint256::size()) + uint256::size() +
+                                GetSizeOfCompactSize(1) + 1;
+        return GetVirtualTransactionSize(non_witness * WITNESS_SCALE_FACTOR + witness, 0, 0);
+    }
+    return 148;
+}
+
+bool IsDirectQuantumMigrationCoin(const CScript& script_pub_key)
+{
+    const auto tier = GetQuantumStakeTierProgram(script_pub_key);
+    return tier && !tier->tiered && !tier->cold_stake;
+}
+
+bool MatchesSelectedSpendSource(const CScript& script_pub_key, const CCoinControl& coin_control)
+{
+    if (!coin_control.m_input_family) return true;
+    const bool quantum_migration = IsQuantumMigrationScript(script_pub_key);
+    const bool quantum = quantum_migration || IsQuantumColdStakeScript(script_pub_key);
+    if (*coin_control.m_input_family == CCoinControl::InputFamily::QUANTUM) {
+        return quantum;
+    }
+    if (*coin_control.m_input_family == CCoinControl::InputFamily::QUANTUM_MIGRATION) {
+        return quantum_migration && IsDirectQuantumMigrationCoin(script_pub_key);
+    }
+    return !quantum && !IsEUTXOScript(script_pub_key);
+}
+
+QString SpendSourceMismatchTooltip(const CCoinControl& coin_control)
+{
+    if (!coin_control.m_input_family) return {};
+    if (*coin_control.m_input_family == CCoinControl::InputFamily::QUANTUM_MIGRATION) {
+        return QObject::tr("This output is not an ordinary direct quantum spend output for the selected send source.");
+    }
+    if (*coin_control.m_input_family == CCoinControl::InputFamily::QUANTUM) {
+        return QObject::tr("This output is not controlled by a quantum spend path.");
+    }
+    return QObject::tr("This output is quantum, EUTXO, or otherwise incompatible with the selected legacy send source.");
+}
+} // namespace
 
 CoinControlDialog::CoinControlDialog(CCoinControl& coin_control, WalletModel* _model, const PlatformStyle *_platformStyle, QWidget *parent) :
     QDialog(parent, GUIUtil::dialog_flags),
@@ -431,8 +489,7 @@ void CoinControlDialog::updateLabels(CCoinControl& m_coin_control, WalletModel *
                 // 1 WU (witness item count) + 65 WU (Schnorr signature with len byte)
                 nBytesInputs += 66 / WITNESS_SCALE_FACTOR;
             } else {
-                // not supported, should be unreachable
-                throw std::runtime_error("Trying to spend future segwit version script");
+                nBytesInputs += QuantumWitnessInputVBytes(witnessversion, witnessprogram);
             }
             fWitness = true;
         }
@@ -660,6 +717,12 @@ void CoinControlDialog::updateView()
                 m_coin_control.UnSelect(output); // just to be sure
                 itemOutput->setDisabled(true);
                 itemOutput->setIcon(COLUMN_CHECKBOX, platformStyle->SingleColorIcon(":/icons/lock_closed"));
+            } else if (!MatchesSelectedSpendSource(out.txout.scriptPubKey, m_coin_control)) {
+                m_coin_control.UnSelect(output);
+                itemOutput->setDisabled(true);
+                itemOutput->setToolTip(COLUMN_CHECKBOX, SpendSourceMismatchTooltip(m_coin_control));
+                itemOutput->setToolTip(COLUMN_AMOUNT, SpendSourceMismatchTooltip(m_coin_control));
+                itemOutput->setToolTip(COLUMN_LABEL, SpendSourceMismatchTooltip(m_coin_control));
             }
 
             // set checkbox
