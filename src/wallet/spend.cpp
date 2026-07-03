@@ -374,6 +374,50 @@ static bool IsExcludedGeneratedQuantumInput(const CWallet& wallet, const CCoinCo
     return IsGoldRushDirectPayoutOutput(wallet.chain().getCoinsTip(), outpoint, &marker_script) && marker_script == script_pub_key;
 }
 
+static bool IsGeneratedQuantumInput(const CWallet& wallet, const COutPoint& outpoint, const CScript& script_pub_key)
+{
+    if (!IsQuantumMigrationScript(script_pub_key)) return false;
+
+    CScript marker_script;
+    return IsGoldRushDirectPayoutOutput(wallet.chain().getCoinsTip(), outpoint, &marker_script) && marker_script == script_pub_key;
+}
+
+static bool IsLockedTieredQuantumStakeOutput(const CScript& script_pub_key, int spend_height)
+{
+    const auto tier = GetQuantumStakeTierProgram(script_pub_key);
+    if (!tier || !tier->tiered) return false;
+    if (tier->IsBonded()) return true;
+    return tier->IsUnbonding() && tier->unlock_height > static_cast<uint32_t>(std::max(0, spend_height));
+}
+
+static std::optional<Consensus::DemurrageEvaluation> GetDemurrageEvaluationForOutput(const CWallet& wallet, const COutPoint& outpoint, const CScript& script_pub_key, int spend_height, int64_t spend_time)
+{
+    const Consensus::Params& consensus = Params().GetConsensus();
+    if (!consensus.IsDemurrageActive(spend_height, spend_time)) return std::nullopt;
+
+    std::map<COutPoint, Coin> coins;
+    coins.emplace(outpoint, Coin{});
+    wallet.chain().findCoins(coins);
+    const auto it = coins.find(outpoint);
+    if (it == coins.end() || it->second.out.IsNull()) return std::nullopt;
+
+    std::optional<int> latest_attestation;
+    {
+        LOCK(::cs_main);
+        latest_attestation = Consensus::LatestDemurrageAttestationHeightForScript(wallet.chain().getCoinsTip(), script_pub_key);
+    }
+    return Consensus::EvaluateDemurrage(it->second, consensus, spend_height, spend_time, latest_attestation);
+}
+
+static bool ShouldSkipProtectedQuantumInput(const CWallet& wallet, const COutPoint& outpoint, const CScript& script_pub_key, const CoinFilterParams& params, int spend_height, int64_t spend_time)
+{
+    if (!params.include_generated_quantum_inputs && IsGeneratedQuantumInput(wallet, outpoint, script_pub_key)) return true;
+    if (!params.include_locked_quantum_stake_outputs && IsLockedTieredQuantumStakeOutput(script_pub_key, spend_height)) return true;
+    const auto demurrage = GetDemurrageEvaluationForOutput(wallet, outpoint, script_pub_key, spend_height, spend_time);
+    if (!params.include_demurrage_locked_outputs && demurrage && demurrage->locked) return true;
+    return false;
+}
+
 // Fetch and validate the coin control selected inputs.
 // Coins could be internal (from the wallet) or external.
 util::Result<PreSelectedInputs> FetchSelectedInputs(const CWallet& wallet, const CCoinControl& coin_control,
@@ -381,6 +425,9 @@ util::Result<PreSelectedInputs> FetchSelectedInputs(const CWallet& wallet, const
 {
     PreSelectedInputs result;
     const bool can_grind_r = wallet.CanGrindR();
+    const CBlockIndex* tip = wallet.chain().getTip();
+    const int spend_height = tip ? tip->nHeight + 1 : 0;
+    const int64_t spend_time = tip ? tip->GetMedianTimePast() : 0;
     std::map<COutPoint, CAmount> map_of_bump_fees = wallet.chain().CalculateIndividualBumpFees(coin_control.ListSelected(), coin_selection_params.m_effective_feerate);
     for (const COutPoint& outpoint : coin_control.ListSelected()) {
         int input_bytes = -1;
@@ -408,6 +455,16 @@ util::Result<PreSelectedInputs> FetchSelectedInputs(const CWallet& wallet, const
         if (IsExcludedGeneratedQuantumInput(wallet, coin_control, outpoint, txout.scriptPubKey)) {
             return util::Error{strprintf(_("Pre-selected input %s is a Gold Rush reward output. Move it to a fresh quantum address before using it for ordinary sends or staking."), outpoint.ToString())};
         }
+        if (!coin_control.m_include_generated_quantum_inputs && IsGeneratedQuantumInput(wallet, outpoint, txout.scriptPubKey)) {
+            return util::Error{strprintf(_("Pre-selected input %s is a Gold Rush reward output. Move it to a fresh quantum address before using it for ordinary sends or staking."), outpoint.ToString())};
+        }
+        if (!coin_control.m_include_locked_quantum_stake_outputs && IsLockedTieredQuantumStakeOutput(txout.scriptPubKey, spend_height)) {
+            return util::Error{strprintf(_("Pre-selected input %s is a bonded or unbonding quantum staking output. Use the staking withdrawal workflow before ordinary spending."), outpoint.ToString())};
+        }
+        const auto demurrage = GetDemurrageEvaluationForOutput(wallet, outpoint, txout.scriptPubKey, spend_height, spend_time);
+        if (!coin_control.m_include_demurrage_locked_outputs && demurrage && demurrage->locked) {
+            return util::Error{strprintf(_("Pre-selected input %s is fully locked by inactivity demurrage and cannot be spent."), outpoint.ToString())};
+        }
 
         if (input_bytes == -1) {
             input_bytes = CalculateMaximumSignedInputSize(txout, outpoint, &coin_control.m_external_provider, can_grind_r, &coin_control);
@@ -425,6 +482,9 @@ util::Result<PreSelectedInputs> FetchSelectedInputs(const CWallet& wallet, const
         /* Set some defaults for depth, spendable, solvable, safe, time, and from_me as these don't matter for preset inputs since no selection is being done. */
         COutput output(outpoint, txout, /*depth=*/ 0, input_bytes, /*spendable=*/ true, /*solvable=*/ true, /*safe=*/ true, /*time=*/ 0, /*from_me=*/ false, coin_selection_params.m_effective_feerate);
         output.ApplyBumpFee(map_of_bump_fees.at(output.outpoint));
+        if (demurrage && !demurrage->locked) {
+            output.SetEffectiveInputValue(demurrage->effective_value);
+        }
         result.Insert(output, coin_selection_params.m_subtract_fee_outputs);
     }
     return result;
@@ -445,6 +505,9 @@ CoinsResult AvailableCoins(const CWallet& wallet,
     const int max_depth = {coinControl ? coinControl->m_max_depth : DEFAULT_MAX_DEPTH};
     const bool only_safe = {coinControl ? !coinControl->m_include_unsafe_inputs : true};
     const bool can_grind_r = wallet.CanGrindR();
+    const CBlockIndex* tip = wallet.chain().getTip();
+    const int spend_height = tip ? tip->nHeight + 1 : 0;
+    const int64_t spend_time = tip ? tip->GetMedianTimePast() : 0;
     std::vector<COutPoint> outpoints;
 
     // Never auto-select UTXOs carrying live RGB single-use-seal or EUTXO state.
@@ -487,6 +550,9 @@ CoinsResult AvailableCoins(const CWallet& wallet,
                 continue;
 
             if (coinControl && IsExcludedGeneratedQuantumInput(wallet, *coinControl, outpoint, output.scriptPubKey)) {
+                continue;
+            }
+            if (ShouldSkipProtectedQuantumInput(wallet, outpoint, output.scriptPubKey, params, spend_height, spend_time)) {
                 continue;
             }
 
@@ -542,8 +608,12 @@ CoinsResult AvailableCoins(const CWallet& wallet,
                 is_from_p2sh = true;
             }
 
-            result.Add(GetOutputType(type, is_from_p2sh),
-                       COutput(outpoint, output, nDepth, input_bytes, spendable, solvable, safeTx, wtx.GetTxTime(), tx_from_me, feerate));
+            COutput candidate(outpoint, output, nDepth, input_bytes, spendable, solvable, safeTx, wtx.GetTxTime(), tx_from_me, feerate);
+            if (const auto demurrage = GetDemurrageEvaluationForOutput(wallet, outpoint, output.scriptPubKey, spend_height, spend_time);
+                demurrage && !demurrage->locked) {
+                candidate.SetEffectiveInputValue(demurrage->effective_value);
+            }
+            result.Add(GetOutputType(type, is_from_p2sh), candidate);
 
             outpoints.push_back(outpoint);
 
@@ -577,6 +647,9 @@ CoinsResult AvailableCoins(const CWallet& wallet,
 CoinsResult AvailableCoinsListUnspent(const CWallet& wallet, const CCoinControl* coinControl, CoinFilterParams params)
 {
     params.only_spendable = false;
+    params.include_generated_quantum_inputs = true;
+    params.include_locked_quantum_stake_outputs = true;
+    params.include_demurrage_locked_outputs = true;
     return AvailableCoins(wallet, coinControl, /*feerate=*/ std::nullopt, params);
 }
 
@@ -962,7 +1035,11 @@ util::Result<SelectionResult> AutomaticCoinSelection(const CWallet& wallet, Coin
             if (group.m_ancestors >= max_ancestors || group.m_descendants >= max_descendants) total_unconf_long_chain += group.GetSelectionAmount();
         }
 
-        if (CAmount total_amount = available_coins.GetTotalAmount() - total_discarded < value_to_select) {
+        const CAmount available_selection_amount = coin_selection_params.m_subtract_fee_outputs ?
+            available_coins.GetTotalAmount() :
+            (available_coins.GetEffectiveTotalAmount().has_value() ? *available_coins.GetEffectiveTotalAmount() : 0);
+        const CAmount total_amount = available_selection_amount - total_discarded;
+        if (total_amount < value_to_select) {
             // Special case, too-long-mempool cluster.
             if (total_amount + total_unconf_long_chain > value_to_select) {
                 return util::Result<SelectionResult>({_("Unconfirmed UTXOs are available, but spending them creates a chain of transactions that will be rejected by the mempool")});

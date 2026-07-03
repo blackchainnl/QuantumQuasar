@@ -384,6 +384,35 @@ BOOST_AUTO_TEST_CASE(quantum_tiered_principal_covenant_enforces_unbonding)
     BOOST_CHECK(CheckTieredStakePrincipalCovenant(make_spend(legacy_quantum_script, 10 * COIN), coins, SCRIPT_VERIFY_NONE, spend_height, reason));
 }
 
+BOOST_AUTO_TEST_CASE(quantum_tiered_bonded_raw_spend_rejected_by_consensus_backstop)
+{
+    std::vector<uint8_t> pubkey;
+    std::vector<uint8_t> privkey;
+    BOOST_REQUIRE(ML_DSA::KeyGen(pubkey, privkey));
+
+    constexpr uint16_t delay = 100;
+    constexpr int spend_height = 250;
+    const std::vector<unsigned char> bonded_program = QuantumTieredMigrationProgramForPubkey(pubkey, QUANTUM_TIERED_STATE_BONDED, delay, 0);
+    const CScript bonded_script = GetScriptForDestination(WitnessUnknown{QUANTUM_MIGRATION_WITNESS_VERSION, bonded_program});
+    const COutPoint bonded_outpoint{uint256::ONE, 41};
+
+    CCoinsView coins_dummy;
+    CCoinsViewCache coins{&coins_dummy};
+    coins.AddCoin(bonded_outpoint, Coin{CTxOut{10 * COIN, bonded_script}, 100, false, false, 0}, false);
+
+    const CScript direct_quantum_script = GetScriptForDestination(WitnessUnknown{QUANTUM_MIGRATION_WITNESS_VERSION, QuantumMigrationProgramForPubkey(pubkey)});
+    CMutableTransaction mtx;
+    mtx.nVersion = 2;
+    mtx.vin.emplace_back(bonded_outpoint);
+    mtx.vin[0].scriptWitness.stack.emplace_back(ML_DSA::SIGNATURE_BYTES, 0x00);
+    mtx.vin[0].scriptWitness.stack.emplace_back(pubkey.begin(), pubkey.end());
+    mtx.vout.emplace_back(10 * COIN, direct_quantum_script);
+
+    std::string reason;
+    BOOST_CHECK(!CheckTieredStakePrincipalCovenant(CTransaction{mtx}, coins, SCRIPT_VERIFY_QUANTUM_STAKE_TIERS, spend_height, reason));
+    BOOST_CHECK_EQUAL(reason, "bad-stake-tier-transition");
+}
+
 BOOST_AUTO_TEST_CASE(quantum_tiered_principal_covenant_uses_demurrage_effective_value)
 {
     std::vector<uint8_t> pubkey;

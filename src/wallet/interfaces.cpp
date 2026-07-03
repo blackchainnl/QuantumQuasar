@@ -232,6 +232,7 @@ ColdStakeDelegationOutputs ScanColdStakeDelegationOutputs(
     filter.only_spendable = spendable_only;
     filter.skip_locked = spendable_only;
     filter.include_immature_coinbase = false;
+    filter.include_locked_quantum_stake_outputs = true;
 
     const std::vector<COutput> coins = spendable_only
         ? AvailableCoins(wallet, nullptr, std::nullopt, filter).All()
@@ -344,6 +345,7 @@ ColdStakeFundingInputs ScanColdStakeFundingInputs(
     filter.only_spendable = true;
     filter.skip_locked = true;
     filter.include_immature_coinbase = false;
+    filter.include_generated_quantum_inputs = true;
 
     for (const COutput& out : AvailableCoins(wallet, &scan_control, std::nullopt, filter).All()) {
         if (out.txout.nValue <= 0 || !IsDirectQuantumMigrationScript(out.txout.scriptPubKey)) continue;
@@ -456,6 +458,7 @@ OperatorBondOutputs ScanOperatorBondOutputs(
     filter.only_spendable = spendable_only;
     filter.skip_locked = spendable_only;
     filter.include_immature_coinbase = false;
+    filter.include_locked_quantum_stake_outputs = true;
 
     const std::vector<COutput> coins = spendable_only
         ? AvailableCoins(wallet, nullptr, std::nullopt, filter).All()
@@ -854,6 +857,7 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
             }
             coin_control.m_allow_other_inputs = false;
             coin_control.m_exclude_generated_quantum_inputs = true;
+            coin_control.m_include_locked_quantum_stake_outputs = true;
             const CCoinsViewCache& view = wallet.chain().chainman().ActiveChainstate().CoinsTip();
             const SafeFeeInputSummary fee_inputs = SelectSafeUnbondingFeeInputs(
                 wallet,
@@ -889,6 +893,7 @@ util::Result<WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress(
             }
             coin_control.m_allow_other_inputs = false;
             coin_control.m_input_family = CCoinControl::InputFamily::QUANTUM;
+            coin_control.m_include_locked_quantum_stake_outputs = true;
 
             auto withdraw_dest = wallet.GetNewQuantumDestination(withdrawal_label);
             if (!withdraw_dest) return util::Error{util::ErrorString(withdraw_dest)};
@@ -1426,11 +1431,13 @@ util::Result<WalletQuantumActionTx> CreateQuantumMigrationSweep(
         coin_control.m_allow_other_inputs = false;
         coin_control.m_include_unsafe_inputs = false;
         coin_control.destChange = CNoDestination{};
+        coin_control.m_include_generated_quantum_inputs = goldrush_rewards_only;
 
         CoinFilterParams filter;
         filter.only_spendable = true;
         filter.skip_locked = true;
         filter.include_immature_coinbase = false;
+        filter.include_generated_quantum_inputs = goldrush_rewards_only;
 
         const CCoinsViewCache& view = wallet.chain().chainman().ActiveChainstate().CoinsTip();
         for (const COutput& out : AvailableCoins(wallet, &coin_control, std::nullopt, filter).All()) {
@@ -2509,20 +2516,20 @@ public:
             if (IsQuantumMigrationScript(spk)) {
                 CTxDestination dest;
                 const bool wallet_owned = ExtractDestination(spk, dest) && m_wallet->GetQuantumKeyInfo(dest).has_value();
-                if (wallet_owned) {
-                    status.migrated_quantum_amount += out.txout.nValue;
-                    ++status.migrated_quantum_outputs;
-                }
                 CScript marker_script;
                 if (IsGoldRushDirectPayoutOutput(view, out.outpoint, &marker_script) && marker_script == spk) {
                     status.goldrush_reward_amount_needing_move += out.txout.nValue;
                     ++status.goldrush_reward_outputs_needing_move;
-                } else if (wallet_owned && IsDirectQuantumMigrationScript(spk)) {
-                    status.direct_quantum_amount += out.txout.nValue;
-                    ++status.direct_quantum_outputs;
                 } else if (wallet_owned) {
-                    status.staked_quantum_amount += out.txout.nValue;
-                    ++status.staked_quantum_outputs;
+                    status.migrated_quantum_amount += out.txout.nValue;
+                    ++status.migrated_quantum_outputs;
+                    if (IsDirectQuantumMigrationScript(spk)) {
+                        status.direct_quantum_amount += out.txout.nValue;
+                        ++status.direct_quantum_outputs;
+                    } else {
+                        status.staked_quantum_amount += out.txout.nValue;
+                        ++status.staked_quantum_outputs;
+                    }
                 }
             } else if (IsQuantumColdStakeScript(spk)) {
                 continue;

@@ -25,7 +25,6 @@ from test_framework.util import assert_equal
 CANONICAL_JSON = os.path.join(
     os.path.dirname(__file__), "..", "..", "contrib", "staking", "staking_mr_canonical.json"
 )
-MIGRATION_DEADLINE_TIME = 2_200_000_000
 STAKE_AMOUNT = Decimal("12000")
 VAULT_7D_BLOCKS = 9450
 
@@ -46,8 +45,10 @@ class QuantumStakingTiersTest(BitcoinTestFramework):
             "-txindex=1",
             "-staketimio=50",
             "-donatetodevfund=0",
+            "-shadowwhitelistheight=1",
+            "-shadowgoldrushblocks=10",
             "-qqgoldrushendtime=1",
-            f"-qqmigrationdeadlinetime={MIGRATION_DEADLINE_TIME}",
+            "-qqmigrationdeadlinetime=2",
             "-qqstaketierheight=1",
         ]
         self.extra_args = [args, args]
@@ -192,7 +193,7 @@ class QuantumStakingTiersTest(BitcoinTestFramework):
     def run_test(self):
         self._set_mocktime((int(time.time()) & ~0xf) + 16)
         for node in self.nodes:
-            assert_equal(node.getquantumquasarinfo()["phase"], "migration")
+            assert_equal(node.getquantumquasarinfo()["phase"], "final_lockout")
 
         self.log.info("Creating funder and tiered staking wallets")
         for node in self.nodes:
@@ -221,15 +222,16 @@ class QuantumStakingTiersTest(BitcoinTestFramework):
         assert_equal(stake_key["public_key"], stake_info["public_key"])
 
         self.log.info("Funding and maturing the tiered staking output")
-        funder_address = funder.getnewaddress("", "legacy")
-        self._generate(COINBASE_MATURITY + 2, funder_address)
+        mining_address = funder.getnewquantumaddress()["address"]
+        self._generate(COINBASE_MATURITY + 2, mining_address)
         funding_txid = funder.sendtoaddress(stake_address, STAKE_AMOUNT)
-        self._generate(1, funder_address)
+        self._generate(1, mining_address)
         self.wait_until(lambda: len(staker.listunspent(1, 9999999, [stake_address])) == 1, timeout=30)
-        self._generate(COINBASE_MATURITY, funder_address)
+        self._generate(COINBASE_MATURITY, mining_address)
         stake_utxo = self._one_tiered_utxo(staker, stake_address)
         assert_equal(stake_utxo["txid"], funding_txid)
-        assert_equal(Decimal(str(stake_utxo["amount"])), STAKE_AMOUNT)
+        stake_amount = Decimal(str(stake_utxo["amount"]))
+        assert_equal(stake_amount, STAKE_AMOUNT)
         assert_equal(bytes.fromhex(stake_utxo["scriptPubKey"]), stake_script)
 
         self.log.info("Mining a tiered quantum PoS block and validating it on an independent node")
@@ -246,7 +248,7 @@ class QuantumStakingTiersTest(BitcoinTestFramework):
             if bytes.fromhex(vout["scriptPubKey"]["hex"]) == stake_script
         ]
         assert tiered_outputs, "tiered quantum coinstake must return principal to the same tiered script"
-        assert sum(tiered_outputs) >= STAKE_AMOUNT
+        assert sum(tiered_outputs) >= stake_amount
 
         self.log.info("Rejecting a signed tiered coinstake that redirects bonded principal")
         raw_tiered_block = self.nodes[0].getblock(block_hash, 0)

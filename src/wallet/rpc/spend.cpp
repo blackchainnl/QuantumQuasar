@@ -2096,6 +2096,7 @@ RPCHelpMan migrategoldrushrewards()
         coin_control.m_allow_other_inputs = false;
         coin_control.m_include_unsafe_inputs = include_unsafe;
         coin_control.destChange = CNoDestination{};
+        coin_control.m_include_generated_quantum_inputs = true;
         if (options.exists("fee_rate")) {
             coin_control.m_feerate = FeeRateFromSatVbValue(options["fee_rate"]);
             coin_control.fOverrideFeeRate = true;
@@ -2104,6 +2105,7 @@ RPCHelpMan migrategoldrushrewards()
         filter.only_spendable = true;
         filter.skip_locked = true;
         filter.include_immature_coinbase = false;
+        filter.include_generated_quantum_inputs = true;
 
         ChainstateManager& chainman = pwallet->chain().chainman();
         const CCoinsViewCache& view = chainman.ActiveChainstate().CoinsTip();
@@ -3706,17 +3708,20 @@ RPCHelpMan getmigrationstatus()
             if (IsQuantumMigrationScript(spk)) {
                 CTxDestination d;
                 const bool wallet_owned = ExtractDestination(spk, d) && pwallet->GetQuantumKeyInfo(d).has_value();
-                if (wallet_owned) { quantum_amt += out.txout.nValue; ++quantum_n; }
                 CScript marker_script;
                 if (IsGoldRushDirectPayoutOutput(view, out.outpoint, &marker_script) && marker_script == spk) {
                     goldrush_reward_amt += out.txout.nValue;
                     ++goldrush_reward_n;
-                } else if (wallet_owned && IsDirectQuantumMigrationScript(spk)) {
-                    direct_quantum_amt += out.txout.nValue;
-                    ++direct_quantum_n;
                 } else if (wallet_owned) {
-                    staked_quantum_amt += out.txout.nValue;
-                    ++staked_quantum_n;
+                    quantum_amt += out.txout.nValue;
+                    ++quantum_n;
+                    if (IsDirectQuantumMigrationScript(spk)) {
+                        direct_quantum_amt += out.txout.nValue;
+                        ++direct_quantum_n;
+                    } else {
+                        staked_quantum_amt += out.txout.nValue;
+                        ++staked_quantum_n;
+                    }
                 }
             } else if (IsQuantumColdStakeScript(spk)) {
                 continue;

@@ -65,6 +65,15 @@ public:
     //! credits have a special migration-window spend path and should only be
     //! consumed by that guided workflow.
     bool m_exclude_generated_quantum_inputs = false;
+    //! Allow selected Gold Rush reward outputs. Only the guided remigration
+    //! workflow should set this.
+    bool m_include_generated_quantum_inputs = false;
+    //! Allow selected bonded or still-unbonding tiered quantum staking outputs.
+    //! Only guided unbond/withdrawal workflows should set this.
+    bool m_include_locked_quantum_stake_outputs = false;
+    //! Allow selected fully decayed demurrage outputs. Consensus will reject
+    //! them; this remains false for ordinary funding paths.
+    bool m_include_demurrage_locked_outputs = false;
     //! SigningProvider that has pubkeys and scripts to do spend size estimation for external inputs
     FlatSigningProvider m_external_provider;
 

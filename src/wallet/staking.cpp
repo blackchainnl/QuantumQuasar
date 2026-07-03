@@ -87,6 +87,30 @@ struct AutoRedelegationSource
     int last_win_height{0};
 };
 
+bool IsGeneratedQuantumStakeCandidate(const CWallet& wallet, const COutPoint& outpoint, const CScript& script_pub_key)
+{
+    if (!IsQuantumMigrationScript(script_pub_key)) return false;
+
+    CScript marker_script;
+    return IsGoldRushDirectPayoutOutput(wallet.chain().getCoinsTip(), outpoint, &marker_script) && marker_script == script_pub_key;
+}
+
+bool IsDemurrageLockedStakeCandidate(const CWallet& wallet, const COutPoint& outpoint, const CScript& script_pub_key, int spend_height, int64_t spend_time)
+{
+    const Consensus::Params& consensus = Params().GetConsensus();
+    if (!consensus.IsDemurrageActive(spend_height, spend_time)) return false;
+
+    std::map<COutPoint, Coin> coins;
+    coins.emplace(outpoint, Coin{});
+    wallet.chain().findCoins(coins);
+    const auto it = coins.find(outpoint);
+    if (it == coins.end() || it->second.out.IsNull()) return false;
+
+    const std::optional<int> latest_attestation = Consensus::LatestDemurrageAttestationHeightForScript(
+        wallet.chain().getCoinsTip(), script_pub_key);
+    return Consensus::EvaluateDemurrage(it->second, consensus, spend_height, spend_time, latest_attestation).locked;
+}
+
 bool IsGoldRushStakeHeight(const CBlockIndex* tip)
 {
     if (!tip) return false;
@@ -1376,32 +1400,27 @@ void StopStake(CWallet& wallet) {
 
 uint64_t GetStakeWeight(const CWallet& wallet)
 {
-    // Choose coins to use
-    const auto bal = GetBalance(wallet);
-    CAmount nBalance = bal.m_mine_trusted;
-    if (wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS))
-        nBalance += bal.m_watchonly_trusted;
-
-    if (nBalance <= wallet.m_reserve_balance)
-        return 0;
-
     std::set<std::pair<const CWalletTx*, unsigned int> > setCoins;
     CAmount nValueIn = 0;
-
-    CAmount nTargetValue = nBalance - wallet.m_reserve_balance;
+    CAmount nTargetValue = MAX_MONEY;
     if (!SelectCoinsForStaking(wallet, nTargetValue, setCoins, nValueIn))
         return 0;
 
-    if (setCoins.empty())
+    if (setCoins.empty() || nValueIn <= wallet.m_reserve_balance)
         return 0;
 
     uint64_t nWeight = 0;
+    CAmount nRemaining = nValueIn - wallet.m_reserve_balance;
 
     for (std::pair<const CWalletTx*,unsigned int> pcoin : setCoins)
     {
         if (wallet.GetTxDepthInMainChain(*pcoin.first) >= Params().GetConsensus().nCoinbaseMaturity)
         {
-            nWeight += pcoin.first->tx->vout[pcoin.second].nValue;
+            const CAmount nCoinValue = pcoin.first->tx->vout[pcoin.second].nValue;
+            const CAmount nWeightValue = std::min(nCoinValue, nRemaining);
+            nWeight += nWeightValue;
+            nRemaining -= nWeightValue;
+            if (nRemaining <= 0) break;
         }
     }
 
@@ -1423,6 +1442,9 @@ void AvailableCoinsForStaking(const CWallet& wallet,
     const int min_depth = std::max(DEFAULT_MIN_DEPTH, Params().GetConsensus().nCoinbaseMaturity);
     const int max_depth = DEFAULT_MAX_DEPTH;
     const bool only_safe = true;
+    const CBlockIndex* tip = wallet.chain().getTip();
+    const int spend_height = tip ? tip->nHeight + 1 : 0;
+    const int64_t spend_time = tip ? tip->GetMedianTimePast() : 0;
 
     // Never stake UTXOs carrying live RGB single-use-seal or EUTXO state.
     const std::set<COutPoint> protected_rgb_seals = wallet.GetProtectedRGBSeals();
@@ -1469,6 +1491,12 @@ void AvailableCoinsForStaking(const CWallet& wallet,
                 continue;
 
             if (wallet.IsSpent(outpoint))
+                continue;
+
+            if (IsGeneratedQuantumStakeCandidate(wallet, outpoint, output.scriptPubKey))
+                continue;
+
+            if (IsDemurrageLockedStakeCandidate(wallet, outpoint, output.scriptPubKey, spend_height, spend_time))
                 continue;
 
             // Never stake an RGB seal / EUTXO-state UTXO; spending it would burn the asset.
@@ -1580,7 +1608,6 @@ bool SelectCoinsForStaking(const CWallet& wallet, CAmount& nTargetValue, std::se
 typedef std::vector<unsigned char> valtype;
 bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterval, CMutableTransaction& txNew, CAmount& nFees, CTxDestination destination, const std::vector<CTransactionRef>& selected_txs)
 {
-    bool fAllowWatchOnly = wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS);
     CBlockIndex* pindexPrev = wallet.chain().getTip();
     arith_uint256 bnTargetPerCoinDay;
     bnTargetPerCoinDay.SetCompact(nBits);
@@ -1594,19 +1621,10 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
     scriptEmpty.clear();
     txNew.vout.push_back(CTxOut(0, scriptEmpty));
 
-    // Choose coins to use
-    const auto bal = GetBalance(wallet);
-    CAmount nBalance = bal.m_mine_trusted;
-    if (fAllowWatchOnly)
-        nBalance += bal.m_watchonly_trusted;
-
-    if (nBalance <= wallet.m_reserve_balance)
-        return false;
-
     std::set<std::pair<const CWalletTx*, unsigned int> > setCoins;
     std::vector<CTransactionRef> vwtxPrev;
     CAmount nValueIn = 0;
-    CAmount nAllowedBalance = nBalance - wallet.m_reserve_balance;
+    CAmount nTargetValue = MAX_MONEY;
     const int64_t stake_mtp = pindexPrev->GetMedianTimePast();
     const int stake_height = pindexPrev->nHeight + 1;
     const Consensus::Params& consensus = Params().GetConsensus();
@@ -1616,11 +1634,13 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
     const bool stake_reward_split_active = consensus.IsStakeRewardSplitActive(stake_height);
 
     // Select coins with suitable depth
-    if (!SelectCoinsForStaking(wallet, nAllowedBalance, setCoins, nValueIn))
+    if (!SelectCoinsForStaking(wallet, nTargetValue, setCoins, nValueIn))
         return false;
 
-    if (setCoins.empty())
+    if (setCoins.empty() || nValueIn <= wallet.m_reserve_balance)
         return false;
+
+    CAmount nAllowedBalance = nValueIn - wallet.m_reserve_balance;
 
     if (IsGoldRushStakeHeight(pindexPrev) && !final_quantum_lockout) {
         const std::set<CScript> whitelisted_scripts = WhitelistedGoldRushStakeScripts(wallet.chain().getCoinsTip(), setCoins);
@@ -1841,7 +1861,7 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
             if (!GetCoinStakeInputPrincipal(wallet.chain().getCoinsTip(), candidate_outpoint, consensus, pindexPrev->nHeight + 1, stake_mtp, candidate_principal))
                 continue;
             // Stop adding inputs if reached reserve limit
-            if (nCredit + candidate_principal > nBalance - wallet.m_reserve_balance)
+            if (nCredit + candidate_principal > nAllowedBalance)
                 break;
             // Do not add additional significant input
             if (candidate_principal >= GetStakeCombineThreshold())

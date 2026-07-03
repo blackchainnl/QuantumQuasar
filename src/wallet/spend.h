@@ -80,6 +80,15 @@ struct CoinFilterParams {
     bool include_immature_coinbase{false};
     // By default, skip locked UTXOs
     bool skip_locked{true};
+    // Ordinary wallet funding must not consume unmoved Gold Rush rewards. Status
+    // and guided migration views opt in so users can still see and move them.
+    bool include_generated_quantum_inputs{false};
+    // Bonded and still-unbonding tiered quantum outputs require the guided
+    // unbond/withdraw paths. Ordinary sends and staking skip them by default.
+    bool include_locked_quantum_stake_outputs{false};
+    // Fully decayed demurrage outputs are consensus-locked. Listing views opt in
+    // so users can diagnose them, but ordinary funding skips them.
+    bool include_demurrage_locked_outputs{false};
 };
 
 /**

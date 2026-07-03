@@ -209,6 +209,32 @@ class GoldRushMigrationRpcTest(BitcoinTestFramework):
         assert_equal(status["goldrush_remigration_active"], True)
         assert_equal(status["goldrush_reward_outputs_needing_move"], 1)
 
+        self.log.info("Ordinary sends do not auto-consume unmoved Gold Rush reward outputs")
+        non_reward_locks = [
+            {"txid": utxo["txid"], "vout": utxo["vout"]}
+            for utxo in wallet.listunspent(1, 9999999)
+            if utxo["txid"] != payout_utxo["txid"] or utxo["vout"] != payout_utxo["vout"]
+        ]
+        wallet.lockunspent(False, non_reward_locks)
+        try:
+            assert_raises_rpc_error(
+                -6,
+                "Insufficient funds",
+                wallet.sendtoaddress,
+                wallet.getnewquantumaddress()["address"],
+                Decimal("1"),
+            )
+        finally:
+            wallet.lockunspent(True, non_reward_locks)
+        self._assert_one_reward_needs_move(wallet, payout_amount, phase="migration", remigration_active=True)
+
+        self.log.info("Raw spends cannot bypass the Gold Rush fresh-address move rule")
+        _, same_address_signed = self._build_quantum_spend(wallet, payout_utxo, payout_address)
+        assert_equal(same_address_signed["complete"], True)
+        same_address_accept = node.testmempoolaccept([same_address_signed["hex"]])[0]
+        assert_equal(same_address_accept["allowed"], False)
+        assert_equal(same_address_accept["reject-reason"], "goldrush-remigration-same-address")
+
         self.log.info("migrategoldrushrewards can dry-run once migration activates quantum reward spends")
         assert_raises_rpc_error(
             -8,

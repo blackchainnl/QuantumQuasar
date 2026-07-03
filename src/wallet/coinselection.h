@@ -134,6 +134,13 @@ public:
     }
 
     bool HasEffectiveValue() const { return effective_value.has_value(); }
+
+    void SetEffectiveInputValue(CAmount input_value)
+    {
+        if (fee) {
+            effective_value = input_value - fee.value();
+        }
+    }
 };
 
 /** Parameters for one iteration of Coin Selection. */
