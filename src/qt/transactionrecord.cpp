@@ -26,6 +26,8 @@ bool IsGoldRushWalletControlTx(const std::map<std::string, std::string>& map_val
     return it->second == "Quantum Quasar built-in shadow PoW claim" ||
            it->second == "Blackcoin shadow PoW claim" ||
            it->second == "Gold Rush PoW claim" ||
+           it->second == "PoW Claim" ||
+           it->second == "PoS Claim" ||
            it->second == "Quantum PoW Claim" ||
            it->second == "Quantum PoS Claim" ||
            it->second == "goldrush-pow" ||
@@ -37,8 +39,8 @@ std::string GoldRushWalletControlLabel(const std::map<std::string, std::string>&
 {
     const auto it = map_value.find("comment");
     if (it == map_value.end()) return {};
-    if (it->second == "Quantum PoS Claim" || it->second.find("signal") != std::string::npos || it->second == "pos-goldrush-test") return "PoS Claim";
-    if (it->second == "Quantum PoW Claim" || it->second.find("PoW claim") != std::string::npos || it->second.find("shadow PoW") != std::string::npos || it->second == "goldrush-pow") return "PoW Claim";
+    if (it->second == "PoS Claim" || it->second == "Quantum PoS Claim" || it->second.find("signal") != std::string::npos || it->second == "pos-goldrush-test") return "PoS Claim";
+    if (it->second == "PoW Claim" || it->second == "Quantum PoW Claim" || it->second.find("PoW claim") != std::string::npos || it->second.find("shadow PoW") != std::string::npos || it->second == "goldrush-pow") return "PoW Claim";
     return "Quantum Claim";
 }
 

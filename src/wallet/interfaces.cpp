@@ -1018,20 +1018,18 @@ util::Result<WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
         auto migration = CreateGoldRushColdStakeMigration(wallet);
         if (!migration) return util::Error{util::ErrorString(migration)};
 
-        auto delegation = FundColdStakeDelegationAddress(wallet, address, amount, allow_goldrush_migration);
-        if (!delegation) {
-            return util::Error{strprintf(
-                _("Gold Rush rewards were moved to fresh quantum address %s in transaction %s, but the cold-stake delegation was not broadcast yet: %s"),
-                migration->address,
-                migration->txid,
-                util::ErrorString(delegation).original)};
-        }
-        delegation->created_migration = true;
-        delegation->migration_txid = migration->txid;
-        delegation->migration_address = migration->address;
-        delegation->migration_amount = migration->amount;
-        delegation->migration_fee = migration->fee;
-        return delegation;
+        WalletQuantumOperatorBondTx result;
+        result.txid = migration->txid;
+        result.address = address;
+        result.amount = amount;
+        result.created_migration = true;
+        result.completed_delegation = false;
+        result.migration_txid = migration->txid;
+        result.migration_address = migration->address;
+        result.migration_amount = migration->amount;
+        result.migration_fee = migration->fee;
+        result.warning = _("Gold Rush rewards were moved to a fresh quantum address. Wait for that transaction to confirm, then fund this cold-stake delegation again.").original;
+        return result;
     }
 
     mapValue_t map_value;

@@ -389,7 +389,7 @@ void StakingMiningPage::setupUi()
     m_dashboard_pow = new QLabel(tr("PoW miner status will appear here."), dashboardBox);
     m_dashboard_pow->setObjectName(QStringLiteral("stakingMiningDashboardPow"));
     configureStatusCard(m_dashboard_pow);
-    m_dashboard_coldstake = new QLabel(tr("Quantum staking status will appear here."), dashboardBox);
+    m_dashboard_coldstake = new QLabel(tr("Cold staking status will appear here."), dashboardBox);
     m_dashboard_coldstake->setObjectName(QStringLiteral("stakingMiningDashboardColdstake"));
     configureStatusCard(m_dashboard_coldstake);
     auto* systemHelp = makeHelpButton(
@@ -405,7 +405,7 @@ void StakingMiningPage::setupUi()
            "<li><b>Choose a staking mode.</b> Stake locally if you want this machine to secure the network with your coins, run a node if you want to stake delegated cold deposits, or delegate to a verified node if you want owner keys offline.</li>"
            "</ol>"
            "<h3>Where transactions appear</h3>"
-           "<p>Legacy-visible Gold Rush participation is recorded through QQSIGNAL and QQSPROOF control transactions. Quantum rewards are tracked by upgraded nodes as quantum shadow-ledger credits and displayed in the wallet as <b>Quantum PoS Reward</b> or <b>Quantum PoW Reward</b>.</p>"),
+           "<p>Legacy-visible Gold Rush participation is recorded through QQSIGNAL and QQSPROOF control transactions. Quantum rewards are tracked by upgraded nodes as quantum shadow-ledger credits and displayed in the wallet as <b>PoS - Quantum Stake</b> or <b>PoW - Quantum Claim</b>.</p>"),
         dashboardBox);
     auto* safetyHelp = makeHelpButton(
         tr("Safety"),
@@ -493,7 +493,7 @@ void StakingMiningPage::setupUi()
            "<li>The wallet must be normally unlocked so it can publish a QQSIGNAL transaction. Staking-only unlock is not enough for this part.</li>"
            "</ul>"
            "<h3>How payouts work</h3>"
-           "<p>Qualified active signalers share the PoS Gold Rush pool. The wallet displays these reward credits as <b>Quantum PoS Reward</b> and shows the quantum payout address in the transaction list.</p>"
+           "<p>Qualified active signalers share the PoS Gold Rush pool. The wallet displays these reward credits as <b>PoS - Quantum Stake</b> and shows the quantum payout address in the transaction list.</p>"
            "<h3>Example</h3>"
            "<p>If your wallet was whitelisted and solves a PoS block, keep staking enabled and unlock with <b>Quantum and Legacy Staking</b>. The wallet publishes the signal and remains in the active signaler set until the activity window expires.</p>"),
         stakingBox);
@@ -610,7 +610,7 @@ void StakingMiningPage::setupUi()
            "<h3>CPU controls</h3>"
            "<p>The default is intentionally conservative: 1 core at 1 percent. Increase cores or percent only if you want this computer to spend more CPU time mining claims.</p>"
            "<h3>What you will see</h3>"
-           "<p>The wallet shows the control transaction fee on the legacy side and the quantum reward as <b>Quantum PoW Reward</b> when the upgraded ledger credit is accepted.</p>"),
+           "<p>The wallet shows the control transaction fee on the legacy side and the quantum reward as <b>PoW - Quantum Claim</b> when the upgraded ledger credit is accepted.</p>"),
         powBox);
     auto* payoutHelp = makeHelpButton(
         tr("Payout"),
@@ -642,7 +642,7 @@ void StakingMiningPage::setupUi()
     miningLayout->addStretch();
 
     // ---- Quantum cold-staking section ----
-    auto* coldstakeBox = new QGroupBox(tr("Quantum staking and cold staking"), this);
+    auto* coldstakeBox = new QGroupBox(tr("Cold Staking"), this);
     auto* coldstakeOuter = new QVBoxLayout(coldstakeBox);
     auto* coldstakeTabs = new QTabWidget(coldstakeBox);
     auto* selfStakeTab = new QWidget(coldstakeTabs);
@@ -1596,7 +1596,7 @@ void StakingMiningPage::onCreateSelfStakeAddress()
     if (!result) {
         const QString msg = QString::fromStdString(util::ErrorString(result).original);
         m_selfstake_status->setText(msg);
-        QMessageBox::warning(this, tr("Quantum staking"), msg);
+        QMessageBox::warning(this, tr("Cold staking"), msg);
         return;
     }
     m_selfstake_address->setText(QString::fromStdString(result->address));
@@ -1702,13 +1702,13 @@ void StakingMiningPage::onWithdrawSelfStakeAddress()
     }
 
     if (result->started_unbonding) {
-        m_selfstake_last_action_status = tr("Quantum staking unbonding started: %1. Amount: %2. Unlock height: %3. Fee: %4.")
+        m_selfstake_last_action_status = tr("Cold staking unbonding started: %1. Amount: %2. Unlock height: %3. Fee: %4.")
             .arg(QString::fromStdString(result->txid))
             .arg(formatBLK(result->amount))
             .arg(result->unlock_height)
             .arg(formatBLK(result->fee));
     } else {
-        m_selfstake_last_action_status = tr("Quantum staking funds withdrawn: %1. Amount: %2. Destination: %3. Fee: %4.")
+        m_selfstake_last_action_status = tr("Cold staking funds withdrawn: %1. Amount: %2. Destination: %3. Fee: %4.")
             .arg(QString::fromStdString(result->txid))
             .arg(formatBLK(result->amount))
             .arg(QString::fromStdString(result->address))
@@ -2595,25 +2595,25 @@ void StakingMiningPage::updateStatus()
         if (stake_info.valid_operator_address) {
             if (stake_info.bonded_outputs > 0) {
                 m_selfstake_withdraw_available = true;
-                m_selfstake_status->setText(tr("Quantum staking active: %1 across %2 output(s). Lock period: %3 blocks. Stop/withdraw starts this address's unbonding period.")
+                m_selfstake_status->setText(tr("Cold staking active: %1 across %2 output(s). Lock period: %3 blocks. Stop/withdraw starts this address's unbonding period.")
                     .arg(formatBLK(stake_info.bonded_amount))
                     .arg(stake_info.bonded_outputs)
                     .arg(lock_blocks));
                 m_selfstake_withdraw->setText(tr("Start withdrawal"));
             } else if (stake_info.withdrawable_outputs > 0) {
-                m_selfstake_status->setText(tr("Quantum staking funds are unbonded and withdrawable: %1 across %2 output(s).")
+                m_selfstake_status->setText(tr("Cold staking funds are unbonded and withdrawable: %1 across %2 output(s).")
                     .arg(formatBLK(stake_info.withdrawable_amount))
                     .arg(stake_info.withdrawable_outputs));
                 m_selfstake_withdraw->setText(tr("Complete withdrawal"));
                 m_selfstake_withdraw_available = true;
             } else if (stake_info.unbonding_outputs > 0) {
-                m_selfstake_status->setText(tr("Quantum staking funds are unbonding: %1 across %2 output(s). Next unlock height: %3.")
+                m_selfstake_status->setText(tr("Cold staking funds are unbonding: %1 across %2 output(s). Next unlock height: %3.")
                     .arg(formatBLK(stake_info.unbonding_amount))
                     .arg(stake_info.unbonding_outputs)
                     .arg(stake_info.next_unlock_height));
                 m_selfstake_withdraw->setText(tr("Withdrawal pending"));
             } else {
-                m_selfstake_status->setText(tr("Quantum staking address ready with %1 bonded blocks. Click Activate staking to fund and start using it.")
+                m_selfstake_status->setText(tr("Cold staking address ready with %1 bonded blocks. Click Activate staking to fund and start using it.")
                     .arg(lock_blocks));
                 m_selfstake_withdraw->setText(tr("Stop staking"));
             }
@@ -2744,7 +2744,7 @@ void StakingMiningPage::updateStatus()
         .arg(goldrush_move_note));
 
     m_dashboard_coldstake->setText(tr(
-        "<b>Quantum staking</b><br>"
+        "<b>Cold staking</b><br>"
         "Ready to stake/delegate: %1<br>"
         "Bonded/delegated: %2<br>"
         "Pending delegation: %3")
@@ -2830,7 +2830,7 @@ void StakingMiningPage::resetStatusForNoWallet()
     m_dashboard_wallet->setText(tr("<b>Wallet</b><br>No wallet loaded."));
     m_dashboard_pos->setText(tr("<b>PoS Gold Rush</b><br>No wallet loaded."));
     m_dashboard_pow->setText(tr("<b>PoW Gold Rush</b><br>No wallet loaded."));
-    m_dashboard_coldstake->setText(tr("<b>Quantum staking</b><br>No wallet loaded."));
+    m_dashboard_coldstake->setText(tr("<b>Cold staking</b><br>No wallet loaded."));
 
     m_donation_enable->setChecked(false);
     m_donation_status->setText(tr("Load a wallet to configure staking reward donations."));

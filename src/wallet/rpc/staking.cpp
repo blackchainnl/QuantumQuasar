@@ -926,19 +926,20 @@ static RPCHelpMan fundquantumcoldstakeaddress()
 {
     return RPCHelpMan{"fundquantumcoldstakeaddress",
         "\nFunds a quantum cold-stake delegation address from direct quantum funds.\n"
-        "Gold Rush reward outputs are never moved as a side effect unless options.allow_goldrush_migration is true.\n" +
+        "If direct quantum funds are not available, wallet-owned Gold Rush reward outputs are first moved to a fresh quantum address unless options.allow_goldrush_migration is false.\n"
+        "When that migration is required, this call returns completed_delegation=false; wait for the migration transaction to confirm, then call this RPC again to fund the delegation.\n" +
         HELP_REQUIRING_PASSPHRASE,
         {
             {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "Wallet-backed quantum cold-stake delegation address."},
             {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "Amount to delegate."},
             {"options", RPCArg::Type::OBJ, RPCArg::Default{UniValue::VOBJ}, "Delegation funding options.", {
-                {"allow_goldrush_migration", RPCArg::Type::BOOL, RPCArg::Default{false}, "Allow this RPC to first move wallet-owned Gold Rush reward outputs to a fresh quantum address if direct quantum funds are not currently available."},
+                {"allow_goldrush_migration", RPCArg::Type::BOOL, RPCArg::Default{true}, "Allow this RPC to first move wallet-owned Gold Rush reward outputs to a fresh quantum address if direct quantum funds are not currently available."},
             }},
         },
         RPCResult{RPCResult::Type::OBJ, "", "", QuantumStakeTxResult()},
         RPCExamples{
             HelpExampleCli("fundquantumcoldstakeaddress", "\"coldstake_delegation_address\" 1000")
-          + HelpExampleCli("fundquantumcoldstakeaddress", "\"coldstake_delegation_address\" 1000 '{\"allow_goldrush_migration\":true}'")
+          + HelpExampleCli("fundquantumcoldstakeaddress", "\"coldstake_delegation_address\" 1000 '{\"allow_goldrush_migration\":false}'")
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -947,7 +948,7 @@ static RPCHelpMan fundquantumcoldstakeaddress()
     pwallet->BlockUntilSyncedToCurrentChain();
 
     const UniValue options = request.params[2].isNull() ? UniValue(UniValue::VOBJ) : request.params[2].get_obj();
-    const bool allow_goldrush_migration = options.exists("allow_goldrush_migration") && options["allow_goldrush_migration"].get_bool();
+    const bool allow_goldrush_migration = !options.exists("allow_goldrush_migration") || options["allow_goldrush_migration"].get_bool();
 
     return ThrowOrReturnQuantumStakeTx(FundColdStakeDelegationAddress(
         *pwallet,
@@ -1179,8 +1180,8 @@ static RPCHelpMan sendshadowsignal()
     CTransactionRef tx = MakeTransactionRef(std::move(signal_tx));
     const std::string hex = EncodeHexTx(*tx);
     mapValue_t map_value;
-    map_value["comment"] = "Quantum PoS Claim";
-    CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "Quantum PoS Claim");
+    map_value["comment"] = "PoS Claim";
+    CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "PoS Claim");
 
     UniValue result(UniValue::VOBJ);
     result.pushKV("txid", tx->GetHash().GetHex());
@@ -1451,8 +1452,8 @@ static RPCHelpMan sendshadowpowclaim()
     }
 
     mapValue_t map_value;
-    map_value["comment"] = "Quantum PoW Claim";
-    CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "Quantum PoW Claim");
+    map_value["comment"] = "PoW Claim";
+    CommitWalletTransactionOrThrow(*pwallet, tx, std::move(map_value), "PoW Claim");
 
     UniValue result(UniValue::VOBJ);
     result.pushKV("txid", tx->GetHash().GetHex());

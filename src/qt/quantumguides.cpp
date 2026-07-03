@@ -39,9 +39,9 @@ QString CommonGuide()
 
 <h3>How to read transaction names</h3>
 <ul>
-<li><b>Quantum PoS Reward</b> means a PoS quantum reward credit was accepted for a quantum payout address.</li>
-<li><b>Quantum PoW Reward</b> means a PoW quantum claim was accepted and credited to a quantum payout address.</li>
-<li><b>Quantum PoW Claim</b> or <b>Quantum PoS Claim</b> is the small control transaction and fee that anchored participation on the legacy-visible chain.</li>
+<li><b>PoS - Quantum Stake</b> means a PoS quantum reward credit was accepted for a quantum payout address.</li>
+<li><b>PoW - Quantum Claim</b> means a PoW quantum claim was accepted and credited to a quantum payout address.</li>
+<li><b>PoW Claim</b> or <b>PoS Claim</b> is the small control transaction and fee that anchored participation on the legacy-visible chain.</li>
 </ul>
 <p>Seeing a small negative fee entry next to a quantum reward is expected. The fee is the legacy-chain cost of anchoring participation. The reward is the upgraded quantum credit.</p>
 )HTML");
@@ -67,7 +67,7 @@ QString PosGuide()
 <p>Legacy staking-only unlock is intentionally narrow. It lets the wallet create ordinary legacy coinstakes without opening the wallet for spending. A Gold Rush signal is not just a legacy coinstake. It is an extra wallet-authenticated control transaction that links the qualifying activity to a quantum payout address. That requires normal signing authority.</p>
 
 <h3>Where PoS rewards go</h3>
-<p>Ordinary staking rewards follow the usual legacy staking path. Gold Rush reward credits go to a quantum payout address. In the transaction list, the upgraded credit should be labeled <b>Quantum PoS Reward</b> and should show the quantum destination so the user can tell which address received the reward.</p>
+<p>Ordinary staking rewards follow the usual legacy staking path. Gold Rush reward credits go to a quantum payout address. In the transaction list, the upgraded credit should be labeled <b>PoS - Quantum Stake</b> and should show the quantum destination so the user can tell which address received the reward.</p>
 
 <h3>What to do if you expected a PoS reward but do not see one</h3>
 <ul>
@@ -161,7 +161,7 @@ QString MigrationGuide()
 <h3>Gold Rush reward example</h3>
 <ol>
 <li>The wallet receives a PoW or PoS Gold Rush quantum reward.</li>
-<li>The transaction list labels it as Quantum PoW Reward or Quantum PoS Reward.</li>
+<li>The transaction list labels it as <b>PoW - Quantum Claim</b> or <b>PoS - Quantum Stake</b>.</li>
 <li>The reward must be moved once to a fresh quantum address before ordinary use.</li>
 <li>After the move, the wallet can use it for a send, local staking, node bond, or delegation.</li>
 </ol>

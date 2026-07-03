@@ -153,6 +153,7 @@ BASE_SCRIPTS = [
     'feature_goldrush_pos_single_utxo.py',
     'feature_goldrush_shadow_replay.py',
     'feature_goldrush_migration_rpc.py',
+    'feature_goldrush_coldstake_auto_migration.py',
     'feature_goldrush_coinstatsindex.py',
     'feature_goldrush_reorg.py',
     'feature_goldrush_schedule_controls.py',

@@ -22,6 +22,8 @@ static bool IsGoldRushWalletControlTx(const CWalletTx& wtx)
     return it->second == "Quantum Quasar built-in shadow PoW claim" ||
            it->second == "Blackcoin shadow PoW claim" ||
            it->second == "Blackcoin shadow signal" ||
+           it->second == "PoW Claim" ||
+           it->second == "PoS Claim" ||
            it->second == "Quantum PoW Claim" ||
            it->second == "Quantum PoS Claim";
 }

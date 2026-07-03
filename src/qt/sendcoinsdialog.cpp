@@ -51,15 +51,21 @@ enum SpendSource {
     SPEND_SOURCE_QUANTUM = 1,
 };
 
-bool IsQuantumDestinationString(const QString& address)
+bool IsQuantumMigrationDestinationString(const QString& address)
 {
     const CTxDestination dest = DecodeDestination(address.toStdString());
-    return IsValidDestination(dest) && (IsQuantumMigrationDestination(dest) || IsQuantumColdStakeDestination(dest));
+    return IsValidDestination(dest) && IsQuantumMigrationDestination(dest);
 }
 
-bool IsQuantumDestinationValue(const CTxDestination& dest)
+bool IsQuantumColdStakeDestinationString(const QString& address)
 {
-    return IsValidDestination(dest) && (IsQuantumMigrationDestination(dest) || IsQuantumColdStakeDestination(dest));
+    const CTxDestination dest = DecodeDestination(address.toStdString());
+    return IsValidDestination(dest) && IsQuantumColdStakeDestination(dest);
+}
+
+bool IsQuantumMigrationDestinationValue(const CTxDestination& dest)
+{
+    return IsValidDestination(dest) && IsQuantumMigrationDestination(dest);
 }
 } // namespace
 
@@ -765,13 +771,17 @@ void SendCoinsDialog::updateCoinControlState()
 
 bool SendCoinsDialog::validateSpendSourceRecipients(const QList<SendCoinsRecipient>& recipients)
 {
-    if (!m_spend_source_combo || m_spend_source_combo->currentData().toInt() != SPEND_SOURCE_QUANTUM) {
-        return true;
-    }
     for (const SendCoinsRecipient& rcp : recipients) {
-        if (!IsQuantumDestinationString(rcp.address)) {
+        if (IsQuantumColdStakeDestinationString(rcp.address)) {
             Q_EMIT message(tr("Send Coins"),
-                           tr("Quantum wallet funds can only be sent to quantum addresses. Select legacy wallet funds to send to a legacy address."),
+                           tr("Cold-stake contract addresses cannot be funded from the ordinary Send tab. Use Staking & Mining -> Cold Staking so the wallet can verify the selected node and prepare the delegation safely."),
+                           CClientUIInterface::MSG_ERROR);
+            return false;
+        }
+        if (m_spend_source_combo && m_spend_source_combo->currentData().toInt() == SPEND_SOURCE_QUANTUM &&
+            !IsQuantumMigrationDestinationString(rcp.address)) {
+            Q_EMIT message(tr("Send Coins"),
+                           tr("Quantum wallet funds can only be sent to direct quantum wallet addresses. Select legacy wallet funds to send to a legacy address."),
                            CClientUIInterface::MSG_ERROR);
             return false;
         }
@@ -786,11 +796,11 @@ bool SendCoinsDialog::ensureSpendSourceChange(CCoinControl& coin_control)
     }
 
     if (IsValidDestination(coin_control.destChange)) {
-        if (IsQuantumDestinationValue(coin_control.destChange)) {
+        if (IsQuantumMigrationDestinationValue(coin_control.destChange)) {
             return true;
         }
         Q_EMIT message(tr("Send Coins"),
-                       tr("Quantum wallet funds require a quantum change address. Clear the custom change address or enter a quantum address."),
+                       tr("Quantum wallet funds require a direct quantum change address. Clear the custom change address or enter a direct quantum wallet address. Cold-stake contract addresses cannot be used as ordinary change."),
                        CClientUIInterface::MSG_ERROR);
         return false;
     }
@@ -803,9 +813,9 @@ bool SendCoinsDialog::ensureSpendSourceChange(CCoinControl& coin_control)
         return false;
     }
     const CTxDestination change_dest = DecodeDestination(quantum_change->address);
-    if (!IsQuantumDestinationValue(change_dest)) {
+    if (!IsQuantumMigrationDestinationValue(change_dest)) {
         Q_EMIT message(tr("Send Coins"),
-                       tr("Unable to create a valid quantum change address."),
+                       tr("Unable to create a valid direct quantum change address."),
                        CClientUIInterface::MSG_ERROR);
         return false;
     }
@@ -919,6 +929,10 @@ void SendCoinsDialog::coinControlChangeEdited(const QString& text)
         else if (!IsValidDestination(dest)) // Invalid address
         {
             ui->labelCoinControlChangeLabel->setText(tr("Warning: Invalid Blackcoin address"));
+        }
+        else if (IsQuantumColdStakeDestination(dest))
+        {
+            ui->labelCoinControlChangeLabel->setText(tr("Warning: Cold-stake contract addresses cannot be used as ordinary change. Use Staking & Mining -> Cold Staking."));
         }
         else // Valid address
         {

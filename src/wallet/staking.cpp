@@ -160,15 +160,17 @@ struct AutoShadowSignalCandidate
     uint256 solve_hash;
 };
 
-static constexpr const char* SHADOW_SIGNAL_COMMENT{"Quantum PoS Claim"};
-static constexpr const char* SHADOW_SIGNAL_PAYOUT_LABEL{"Quantum PoS Reward Address"};
+static constexpr const char* SHADOW_SIGNAL_COMMENT{"PoS Claim"};
+static constexpr const char* OLD_SHADOW_SIGNAL_COMMENT{"Quantum PoS Claim"};
+static constexpr const char* SHADOW_SIGNAL_PAYOUT_LABEL{"PoS - Quantum Stake Address"};
+static constexpr const char* OLD_SHADOW_SIGNAL_PAYOUT_LABEL{"Quantum PoS Reward Address"};
 static constexpr const char* LEGACY_SHADOW_SIGNAL_PAYOUT_LABEL{"goldrush-pos"};
 
 bool HasPendingShadowSignal(CWallet& wallet) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
 {
     for (const auto& [txid, wtx] : wallet.mapWallet) {
         const auto comment = wtx.mapValue.find("comment");
-        if (comment == wtx.mapValue.end() || comment->second != SHADOW_SIGNAL_COMMENT) continue;
+        if (comment == wtx.mapValue.end() || (comment->second != SHADOW_SIGNAL_COMMENT && comment->second != OLD_SHADOW_SIGNAL_COMMENT)) continue;
         if (wtx.isAbandoned() || wtx.isConflicted()) continue;
         if (wallet.GetTxDepthInMainChain(wtx) == 0) return true;
     }
@@ -181,7 +183,7 @@ bool EnsureShadowSignalPayout(CWallet& wallet, CScript& payout_script, std::stri
         LOCK(wallet.cs_wallet);
         for (const auto& [dest, entry] : wallet.m_address_book) {
             const std::string label = entry.GetLabel();
-            if (entry.IsChange() || (label != SHADOW_SIGNAL_PAYOUT_LABEL && label != LEGACY_SHADOW_SIGNAL_PAYOUT_LABEL)) continue;
+            if (entry.IsChange() || (label != SHADOW_SIGNAL_PAYOUT_LABEL && label != OLD_SHADOW_SIGNAL_PAYOUT_LABEL && label != LEGACY_SHADOW_SIGNAL_PAYOUT_LABEL)) continue;
             if (!IsValidDestination(dest) || !IsQuantumMigrationDestination(dest)) continue;
             if (wallet.IsMine(dest) == ISMINE_NO) continue;
             payout_address = EncodeDestination(dest);

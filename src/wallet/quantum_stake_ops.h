@@ -42,7 +42,11 @@ util::Result<interfaces::WalletQuantumOperatorBondTx> WithdrawTieredStakeAddress
     std::optional<COutPoint> selected_outpoint = std::nullopt,
     bool allow_all_outputs = true);
 
-util::Result<interfaces::WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(CWallet& wallet, const std::string& address, CAmount amount, bool allow_goldrush_migration);
+util::Result<interfaces::WalletQuantumOperatorBondTx> FundColdStakeDelegationAddress(
+    CWallet& wallet,
+    const std::string& address,
+    CAmount amount,
+    bool allow_goldrush_migration);
 util::Result<interfaces::WalletQuantumOperatorBondTx> WithdrawColdStakeDelegationAddress(
     CWallet& wallet,
     const std::string& address,
