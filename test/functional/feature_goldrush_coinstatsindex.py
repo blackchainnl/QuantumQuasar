@@ -35,7 +35,8 @@ class GoldRushCoinStatsIndexTest(BitcoinTestFramework):
             "-txindex=1",
             "-staketimio=50",
             "-shadowwhitelistheight=1",
-            "-shadowgoldrushblocks=500",
+            "-shadowgoldrushstartheight=20",
+            "-shadowgoldrushblocks=10",
             f"-qqgoldrushendtime={GOLD_RUSH_END_TIME}",
         ]
         self.extra_args = [

@@ -30,6 +30,8 @@ class QuantumColdStakingTest(BitcoinTestFramework):
             "-txindex=1",
             "-staketimio=50",
             "-donatetodevfund=0",
+            "-shadowwhitelistheight=1",
+            "-shadowgoldrushblocks=1",
             "-qqgoldrushendtime=1",
         ]]
 

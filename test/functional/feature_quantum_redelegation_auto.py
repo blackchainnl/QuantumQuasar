@@ -22,6 +22,8 @@ class QuantumRedelegationAutoTest(BitcoinTestFramework):
         self.extra_args = [[
             "-donatetodevfund=0",
             "-staketimio=50",
+            "-shadowwhitelistheight=1",
+            "-shadowgoldrushblocks=1",
             "-qqgoldrushendtime=1",
             "-qqautoredelegate=1",
             "-qqredelegationtriggermultiplier=1",

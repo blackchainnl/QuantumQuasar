@@ -21,6 +21,8 @@ class QuantumRedelegationTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.extra_args = [[
             "-donatetodevfund=0",
+            "-shadowwhitelistheight=1",
+            "-shadowgoldrushblocks=1",
             "-qqgoldrushendtime=1",
         ]]
 
