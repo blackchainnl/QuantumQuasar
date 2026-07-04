@@ -54,6 +54,7 @@ uint64_t GetBogoSize(const CScript& script_pub_key)
 bool IsQuantumQuasarInternalMarkerScript(const CScript& script_pub_key)
 {
     static const valtype marker_whitelist{'Q', 'Q', 'W', 'L'};
+    static const valtype marker_whitelist_ready{'Q', 'Q', 'W', 'L', 'R', 'E', 'A', 'D', 'Y'};
     static const valtype marker_pool{'Q', 'Q', 'P', 'O', 'O', 'L'};
     static const valtype marker_direct_claim{'Q', 'Q', 'D', 'C', 'L', 'A', 'I', 'M'};
     static const valtype marker_gold_rush_payout{'Q', 'Q', 'G', 'R', 'P', 'A', 'Y'};
@@ -67,6 +68,7 @@ bool IsQuantumQuasarInternalMarkerScript(const CScript& script_pub_key)
     if (!script_pub_key.GetOp(pc, opcode, data) || opcode != OP_RETURN) return false;
     if (!script_pub_key.GetOp(pc, opcode, data)) return false;
     if (data != marker_whitelist &&
+        data != marker_whitelist_ready &&
         data != marker_pool &&
         data != marker_direct_claim &&
         data != marker_gold_rush_payout &&
