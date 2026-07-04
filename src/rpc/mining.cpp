@@ -12,6 +12,7 @@
 #include <consensus/consensus.h>
 #include <consensus/merkle.h>
 #include <consensus/params.h>
+#include <consensus/quantum_witness.h>
 #include <consensus/validation.h>
 #include <core_io.h>
 #include <crypto/mldsa.h>
@@ -107,6 +108,17 @@ static UniValue GetNetworkHashPS(int lookup, int height, const CChain& active_ch
     int64_t timeDiff = maxTime - minTime;
 
     return workDiff.getdouble() / timeDiff;
+}
+
+static CScript GetTemplateDummyCoinbaseScript(const Consensus::Params& consensus_params, const CBlockIndex* pindex_prev)
+{
+    if (pindex_prev && consensus_params.IsQuantumFinalLockout(pindex_prev->GetMedianTimePast(), pindex_prev->nHeight + 1)) {
+        return GetScriptForDestination(WitnessUnknown{
+            QUANTUM_MIGRATION_WITNESS_VERSION,
+            std::vector<unsigned char>(QUANTUM_MIGRATION_PROGRAM_SIZE, 0),
+        });
+    }
+    return CScript() << OP_TRUE;
 }
 
 static RPCHelpMan getnetworkhashps()
@@ -787,7 +799,7 @@ static RPCHelpMan getblocktemplate()
         time_start = GetTime();
 
         // Create new block
-        CScript scriptDummy = CScript() << OP_TRUE;
+        CScript scriptDummy = GetTemplateDummyCoinbaseScript(consensusParams, pindexPrevNew);
         pblocktemplate = BlockAssembler{active_chainstate, &mempool}.CreateNewBlock(scriptDummy, nullptr, nullptr);
         if (!pblocktemplate)
             throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");

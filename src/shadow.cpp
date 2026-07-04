@@ -1101,7 +1101,7 @@ CAmount ShadowBaseReward(int height)
     if (height < SHADOW_REWARD_START_HEIGHT || height > SHADOW_REWARD_END_HEIGHT) return 0;
     const int blocks_since_snapshot = height - SHADOW_REWARD_START_HEIGHT;
     if (height <= SHADOW_PHASE1_END_HEIGHT) {
-        const int halvings = blocks_since_snapshot / 43200;
+        const int halvings = blocks_since_snapshot / std::max(1, SHADOW_HALVING_INTERVAL_BLOCKS);
         return (580 * COIN) >> halvings;
     }
     return 463 * COIN;
@@ -1415,12 +1415,15 @@ void MarkGoldRushDirectPayoutOutputs(CCoinsViewCache& view, const CTransaction& 
     }
 }
 
-void UndoGoldRushDirectPayoutOutputMarkers(CCoinsViewCache& view, const CBlockIndex* pindex)
+void UndoGoldRushDirectPayoutOutputMarkers(CCoinsViewCache& view, const CBlock& block, const CBlockIndex* pindex)
 {
     if (!pindex) return;
     if (pindex->nHeight < SHADOW_REWARD_START_HEIGHT || pindex->nHeight > SHADOW_REWARD_END_HEIGHT) return;
-    for (const COutPoint& outpoint : FindMarkerCoins(view, MARKER_GOLD_RUSH_PAYOUT, pindex)) {
-        view.SpendCoin(outpoint);
+    for (const auto& tx : block.vtx) {
+        const uint256 txid = tx->GetHash();
+        for (uint32_t i = 0; i < tx->vout.size(); ++i) {
+            view.SpendCoin(GoldRushPayoutOutpoint(COutPoint{txid, i}));
+        }
     }
 }
 

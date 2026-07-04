@@ -32,6 +32,7 @@
 #include <pos.h>
 #include <pow.h>
 #include <primitives/transaction.h>
+#include <script/interpreter.h>
 #include <shutdown.h> // ShutdownRequested()
 #include <shadow.h>
 #include <support/cleanse.h>
@@ -77,6 +78,44 @@ static bool IsPreMigrationQuantumSpendScript(const CScript& script_pub_key)
     return IsQuantumMigrationScript(script_pub_key) ||
            IsQuantumColdStakeScript(script_pub_key) ||
            IsEUTXOScript(script_pub_key);
+}
+
+static bool IsOpReturnOutput(const CTxOut& txout)
+{
+    return !txout.scriptPubKey.empty() && txout.scriptPubKey[0] == OP_RETURN;
+}
+
+static bool IsFinalLockoutAllowedOutput(const CTransaction& tx, unsigned int output_index)
+{
+    const CTxOut& txout = tx.vout[output_index];
+    if (tx.IsCoinStake() && output_index == 0 && txout.IsEmpty()) return true;
+    if (txout.IsEmpty()) return true;
+    if (IsOpReturnOutput(txout)) return true;
+    return IsQuantumMigrationScript(txout.scriptPubKey) ||
+           IsQuantumColdStakeScript(txout.scriptPubKey) ||
+           IsEUTXOScript(txout.scriptPubKey);
+}
+
+static bool IsPackageTxAllowedAfterFinalLockout(const CTransaction& tx, CCoinsViewCache& inputs, unsigned int flags, int spend_height, const Consensus::Params& consensus_params, int64_t spend_time)
+{
+    if (tx.IsCoinBase()) return true;
+    if (!inputs.HaveInputs(tx)) return false;
+
+    for (const CTxIn& txin : tx.vin) {
+        const Coin& coin = inputs.AccessCoin(txin.prevout);
+        const bool is_quantum_spend = IsQuantumMigrationScript(coin.out.scriptPubKey) ||
+                                      IsQuantumColdStakeScript(coin.out.scriptPubKey);
+        const bool is_eutxo_spend = IsEUTXOScript(coin.out.scriptPubKey);
+        if (!is_quantum_spend && !is_eutxo_spend) return false;
+        if (IsGoldRushDirectPayoutOutput(inputs, txin.prevout)) return false;
+    }
+
+    for (unsigned int i = 0; i < tx.vout.size(); ++i) {
+        if (!IsFinalLockoutAllowedOutput(tx, i)) return false;
+    }
+
+    std::string reject_reason;
+    return CheckTieredStakePrincipalCovenant(tx, inputs, flags, spend_height, reject_reason, &consensus_params, spend_time);
 }
 
 int64_t UpdateTime(CBlock* pblock, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev)
@@ -370,11 +409,24 @@ bool BlockAssembler::TestPackage(uint64_t packageSize, int64_t packageSigOpsCost
 bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& package, uint32_t nTime) const
 {
     CBlockIndex* tip{Assert(m_chainstate.m_chain.Tip())};
-    const CCoinsViewMemPool view_mempool{&m_chainstate.CoinsTip(), *Assert(m_mempool)};
+    CCoinsViewMemPool view_mempool{&m_chainstate.CoinsTip(), *Assert(m_mempool)};
+    CCoinsViewCache package_view{&view_mempool};
+    const int next_height{tip->nHeight + 1};
+    const int64_t next_block_mtp{tip->GetMedianTimePast()};
     std::set<COutPoint> spent_outpoints;
     const bool defer_pre_migration_quantum_spends =
         m_building_pos_template &&
-        !IsQuantumWitnessSpendActive(chainparams.GetConsensus(), tip->GetMedianTimePast(), tip->nHeight + 1);
+        !IsQuantumWitnessSpendActive(chainparams.GetConsensus(), next_block_mtp, next_height);
+    const bool final_quantum_lockout =
+        chainparams.GetConsensus().IsQuantumFinalLockout(next_block_mtp, next_height);
+    unsigned int final_lockout_flags = SCRIPT_VERIFY_LEGACY_ECDSA_LOCKOUT |
+                                       SCRIPT_VERIFY_QUANTUM_ML_DSA |
+                                       SCRIPT_VERIFY_QUANTUM_COLDSTAKE |
+                                       SCRIPT_VERIFY_EUTXO |
+                                       SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
+    if (chainparams.GetConsensus().IsStakeTiersActive(next_height)) {
+        final_lockout_flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
+    }
 
     for (CTxMemPool::txiter selected : inBlock) {
         for (const CTxIn& txin : selected->GetTx().vin) {
@@ -412,6 +464,10 @@ bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& packa
                     return false;
                 }
             }
+        }
+        if (final_quantum_lockout &&
+            !IsPackageTxAllowedAfterFinalLockout(tx, package_view, final_lockout_flags, next_height, chainparams.GetConsensus(), next_block_mtp)) {
+            return false;
         }
         // peercoin: timestamp limit
         if (tx.nTime > GetAdjustedTimeSeconds() || (nTime && tx.nTime > nTime)) {
@@ -626,6 +682,13 @@ void BlockAssembler::addPackageTxs(const CTxMemPool& mempool, int& nPackagesSele
                 break;
             }
             package_has_shadow_proof = true;
+        }
+        if (package_has_shadow_proof && !m_building_pos_template) {
+            if (fUsingModified) {
+                mapModifiedTx.get<ancestor_score>().erase(modit);
+            }
+            failedTx.insert(iter);
+            continue;
         }
         if (package_has_duplicate_shadow_proofs) {
             if (fUsingModified) {

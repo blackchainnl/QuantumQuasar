@@ -302,6 +302,9 @@ public:
                                   opts.shadow_gold_rush_start_height.value_or(whitelist_height + 1),
                                   opts.shadow_gold_rush_blocks.value_or(SHADOW_GOLD_RUSH_BLOCKS));
         }
+        if (opts.shadow_halving_interval_blocks) {
+            SetShadowTestHalvingInterval(*opts.shadow_halving_interval_blocks);
+        }
         consensus.nDemurrageMinActivationHeight = SHADOW_REWARD_END_HEIGHT + 1;
         if (opts.segwit_activation_height) consensus.SegwitHeight = *opts.segwit_activation_height;
         for (const auto& [deployment_pos, version_bits_params] : opts.version_bits_parameters) {
@@ -585,6 +588,9 @@ public:
             SetShadowTestSchedule(whitelist_height,
                                   opts.shadow_gold_rush_start_height.value_or(whitelist_height + 1),
                                   opts.shadow_gold_rush_blocks.value_or(SHADOW_GOLD_RUSH_BLOCKS));
+        }
+        if (opts.shadow_halving_interval_blocks) {
+            SetShadowTestHalvingInterval(*opts.shadow_halving_interval_blocks);
         }
 
         consensus.nProtocolV1RetargetingFixedTime = 1395631999;

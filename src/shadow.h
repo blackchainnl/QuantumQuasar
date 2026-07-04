@@ -70,9 +70,12 @@ extern int SHADOW_REWARD_START_HEIGHT;
 extern int SHADOW_GOLD_RUSH_BLOCKS;
 extern int SHADOW_PHASE1_END_HEIGHT;
 extern int SHADOW_REWARD_END_HEIGHT;
+extern int SHADOW_HALVING_INTERVAL_BLOCKS;
 
 /** Test-only: shift the Gold Rush schedule to a small, reachable window. */
 void SetShadowTestSchedule(int whitelist_height, int reward_start_height, int gold_rush_blocks);
+/** Test-only: compress the phase-one reward halving interval. */
+void SetShadowTestHalvingInterval(int halving_interval_blocks);
 /** Legacy regtest helper: shift the reward window to whitelist_height + 1. */
 void SetShadowRegtestSchedule(int whitelist_height, int gold_rush_blocks);
 
@@ -203,7 +206,7 @@ std::vector<ShadowSyntheticPayoutCoin> GetAppliedShadowClaimPayoutCoins(const CC
 /** Mark/check obsolete direct Gold Rush emission outputs from earlier test builds.
  *  Current Gold Rush blocks no longer create these base-chain payout outputs. */
 void MarkGoldRushDirectPayoutOutputs(CCoinsViewCache& view, const CTransaction& coinstake, const CBlockIndex* pindex, const std::map<CScript, CAmount>& payouts);
-void UndoGoldRushDirectPayoutOutputMarkers(CCoinsViewCache& view, const CBlockIndex* pindex);
+void UndoGoldRushDirectPayoutOutputMarkers(CCoinsViewCache& view, const CBlock& block, const CBlockIndex* pindex);
 bool IsGoldRushDirectPayoutOutput(const CCoinsViewCache& view, const COutPoint& outpoint, CScript* payout_script = nullptr);
 
 /** Apply/remove deterministic shadow claim state for one shadow-epoch block. */

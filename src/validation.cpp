@@ -2858,7 +2858,7 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
         error("DisconnectBlock(): failed to undo Quantum Quasar demurrage state at height %d", pindex->nHeight);
         return DISCONNECT_FAILED;
     }
-    UndoGoldRushDirectPayoutOutputMarkers(view, pindex);
+    UndoGoldRushDirectPayoutOutputMarkers(view, block, pindex);
     UndoLegacyWhitelistSnapshot(view, pindex);
 
     // undo transactions in reverse order
@@ -5937,6 +5937,17 @@ bool Chainstate::ReplayShadowBlocks()
             }
         }
         pindexOld = pindexOld->pprev;
+    }
+
+    // Replay is the recovery path for nodes that upgraded or changed a
+    // testnet-only schedule after shadow state had already been materialized.
+    // DisconnectBlock uses the currently configured schedule, so it will not
+    // necessarily remove markers from blocks that used to be inside a previous
+    // Gold Rush window but are no longer active. Wipe shadow-only marker coins
+    // once at the fork point, then deterministically rebuild them below.
+    const uint64_t purged_markers = PurgeShadowMarkers(cache);
+    if (purged_markers != 0) {
+        LogPrintf("Quantum Quasar: purged %u stale shadow marker coins before replay\n", purged_markers);
     }
 
     for (int height = fork_height + 1; height <= pindexTip->nHeight; ++height) {

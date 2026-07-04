@@ -166,6 +166,7 @@ public:
         std::optional<int> shadow_whitelist_height{};
         std::optional<int> shadow_gold_rush_start_height{};
         std::optional<int> shadow_gold_rush_blocks{};
+        std::optional<int> shadow_halving_interval_blocks{};
         // Deployment overrides (mirrors RegTestOptions) so private testnet
         // chains can activate segwit from genesis; the public testnet activated
         // it via signalling long ago, but a fresh schedule-override chain can
@@ -196,6 +197,7 @@ public:
         std::optional<int> shadow_whitelist_height{};
         std::optional<int> shadow_gold_rush_start_height{};
         std::optional<int> shadow_gold_rush_blocks{};
+        std::optional<int> shadow_halving_interval_blocks{};
     };
 
     static std::unique_ptr<const CChainParams> RegTest(const RegTestOptions& options);

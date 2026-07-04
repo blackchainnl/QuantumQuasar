@@ -903,10 +903,11 @@ bool AppInitParameterInteraction(const ArgsManager& args)
     const bool has_shadow_schedule_override = args.IsArgSet("-shadowwhitelistheight") ||
                                               args.IsArgSet("-shadowgoldrushstartheight") ||
                                               args.IsArgSet("-shadowgoldrushblocks") ||
-                                              args.IsArgSet("-shadowgoldrushendheight");
+                                              args.IsArgSet("-shadowgoldrushendheight") ||
+                                              args.IsArgSet("-shadowhalvinginterval");
     if (has_shadow_schedule_override) {
         if (chain != ChainType::TESTNET && chain != ChainType::REGTEST) {
-            return InitError(_("-shadowwhitelistheight, -shadowgoldrushstartheight, -shadowgoldrushblocks, and -shadowgoldrushendheight are only supported on testnet/regtest in the test schedule branch."));
+            return InitError(_("-shadowwhitelistheight, -shadowgoldrushstartheight, -shadowgoldrushblocks, -shadowgoldrushendheight, and -shadowhalvinginterval are only supported on testnet/regtest in the test schedule branch."));
         }
 
         // The schedule itself is parsed, validated, and applied by chainparams

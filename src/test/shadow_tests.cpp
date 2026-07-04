@@ -1312,7 +1312,9 @@ BOOST_AUTO_TEST_CASE(obsolete_goldrush_direct_payout_markers_are_exact_and_reorg
     BOOST_CHECK(!IsGoldRushDirectPayoutOutput(view, COutPoint{txid, 3}));
     BOOST_CHECK(!IsGoldRushDirectPayoutOutput(view, COutPoint{txid, 4}));
 
-    UndoGoldRushDirectPayoutOutputMarkers(view, &reward_index);
+    CBlock reward_block;
+    reward_block.vtx.push_back(coinstake);
+    UndoGoldRushDirectPayoutOutputMarkers(view, reward_block, &reward_index);
     BOOST_CHECK(!IsGoldRushDirectPayoutOutput(view, COutPoint{txid, 2}));
 }
 

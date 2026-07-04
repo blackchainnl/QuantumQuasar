@@ -92,6 +92,7 @@ void ReadShadowScheduleArgs(const ArgsManager& args,
                             std::optional<int>& shadow_whitelist_height,
                             std::optional<int>& shadow_gold_rush_start_height,
                             std::optional<int>& shadow_gold_rush_blocks,
+                            std::optional<int>& shadow_halving_interval_blocks,
                             std::optional<int>& quantum_gold_rush_end_height,
                             std::optional<int>& quantum_migration_end_height,
                             int default_shadow_start_height)
@@ -131,6 +132,13 @@ void ReadShadowScheduleArgs(const ArgsManager& args,
         shadow_gold_rush_blocks = static_cast<int>(end_height - start_height + 1);
         if (!shadow_gold_rush_start_height) shadow_gold_rush_start_height = static_cast<int>(start_height);
     }
+    if (args.IsArgSet("-shadowhalvinginterval")) {
+        const int64_t blocks = args.GetIntArg("-shadowhalvinginterval", 0);
+        if (blocks <= 0 || blocks >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Invalid block count value (%d) for -shadowhalvinginterval.", blocks));
+        }
+        shadow_halving_interval_blocks = static_cast<int>(blocks);
+    }
     if (args.IsArgSet("-qqgoldrushendheight")) {
         const int64_t height = args.GetIntArg("-qqgoldrushendheight", 0);
         if (height <= 0 || height >= std::numeric_limits<int>::max()) {
@@ -167,6 +175,7 @@ void ReadTestNetArgs(const ArgsManager& args, CChainParams::TestNetOptions& opti
                            options.shadow_whitelist_height,
                            options.shadow_gold_rush_start_height,
                            options.shadow_gold_rush_blocks,
+                           options.shadow_halving_interval_blocks,
                            options.quantum_gold_rush_end_height,
                            options.quantum_migration_end_height,
                            SHADOW_REWARD_START_HEIGHT);
@@ -281,6 +290,7 @@ void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& opti
                            options.shadow_whitelist_height,
                            options.shadow_gold_rush_start_height,
                            options.shadow_gold_rush_blocks,
+                           options.shadow_halving_interval_blocks,
                            options.quantum_gold_rush_end_height,
                            options.quantum_migration_end_height,
                            options.shadow_whitelist_height.value_or(SHADOW_WHITELIST_HEIGHT) + 1);
