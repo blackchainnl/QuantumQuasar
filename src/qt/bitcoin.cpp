@@ -56,6 +56,7 @@
 #include <QLibraryInfo>
 #include <QLocale>
 #include <QMessageBox>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QSettings>
 #include <QThread>
@@ -217,6 +218,53 @@ static std::string PromptLegacyMigrationChoice(const std::string& blackcoin_data
     if (messagebox.clickedButton() == import_blackmore) return "blackmore";
     return "blackcoin";
 }
+
+namespace {
+//! Modal progress feedback for the first-run legacy datadir migration. The
+//! migration runs synchronously before the main event loop starts, so drive
+//! a QProgressDialog manually and pump events to keep the UI responsive —
+//! without this a multi-gigabyte Blackmore import looks like a hung app.
+class MigrationProgressDialog
+{
+public:
+    void Report(const std::string& phase, int progress_percent)
+    {
+        if (!m_dialog) {
+            m_dialog = std::make_unique<QProgressDialog>(QString(), QString(), 0, 100);
+            m_dialog->setWindowModality(Qt::ApplicationModal);
+            m_dialog->setWindowTitle(PACKAGE_NAME);
+            m_dialog->setCancelButton(nullptr);
+            m_dialog->setMinimumDuration(0);
+            m_dialog->setAutoClose(false);
+            m_dialog->setAutoReset(false);
+            m_dialog->setMinimumWidth(420);
+        }
+        const QString label = QObject::tr("Upgrading your Blackcoin data — this can take several minutes.\nYour original data is being preserved and backed up.\n\n%1")
+            .arg(QString::fromStdString(phase));
+        m_dialog->setLabelText(label);
+        if (progress_percent < 0) {
+            m_dialog->setRange(0, 0); // indeterminate
+        } else {
+            m_dialog->setRange(0, 100);
+            m_dialog->setValue(progress_percent);
+        }
+        m_dialog->show();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+
+    void Finish()
+    {
+        if (m_dialog) {
+            m_dialog->close();
+            m_dialog.reset();
+        }
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+
+private:
+    std::unique_ptr<QProgressDialog> m_dialog;
+};
+} // namespace
 
 static void ErrorSettingsWrite(const bilingual_str& error, const std::vector<std::string>& details)
 {
@@ -605,7 +653,13 @@ int GuiMain(int argc, char* argv[])
     // - Do not call Params() before this step
     // - QSettings() will use the new application name after this, resulting in network-specific settings
     // - Needs to be done before createOptionsModel
-    if (auto error = common::InitConfig(gArgs, ErrorSettingsRead, PromptLegacyMigrationChoice)) {
+    MigrationProgressDialog migration_progress_dialog;
+    const auto migration_progress = [&migration_progress_dialog](const std::string& phase, int progress_percent) {
+        migration_progress_dialog.Report(phase, progress_percent);
+    };
+    auto init_config_error = common::InitConfig(gArgs, ErrorSettingsRead, PromptLegacyMigrationChoice, migration_progress);
+    migration_progress_dialog.Finish();
+    if (auto error = std::move(init_config_error)) {
         InitError(error->message, error->details);
         if (error->status == common::ConfigStatus::FAILED_WRITE) {
             // Show a custom error message to provide more information in the

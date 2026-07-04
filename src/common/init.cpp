@@ -53,6 +53,15 @@ struct LegacySource {
     const char* config_filename;
 };
 
+//! Front-end progress sink for the first-run migration; set once by
+//! InitConfig before any migration work starts (single-threaded init path).
+common::MigrationProgressFn g_migration_progress_fn;
+
+void ReportMigrationProgress(const std::string& phase, int progress_percent)
+{
+    if (g_migration_progress_fn) g_migration_progress_fn(phase, progress_percent);
+}
+
 bool PathExistsNoThrow(const fs::path& path)
 {
     try {
@@ -355,7 +364,93 @@ void RemoveCopiedBlocksDirs(const fs::path& root)
     }
 }
 
-bool CopyDirectoryTreeVerified(const fs::path& source, const fs::path& destination, const char* verify_config_filename, bool skip_blocks, bool convert_blackmore_config)
+//! Total size of the regular files a migration copy will touch, honoring the
+//! same "blocks" directory pruning that the copy itself performs.
+uintmax_t ScanCopyPlanBytes(const fs::path& source, bool skip_blocks)
+{
+    uintmax_t total{0};
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(source, fs::directory_options::skip_permission_denied, ec), end; it != end && !ec; it.increment(ec)) {
+        if (skip_blocks && it->is_directory(ec) && it->path().filename() == "blocks") {
+            it.disable_recursion_pending();
+            continue;
+        }
+        if (it->is_regular_file(ec) && !it->is_symlink(ec)) {
+            std::error_code size_ec;
+            const uintmax_t size = it->file_size(size_ec);
+            if (!size_ec) total += size;
+        }
+    }
+    return total;
+}
+
+//! Transient per-network state that must not follow a legacy datadir into a
+//! new client: serialization formats drift between forks and a stale
+//! peers.dat or mempool.dat turns the first post-upgrade start into a hard
+//! "corrupt file" error. All of these are safely regenerated from scratch.
+bool IsTransientNetworkFile(const fs::path& filename)
+{
+    static const std::array<const char*, 8> TRANSIENT_FILES{
+        "peers.dat", "banlist.dat", "banlist.json", "anchors.dat",
+        "mempool.dat", "fee_estimates.dat", "db.log", "debug.log"};
+    const std::string name = fs::PathToString(filename);
+    for (const char* transient : TRANSIENT_FILES) {
+        if (name == transient) return true;
+    }
+    return false;
+}
+
+//! Copy `source` into `destination` file by file so front ends can render
+//! progress, skipping any "blocks" subtree when requested instead of copying
+//! gigabytes of block files only to delete them again afterwards.
+void CopyTreeWithProgress(const fs::path& source, const fs::path& destination, bool skip_blocks, bool skip_transient, const std::string& phase, uintmax_t total_bytes)
+{
+    uintmax_t copied_bytes{0};
+    int last_percent{-1};
+    ReportMigrationProgress(phase, total_bytes == 0 ? -1 : 0);
+
+    fs::create_directories(destination);
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(source, fs::directory_options::skip_permission_denied, ec), end; it != end && !ec; it.increment(ec)) {
+        const fs::path relative = it->path().lexically_relative(source);
+        const fs::path target = destination / relative;
+        std::error_code type_ec;
+        if (skip_blocks && it->is_directory(type_ec) && it->path().filename() == "blocks") {
+            it.disable_recursion_pending();
+            continue;
+        }
+        if (it->is_symlink(type_ec)) {
+            fs::copy_symlink(it->path(), target);
+        } else if (it->is_directory(type_ec)) {
+            fs::create_directories(target);
+        } else if (it->is_regular_file(type_ec)) {
+            if (skip_transient && IsTransientNetworkFile(it->path().filename())) {
+                LogPrintf("Blackcoin: not migrating transient legacy file %s (it will be regenerated)\n",
+                          fs::quoted(fs::PathToString(it->path())));
+                continue;
+            }
+            fs::create_directories(target.parent_path());
+            fs::copy_file(it->path(), target, fs::copy_options::skip_existing);
+            std::error_code size_ec;
+            const uintmax_t size = it->file_size(size_ec);
+            if (!size_ec) copied_bytes += size;
+            if (total_bytes > 0) {
+                const int percent = static_cast<int>(std::min<uintmax_t>(100, (copied_bytes * 100) / total_bytes));
+                if (percent != last_percent) {
+                    last_percent = percent;
+                    ReportMigrationProgress(phase, percent);
+                }
+            }
+        }
+        // Other file types (sockets, fifos, devices) are intentionally skipped.
+    }
+    if (ec) {
+        throw std::runtime_error(strprintf("failed while walking %s: %s", fs::PathToString(source), ec.message()));
+    }
+    ReportMigrationProgress(phase, 100);
+}
+
+bool CopyDirectoryTreeVerified(const fs::path& source, const fs::path& destination, const char* verify_config_filename, bool skip_blocks, bool convert_blackmore_config, const std::string& progress_phase)
 {
     const fs::path temp_path = UniqueMigrationPath(destination, "tmp");
     try {
@@ -365,7 +460,23 @@ bool CopyDirectoryTreeVerified(const fs::path& source, const fs::path& destinati
             return false;
         }
 
-        fs::copy(source, temp_path, fs::copy_options::recursive | fs::copy_options::copy_symlinks | fs::copy_options::skip_existing);
+        const uintmax_t plan_bytes = ScanCopyPlanBytes(source, skip_blocks);
+
+        // Fail fast with a clear message when the destination volume cannot
+        // hold the copy instead of dying deep into a multi-gigabyte transfer.
+        std::error_code space_ec;
+        const fs::space_info space = fs::space(destination.parent_path(), space_ec);
+        constexpr uintmax_t SPACE_MARGIN{512ull * 1024 * 1024};
+        if (!space_ec && space.available < plan_bytes + SPACE_MARGIN) {
+            throw std::runtime_error(strprintf(
+                "not enough free disk space to migrate safely: need about %.1f GB plus working room, only %.1f GB available on the destination volume",
+                plan_bytes / 1e9, space.available / 1e9));
+        }
+
+        LogPrintf("Blackcoin: %s: copying %.1f MB from %s\n", progress_phase, plan_bytes / 1e6, fs::quoted(fs::PathToString(source)));
+        // Only the promoted import filters transient network files; backups
+        // stay byte-faithful to the source (minus blocks) for manual recovery.
+        CopyTreeWithProgress(source, temp_path, skip_blocks, /*skip_transient=*/convert_blackmore_config, progress_phase, plan_bytes);
         RemoveCopiedLockFiles(temp_path);
 
         if (convert_blackmore_config) {
@@ -376,11 +487,8 @@ bool CopyDirectoryTreeVerified(const fs::path& source, const fs::path& destinati
             }
         }
 
-        if (skip_blocks) {
-            RemoveCopiedBlocksDirs(temp_path);
-        }
-
-        if (!HasDataPayload(temp_path, verify_config_filename)) {
+        if (!HasDataPayload(temp_path, verify_config_filename) &&
+            !(skip_blocks && HasDataPayload(source, verify_config_filename))) {
             throw std::runtime_error("copied datadir did not contain a recognizable wallet, config, block, or chainstate payload");
         }
         if (!PathIsRealDirectoryNoThrow(temp_path)) {
@@ -411,10 +519,15 @@ bool BackupLegacySource(const fs::path& source, const fs::path& destination, con
     if (!copy_source) return false;
 
     const fs::path backup_path = UniqueBackupPath(destination, label);
-    const bool copied = CopyDirectoryTreeVerified(*copy_source, backup_path, verify_config_filename, /*skip_blocks=*/false, /*convert_blackmore_config=*/false);
+    // Backups exist to protect wallets, configs, and chain databases; the
+    // multi-gigabyte blocks directory is never modified by migration (the
+    // original source directory is preserved in place), so skip it here
+    // instead of doubling the disk cost and copy time of the upgrade.
+    const bool copied = CopyDirectoryTreeVerified(*copy_source, backup_path, verify_config_filename, /*skip_blocks=*/true, /*convert_blackmore_config=*/false,
+                                                  strprintf("Backing up %s data", label));
     if (!copied) return false;
 
-    LogPrintf("Blackcoin: backed up legacy datadir %s to %s\n",
+    LogPrintf("Blackcoin: backed up legacy datadir %s to %s (blocks directory left with the original)\n",
               fs::quoted(fs::PathToString(source)),
               fs::quoted(fs::PathToString(backup_path)));
     return true;
@@ -519,7 +632,8 @@ bool RestoreStrandedActiveBackup(const fs::path& destination)
         return true;
     }
 
-    if (!CopyDirectoryTreeVerified(*recovery_path, destination, BITCOIN_CONF_FILENAME, /*skip_blocks=*/false, /*convert_blackmore_config=*/false)) {
+    if (!CopyDirectoryTreeVerified(*recovery_path, destination, BITCOIN_CONF_FILENAME, /*skip_blocks=*/false, /*convert_blackmore_config=*/false,
+                                   "Restoring Blackcoin data after an interrupted upgrade")) {
         LogPrintf("Warning: failed to copy stranded original .blackcoin datadir from %s\n",
                   fs::quoted(fs::PathToString(*recovery_path)));
         return false;
@@ -544,7 +658,8 @@ bool CopyLegacyDataDirAtomically(const fs::path& legacy_base_path, const fs::pat
     const std::optional<fs::path> copy_source = ResolveCopyableSourceRoot(legacy_base_path);
     if (!copy_source) return false;
 
-    const bool copied = CopyDirectoryTreeVerified(*copy_source, destination, LEGACY_BLACKMORE_CONF_FILENAME, skip_blocks, /*convert_blackmore_config=*/true);
+    const bool copied = CopyDirectoryTreeVerified(*copy_source, destination, LEGACY_BLACKMORE_CONF_FILENAME, skip_blocks, /*convert_blackmore_config=*/true,
+                                                  "Importing Blackmore data");
     if (copied) {
         LogPrintf("Blackcoin: completed copy-only legacy datadir migration from %s to %s\n",
                   fs::quoted(fs::PathToString(legacy_base_path)),
@@ -722,9 +837,10 @@ std::optional<std::string> MaybeMigrateLegacyDataDir(ArgsManager& args, const co
 } // namespace
 
 namespace common {
-std::optional<ConfigError> InitConfig(ArgsManager& args, SettingsAbortFn settings_abort_fn, LegacyMigrationPromptFn legacy_migration_prompt_fn)
+std::optional<ConfigError> InitConfig(ArgsManager& args, SettingsAbortFn settings_abort_fn, LegacyMigrationPromptFn legacy_migration_prompt_fn, MigrationProgressFn migration_progress_fn)
 {
     try {
+        g_migration_progress_fn = std::move(migration_progress_fn);
         if (!CheckDataDirOption(args)) {
             return ConfigError{ConfigStatus::FAILED, strprintf(_("Specified data directory \"%s\" does not exist."), args.GetArg("-datadir", ""))};
         }

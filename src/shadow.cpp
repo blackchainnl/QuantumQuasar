@@ -1534,9 +1534,18 @@ std::set<CScript> BuildLegacyWhitelist(CCoinsView& view)
     std::set<CScript> whitelist;
     std::map<CScript, CAmount> balances;
     std::unique_ptr<CCoinsViewCursor> cursor(view.Cursor());
+    // Scanning the full mainnet UTXO set takes minutes; heartbeat to the log
+    // so the one-off snapshot at the whitelist height does not look like a
+    // hang to node operators watching a frozen progress bar.
+    uint64_t scanned{0};
+    LogPrintf("Quantum Quasar: building the legacy whitelist snapshot from the UTXO set; this one-time scan can take several minutes...\n");
     while (cursor->Valid()) {
         COutPoint outpoint;
         Coin coin;
+        if (++scanned % 2000000 == 0) {
+            LogPrintf("Quantum Quasar: whitelist snapshot scan progress: %u million coins scanned, %u qualifying scripts so far\n",
+                      scanned / 1000000, whitelist.size());
+        }
         if (cursor->GetKey(outpoint) && cursor->GetValue(coin) && !coin.IsSpent()) {
             if (coin.out.nValue > 0 && IsLegacyShadowTargetScript(coin.out.scriptPubKey)) {
                 const CScript script = CanonicalLegacyStakeScript(coin.out.scriptPubKey);
@@ -1552,6 +1561,7 @@ std::set<CScript> BuildLegacyWhitelist(CCoinsView& view)
         }
         cursor->Next();
     }
+    LogPrintf("Quantum Quasar: whitelist snapshot scan complete: %u coins scanned, %u whitelisted scripts\n", scanned, whitelist.size());
     return whitelist;
 }
 

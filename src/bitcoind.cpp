@@ -13,6 +13,7 @@
 #include <clientversion.h>
 #include <common/args.h>
 #include <common/init.h>
+#include <tinyformat.h>
 #include <common/system.h>
 #include <common/url.h>
 #include <compat/compat.h>
@@ -33,6 +34,7 @@
 
 #include <any>
 #include <functional>
+#include <iostream>
 #include <optional>
 
 using node::NodeContext;
@@ -122,7 +124,23 @@ static bool ParseArgs(ArgsManager& args, int argc, char* argv[])
         return InitError(Untranslated(strprintf("Error parsing command line arguments: %s", error)));
     }
 
-    if (auto error = common::InitConfig(args)) {
+    const auto migration_progress = [](const std::string& phase, int progress_percent) {
+        // Long first-run datadir migration: keep the operator informed on the
+        // terminal so the daemon does not look hung during multi-GB copies.
+        static std::string last_phase;
+        static int last_logged_percent{-100};
+        const bool new_phase = phase != last_phase;
+        if (new_phase || progress_percent >= last_logged_percent + 10 || progress_percent == 100) {
+            last_phase = phase;
+            last_logged_percent = progress_percent;
+            if (progress_percent < 0) {
+                tfm::format(std::cout, "Blackcoin first-run migration: %s...\n", phase);
+            } else {
+                tfm::format(std::cout, "Blackcoin first-run migration: %s... %d%%\n", phase, progress_percent);
+            }
+        }
+    };
+    if (auto error = common::InitConfig(args, /*settings_abort_fn=*/nullptr, /*legacy_migration_prompt_fn=*/nullptr, migration_progress)) {
         return InitError(error->message, error->details);
     }
 

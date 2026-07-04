@@ -148,10 +148,34 @@ jobs:
       - name: Build depends
         run: make -j "$MAKEJOBS" -C depends HOST=${{ matrix.host }} ${{ matrix.dep-opts }}
 
+      - name: Verify release version matches configure.ac
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          VERSION="${VERSION#v}"
+          MAJOR=$(sed -n "s/^define(_CLIENT_VERSION_MAJOR, \([0-9]*\))$/\1/p" configure.ac)
+          MINOR=$(sed -n "s/^define(_CLIENT_VERSION_MINOR, \([0-9]*\))$/\1/p" configure.ac)
+          BUILD=$(sed -n "s/^define(_CLIENT_VERSION_BUILD, \([0-9]*\))$/\1/p" configure.ac)
+          SOURCE_VERSION="$MAJOR.$MINOR.$BUILD"
+          if [[ "$VERSION" != "$SOURCE_VERSION" ]]; then
+            echo "::error::Requested release version $VERSION does not match configure.ac version $SOURCE_VERSION. The Windows installer and packaging names are derived from configure.ac; bump it (or fix the tag/input) before releasing."
+            exit 1
+          fi
+
       - name: Build Blackcoin
         run: |
           ./autogen.sh
           ./configure --prefix="$(pwd)/depends/${{ matrix.host }}" ${{ matrix.config-opts }} --enable-reduce-exports || (cat config.log && false)
+          grep -q "define USE_BDB 1" src/config/bitcoin-config.h || {
+            echo "::error::Release build configured WITHOUT Berkeley DB wallet support. Upgrading Blackcoin More users could not open their legacy wallet.dat. Aborting."
+            grep -i bdb config.log | tail -20 || true
+            exit 1
+          }
+          grep -q "define USE_SQLITE 1" src/config/bitcoin-config.h || {
+            echo "::error::Release build configured WITHOUT SQLite wallet support. Aborting."
+            exit 1
+          }
           if ! make -j "$MAKEJOBS" ${{ matrix.goal }}; then
             echo "Parallel build failed. Retrying once serially with verbose output."
             make ${{ matrix.goal }} V=1
@@ -224,6 +248,12 @@ jobs:
             label="${label%-Qt-app.tar.gz}"
             rm -rf work/*
             tar -C work -xzf "$archive"
+            # Cross-built binaries carry no code signature at all; unsigned
+            # apps are reported as "damaged" by Gatekeeper and will not launch
+            # on Apple Silicon. Apply an ad-hoc signature so the app runs
+            # after the user approves it (System Settings or right-click Open).
+            codesign --force --deep --sign - work/blackcoin-qt.app
+            codesign --verify --deep --strict work/blackcoin-qt.app
             hdiutil create -volname "Blackcoin $VERSION" \
               -srcfolder work/blackcoin-qt.app \
               -ov -format UDZO \
@@ -298,6 +328,18 @@ jobs:
             echo "Gold Rush reward accounting starts at block 5,950,000 and runs for 243,000 blocks. The deterministic 10,000 BLK whitelist snapshot remains block 5,920,000."
             echo
             echo "When upgrading from older software versions, back up wallet.dat before installation."
+            echo
+            echo "## Upgrading from Blackcoin More"
+            echo
+            echo "On first launch this release automatically finds your existing Blackcoin More data directory, backs up your wallet and settings, and imports everything into the new Blackcoin data directory. Your original Blackcoin More data is never modified or deleted. A progress window shows each step; the import of a fully synced data directory can take several minutes, followed by a one-time Gold Rush state replay — please let it finish. Backups are kept next to the new data directory in a .blackcoin.backup folder."
+            echo
+            echo "### macOS installation note"
+            echo
+            echo "The macOS apps are ad-hoc signed. On first open, macOS may warn that the developer cannot be verified: right-click (Control-click) blackcoin-qt.app and choose Open, then Open again — or allow it under System Settings > Privacy & Security. If macOS reports the app is damaged after downloading, clear the quarantine flag with: xattr -dr com.apple.quarantine /Applications/blackcoin-qt.app"
+            echo
+            echo "### Windows installation note"
+            echo
+            echo "The installer is not code-signed yet; Windows SmartScreen may show \"Windows protected your PC\". Click More info, then Run anyway. Verify your download against the SHA256 checksums below first."
             echo
             echo "## SHA256 Checksums"
             echo
