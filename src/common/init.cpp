@@ -284,15 +284,34 @@ bool ProbeExistingDirectoryLock(const fs::path& directory)
 bool SourceRootIsCopyable(const fs::path& source)
 {
     if (!PathIsDirectoryNoThrow(source)) return false;
-    if (PathIsSymlinkNoThrow(source)) {
-        LogPrintf("Warning: refusing legacy datadir migration from symlinked source root %s\n", fs::quoted(fs::PathToString(source)));
-        return false;
-    }
     if (!ProbeExistingDirectoryLock(source)) {
         LogPrintf("Warning: skipping legacy datadir migration because %s appears to be in use\n", fs::quoted(fs::PathToString(source)));
         return false;
     }
     return true;
+}
+
+std::optional<fs::path> ResolveCopyableSourceRoot(const fs::path& source)
+{
+    if (!PathIsDirectoryNoThrow(source)) return std::nullopt;
+
+    fs::path resolved_source{source};
+    if (PathIsSymlinkNoThrow(source)) {
+        std::error_code ec;
+        resolved_source = fs::canonical(source, ec);
+        if (ec || !PathIsDirectoryNoThrow(resolved_source)) {
+            LogPrintf("Warning: refusing legacy datadir migration from broken symlinked source root %s: %s\n",
+                      fs::quoted(fs::PathToString(source)),
+                      ec ? ec.message() : "target is not a directory");
+            return std::nullopt;
+        }
+        LogPrintf("Blackcoin: legacy datadir source %s is a symlink; migrating resolved target %s\n",
+                  fs::quoted(fs::PathToString(source)),
+                  fs::quoted(fs::PathToString(resolved_source)));
+    }
+
+    if (!SourceRootIsCopyable(resolved_source)) return std::nullopt;
+    return resolved_source;
 }
 
 bool PathIsRealDirectoryNoThrow(const fs::path& path)
@@ -388,10 +407,11 @@ bool CopyDirectoryTreeVerified(const fs::path& source, const fs::path& destinati
 bool BackupLegacySource(const fs::path& source, const fs::path& destination, const std::string& label, const char* verify_config_filename)
 {
     if (!HasDataPayload(source, verify_config_filename)) return true;
-    if (!SourceRootIsCopyable(source)) return false;
+    const std::optional<fs::path> copy_source = ResolveCopyableSourceRoot(source);
+    if (!copy_source) return false;
 
     const fs::path backup_path = UniqueBackupPath(destination, label);
-    const bool copied = CopyDirectoryTreeVerified(source, backup_path, verify_config_filename, /*skip_blocks=*/false, /*convert_blackmore_config=*/false);
+    const bool copied = CopyDirectoryTreeVerified(*copy_source, backup_path, verify_config_filename, /*skip_blocks=*/false, /*convert_blackmore_config=*/false);
     if (!copied) return false;
 
     LogPrintf("Blackcoin: backed up legacy datadir %s to %s\n",
@@ -521,9 +541,10 @@ bool CopyLegacyDataDirAtomically(const fs::path& legacy_base_path, const fs::pat
 {
     if (!PathExistsNoThrow(legacy_base_path) || !HasDataPayload(legacy_base_path, LEGACY_BLACKMORE_CONF_FILENAME)) return false;
     if (!DestinationAllowsLegacyMigration(destination)) return false;
-    if (!SourceRootIsCopyable(legacy_base_path)) return false;
+    const std::optional<fs::path> copy_source = ResolveCopyableSourceRoot(legacy_base_path);
+    if (!copy_source) return false;
 
-    const bool copied = CopyDirectoryTreeVerified(legacy_base_path, destination, LEGACY_BLACKMORE_CONF_FILENAME, skip_blocks, /*convert_blackmore_config=*/true);
+    const bool copied = CopyDirectoryTreeVerified(*copy_source, destination, LEGACY_BLACKMORE_CONF_FILENAME, skip_blocks, /*convert_blackmore_config=*/true);
     if (copied) {
         LogPrintf("Blackcoin: completed copy-only legacy datadir migration from %s to %s\n",
                   fs::quoted(fs::PathToString(legacy_base_path)),

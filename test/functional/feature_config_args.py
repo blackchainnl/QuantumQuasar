@@ -587,22 +587,18 @@ class ConfArgsTest(BitcoinTestFramework):
         assert stale_active_backup.exists()
         assert_equal((stale_active_backup / "wallet.dat").read_text(encoding="utf8"), "stale active backup wallet\n")
 
-        self.log.info("Test symlinked legacy source root aborts startup and leaves data intact")
+        self.log.info("Test symlinked legacy source root resolves to the real datadir and migrates safely")
         symlink_env, symlink_default_datadir = util.get_temp_default_datadir(Path(self.options.tmpdir, "legacy_migration_symlink_home"))
         real_blackmore_datadir = Path(self.options.tmpdir, "legacy_migration_real_blackmore")
         symlink_blackmore_datadir = self._legacy_datadir_for_env(symlink_env)
         self._write_legacy_datadir(real_blackmore_datadir, wallet_text="symlink blackmore wallet\n")
         symlink_blackmore_datadir.parent.mkdir(parents=True, exist_ok=True)
         os.symlink(real_blackmore_datadir, symlink_blackmore_datadir, target_is_directory=True)
-        self._assert_default_datadir_start_error(
-            node,
-            symlink_env,
-            symlink_default_datadir,
-            "Legacy datadir migration failed: failed to preserve a backup of the legacy .blackmore datadir",
-        )
+        self._run_default_datadir_node_once(node, symlink_env, symlink_default_datadir)
+        assert_equal((symlink_default_datadir / "wallet.dat").read_text(encoding="utf8"), "symlink blackmore wallet\n")
+        assert self._migration_marker(symlink_default_datadir).exists()
+        self._assert_backup_wallet(symlink_default_datadir, "blackmore", "symlink blackmore wallet\n")
         assert_equal((real_blackmore_datadir / "wallet.dat").read_text(encoding="utf8"), "symlink blackmore wallet\n")
-        assert not (symlink_default_datadir / "wallet.dat").exists()
-        assert not self._migration_marker(symlink_default_datadir).exists()
 
         self.log.info("Test fresh first run does not create migration backup state")
         fresh_env, fresh_default_datadir = util.get_temp_default_datadir(Path(self.options.tmpdir, "legacy_migration_fresh_home"))
