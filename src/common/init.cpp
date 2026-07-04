@@ -45,6 +45,7 @@ enum class MigrationChoice {
     BLACKMORE,
     BLACKCOIN,
     NONE,
+    ABORT, //!< user chose to exit without deciding; leave everything untouched
 };
 
 struct LegacySource {
@@ -732,6 +733,7 @@ MigrationChoice ParseMigrationChoiceValue(const std::string& raw_choice)
     if (choice == "blackmore") return MigrationChoice::BLACKMORE;
     if (choice == "blackcoin") return MigrationChoice::BLACKCOIN;
     if (choice == "none") return MigrationChoice::NONE;
+    if (choice == "abort") return MigrationChoice::ABORT;
 
     LogPrintf("Warning: unknown -migratewallet value %s; using auto\n", choice);
     return MigrationChoice::AUTO;
@@ -751,7 +753,7 @@ MigrationChoice ResolveAutoMigrationChoice(bool has_blackcoin, const fs::path& b
     if (!explicit_choice && legacy_migration_prompt_fn) {
         const MigrationChoice prompted = ParseMigrationChoiceValue(
             legacy_migration_prompt_fn(fs::PathToString(blackcoin_path), fs::PathToString(blackmore_source->path)));
-        if (prompted == MigrationChoice::BLACKMORE || prompted == MigrationChoice::BLACKCOIN || prompted == MigrationChoice::NONE) {
+        if (prompted == MigrationChoice::BLACKMORE || prompted == MigrationChoice::BLACKCOIN || prompted == MigrationChoice::NONE || prompted == MigrationChoice::ABORT) {
             return prompted;
         }
     }
@@ -766,22 +768,27 @@ std::optional<std::string> CommitMigrationMarker(const fs::path& destination, co
     return "failed to durably write the first-run migration marker";
 }
 
-std::optional<std::string> MaybeMigrateLegacyDataDir(ArgsManager& args, const common::LegacyMigrationPromptFn& legacy_migration_prompt_fn)
+struct MigrationOutcome {
+    bool aborted{false};
+    std::optional<std::string> error;
+};
+
+MigrationOutcome MaybeMigrateLegacyDataDir(ArgsManager& args, const common::LegacyMigrationPromptFn& legacy_migration_prompt_fn)
 {
-    if (args.IsArgSet("-datadir") || args.IsArgSet("-conf")) return std::nullopt;
+    if (args.IsArgSet("-datadir") || args.IsArgSet("-conf")) return {};
 
     const fs::path base_path = args.GetDataDirBase();
     CleanupStaleMigrationTemps(base_path);
     if (!RestoreStrandedActiveBackup(base_path)) {
-        return "failed to restore original .blackcoin datadir after an interrupted migration";
+        return {.aborted = false, .error = "failed to restore original .blackcoin datadir after an interrupted migration"};
     }
-    if (HasMigrationDoneMarker(base_path)) return std::nullopt;
+    if (HasMigrationDoneMarker(base_path)) return {};
 
     const bool has_blackcoin = HasDataPayload(base_path, BITCOIN_CONF_FILENAME);
     const std::optional<LegacySource> blackmore_source = FindBlackmoreSource(base_path);
 
     if (!has_blackcoin && !blackmore_source) {
-        return std::nullopt;
+        return {};
     }
 
     MigrationChoice choice = ParseMigrationChoice(args);
@@ -789,41 +796,47 @@ std::optional<std::string> MaybeMigrateLegacyDataDir(ArgsManager& args, const co
     if (choice == MigrationChoice::AUTO) {
         choice = ResolveAutoMigrationChoice(has_blackcoin, base_path, blackmore_source, legacy_migration_prompt_fn, explicit_choice);
     }
+    if (choice == MigrationChoice::ABORT) {
+        // The user chose to exit instead of deciding. Nothing has been copied,
+        // moved, or marked yet, so the next start will ask again.
+        LogPrintf("Blackcoin: first-run legacy datadir migration cancelled by the user before any changes; exiting\n");
+        return {.aborted = true, .error = std::nullopt};
+    }
 
     if (has_blackcoin && !BackupLegacySource(base_path, base_path, "original-blackcoin", BITCOIN_CONF_FILENAME)) {
-        return "failed to preserve a backup of the existing .blackcoin datadir";
+        return {.aborted = false, .error = "failed to preserve a backup of the existing .blackcoin datadir"};
     }
     if (blackmore_source && !BackupLegacySource(blackmore_source->path, base_path, blackmore_source->label, blackmore_source->config_filename)) {
-        return "failed to preserve a backup of the legacy .blackmore datadir";
+        return {.aborted = false, .error = "failed to preserve a backup of the legacy .blackmore datadir"};
     }
 
     if (choice == MigrationChoice::NONE) {
         LogPrintf("Blackcoin: first-run legacy datadir migration was disabled; backups were preserved under %s\n", fs::quoted(fs::PathToString(MigrationBackupRoot(base_path))));
         const auto marker_error = CommitMigrationMarker(base_path, "Migration disabled by -migratewallet=none; backups preserved.");
-        if (marker_error) return marker_error;
+        if (marker_error) return {.aborted = false, .error = marker_error};
         ClearRecoveryRecord(base_path);
-        return std::nullopt;
+        return {};
     }
 
     if (choice == MigrationChoice::BLACKCOIN) {
         if (has_blackcoin) {
             LogPrintf("Blackcoin: using existing .blackcoin datadir after preserving a backup under %s\n", fs::quoted(fs::PathToString(MigrationBackupRoot(base_path))));
             const auto marker_error = CommitMigrationMarker(base_path, "Using existing original .blackcoin datadir; backups preserved.");
-            if (marker_error) return marker_error;
+            if (marker_error) return {.aborted = false, .error = marker_error};
             ClearRecoveryRecord(base_path);
-            return std::nullopt;
+            return {};
         }
-        return "-migratewallet=blackcoin was selected but no populated .blackcoin datadir was found";
+        return {.aborted = false, .error = "-migratewallet=blackcoin was selected but no populated .blackcoin datadir was found"};
     }
 
     if (choice == MigrationChoice::BLACKMORE) {
         if (!blackmore_source) {
-            return "-migratewallet=blackmore was selected but no .blackmore datadir was found";
+            return {.aborted = false, .error = "-migratewallet=blackmore was selected but no .blackmore datadir was found"};
         }
 
         const fs::path staged_import_path = UniqueMigrationPath(base_path, "import");
         if (!CopyLegacyDataDirAtomically(blackmore_source->path, staged_import_path, args.IsArgSet("-blocksdir"))) {
-            return "failed to stage the .blackmore datadir import";
+            return {.aborted = false, .error = "failed to stage the .blackmore datadir import"};
         }
 
         std::optional<fs::path> moved_active_path;
@@ -832,12 +845,12 @@ std::optional<std::string> MaybeMigrateLegacyDataDir(ArgsManager& args, const co
             if (!WriteRecoveryRecord(base_path, moved_path)) {
                 std::error_code ec;
                 fs::remove_all(staged_import_path, ec);
-                return "failed to write recovery record before replacing the active .blackcoin datadir";
+                return {.aborted = false, .error = "failed to write recovery record before replacing the active .blackcoin datadir"};
             }
             if (!MoveActiveDestinationAside(base_path, moved_path)) {
                 std::error_code ec;
                 fs::remove_all(staged_import_path, ec);
-                return "failed to move the active .blackcoin datadir aside before selected .blackmore import";
+                return {.aborted = false, .error = "failed to move the active .blackcoin datadir aside before selected .blackmore import"};
             }
             moved_active_path = moved_path;
         } else if (PathExistsNoThrow(base_path)) {
@@ -848,7 +861,7 @@ std::optional<std::string> MaybeMigrateLegacyDataDir(ArgsManager& args, const co
             if (!ClearNonPayloadDestination(base_path)) {
                 std::error_code ec;
                 fs::remove_all(staged_import_path, ec);
-                return "failed to clear the pre-existing empty .blackcoin datadir before importing";
+                return {.aborted = false, .error = "failed to clear the pre-existing empty .blackcoin datadir before importing"};
             }
         }
 
@@ -862,9 +875,9 @@ std::optional<std::string> MaybeMigrateLegacyDataDir(ArgsManager& args, const co
             }
             DirectoryCommit(base_path.parent_path());
             const auto marker_error = CommitMigrationMarker(base_path, "Imported .blackmore datadir into active .blackcoin datadir; backups preserved.");
-            if (marker_error) return marker_error;
+            if (marker_error) return {.aborted = false, .error = marker_error};
             ClearRecoveryRecord(base_path);
-            return std::nullopt;
+            return {};
         } catch (const std::exception& e) {
             LogPrintf("Warning: failed to promote staged .blackmore datadir import into %s: %s\n",
                       fs::quoted(fs::PathToString(base_path)),
@@ -885,9 +898,9 @@ std::optional<std::string> MaybeMigrateLegacyDataDir(ArgsManager& args, const co
         }
         std::error_code ec;
         fs::remove_all(staged_import_path, ec);
-        return "failed to activate the staged .blackmore datadir import";
+        return {.aborted = false, .error = "failed to activate the staged .blackmore datadir import"};
     }
-    return "unknown first-run migration choice";
+    return {.aborted = false, .error = "unknown first-run migration choice"};
 }
 
 } // namespace
@@ -901,8 +914,12 @@ std::optional<ConfigError> InitConfig(ArgsManager& args, SettingsAbortFn setting
             return ConfigError{ConfigStatus::FAILED, strprintf(_("Specified data directory \"%s\" does not exist."), args.GetArg("-datadir", ""))};
         }
 
-        if (const auto migration_error = MaybeMigrateLegacyDataDir(args, legacy_migration_prompt_fn)) {
-            return ConfigError{ConfigStatus::FAILED, Untranslated(strprintf("Legacy datadir migration failed: %s. Startup aborted to avoid creating or loading the wrong wallet.", *migration_error))};
+        const MigrationOutcome migration_outcome = MaybeMigrateLegacyDataDir(args, legacy_migration_prompt_fn);
+        if (migration_outcome.aborted) {
+            return ConfigError{ConfigStatus::ABORTED, _("Startup cancelled: no wallet data was changed. Launch again to choose which wallet data to use.")};
+        }
+        if (migration_outcome.error) {
+            return ConfigError{ConfigStatus::FAILED, Untranslated(strprintf("Legacy datadir migration failed: %s. Startup aborted to avoid creating or loading the wrong wallet.", *migration_outcome.error))};
         }
 
         // Record original datadir and config paths before parsing the config

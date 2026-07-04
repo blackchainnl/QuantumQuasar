@@ -207,16 +207,21 @@ static std::string PromptLegacyMigrationChoice(const std::string& blackcoin_data
         QMessageBox::NoButton);
     messagebox.setText(QObject::tr(
         "Blackcoin found both an existing Blackcoin data directory and a legacy Blackmore data directory. "
-        "Choose which wallet data to load. Both sources will be backed up before startup continues."));
+        "Choose which wallet data to load. Both sources will be backed up before startup continues. "
+        "Choosing Exit closes Blackcoin without changing anything; you will be asked again next time."));
     messagebox.setInformativeText(QObject::tr("Blackcoin: %1\nBlackmore: %2")
         .arg(QString::fromStdString(blackcoin_datadir), QString::fromStdString(blackmore_datadir)));
     QPushButton* keep_blackcoin = messagebox.addButton(QObject::tr("Use existing Blackcoin wallet"), QMessageBox::AcceptRole);
     QPushButton* import_blackmore = messagebox.addButton(QObject::tr("Import Blackmore wallet"), QMessageBox::ActionRole);
+    QPushButton* exit_app = messagebox.addButton(QObject::tr("Exit"), QMessageBox::RejectRole);
     messagebox.setDefaultButton(keep_blackcoin);
+    // Esc and the window close button also mean "exit without deciding".
+    messagebox.setEscapeButton(exit_app);
     messagebox.exec();
 
     if (messagebox.clickedButton() == import_blackmore) return "blackmore";
-    return "blackcoin";
+    if (messagebox.clickedButton() == keep_blackcoin) return "blackcoin";
+    return "abort";
 }
 
 namespace {
