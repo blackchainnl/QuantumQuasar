@@ -741,11 +741,10 @@ BOOST_FIXTURE_TEST_CASE(LoadReceiveRequests, TestingSetup)
     }
 }
 
-static void CheckQuantumWalletSigning(CWallet& wallet, const CTxDestination& dest) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
+static CMutableTransaction QuantumWalletSpendFixture(const CTxDestination& dest, std::map<COutPoint, Coin>& coins)
 {
     BOOST_REQUIRE(IsQuantumMigrationDestination(dest));
     const CScript quantum_script = GetScriptForDestination(dest);
-    BOOST_CHECK(wallet.IsMine(quantum_script) & ISMINE_SPENDABLE);
 
     CMutableTransaction funding_mut;
     funding_mut.nVersion = 2;
@@ -756,9 +755,17 @@ static void CheckQuantumWalletSigning(CWallet& wallet, const CTxDestination& des
     spend.nVersion = 2;
     spend.vin.emplace_back(COutPoint{funding_tx.GetHash(), 0});
     spend.vout.emplace_back(COIN - 1000, quantum_script);
+    coins.emplace(spend.vin[0].prevout, Coin{funding_tx.vout[0], 1, false, false, 0});
+    return spend;
+}
+
+static void CheckQuantumWalletSigning(CWallet& wallet, const CTxDestination& dest) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
+{
+    const CScript quantum_script = GetScriptForDestination(dest);
+    BOOST_CHECK(wallet.IsMine(quantum_script) & ISMINE_SPENDABLE);
 
     std::map<COutPoint, Coin> coins;
-    coins.emplace(spend.vin[0].prevout, Coin{funding_tx.vout[0], 1, false, false, 0});
+    CMutableTransaction spend = QuantumWalletSpendFixture(dest, coins);
     std::map<int, bilingual_str> input_errors;
     BOOST_CHECK(wallet.SignTransaction(spend, coins, SIGHASH_ALL, input_errors));
     BOOST_CHECK(input_errors.empty());
@@ -809,6 +816,24 @@ BOOST_AUTO_TEST_CASE(QuantumWalletKeysPersistAndSign)
             CheckQuantumWalletSigning(*wallet, dest);
         }
     }
+}
+
+BOOST_FIXTURE_TEST_CASE(QuantumWalletInactiveSpendKeepsSpecificError, WalletTestingSetup)
+{
+    CTxDestination dest;
+    {
+        LOCK(m_wallet.cs_wallet);
+        auto op_dest = m_wallet.GetNewQuantumDestination("quantum-inactive");
+        BOOST_REQUIRE(op_dest);
+        dest = *op_dest;
+    }
+
+    std::map<COutPoint, Coin> coins;
+    CMutableTransaction spend = QuantumWalletSpendFixture(dest, coins);
+    std::map<int, bilingual_str> input_errors;
+    BOOST_CHECK(!m_wallet.SignTransaction(spend, coins, SIGHASH_ALL, input_errors));
+    BOOST_REQUIRE(input_errors.count(0));
+    BOOST_CHECK_EQUAL(input_errors.at(0).original, "Quantum migration spends are not active until the post-Gold-Rush migration window");
 }
 
 BOOST_AUTO_TEST_CASE(QuantumWalletChangeKeysPersistAndStayOffReceiveBook)

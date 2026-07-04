@@ -2669,6 +2669,10 @@ bool CWallet::SignQuantumTransaction(CMutableTransaction& tx, const std::map<COu
     txdata.m_quantum_sighash_chain_id = quantum_chain_id;
 
     for (unsigned int i = 0; i < tx.vin.size(); ++i) {
+        if (input_errors.count(i)) {
+            continue;
+        }
+
         const auto coin_it = coins.find(tx.vin[i].prevout);
         if (coin_it == coins.end() || coin_it->second.IsSpent()) {
             if (!input_errors.count(i)) {
