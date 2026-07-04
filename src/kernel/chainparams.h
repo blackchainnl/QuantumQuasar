@@ -140,6 +140,15 @@ public:
     };
 
     /**
+     * VersionBitsParameters holds activation parameters
+     */
+    struct VersionBitsParameters {
+        int64_t start_time;
+        int64_t timeout;
+        int min_activation_height;
+    };
+
+    /**
      * TestNetOptions holds testnet-only schedule overrides for isolated fork
      * validation. Mainnet never reads these fields.
      */
@@ -157,15 +166,12 @@ public:
         std::optional<int> shadow_whitelist_height{};
         std::optional<int> shadow_gold_rush_start_height{};
         std::optional<int> shadow_gold_rush_blocks{};
-    };
-
-    /**
-     * VersionBitsParameters holds activation parameters
-     */
-    struct VersionBitsParameters {
-        int64_t start_time;
-        int64_t timeout;
-        int min_activation_height;
+        // Deployment overrides (mirrors RegTestOptions) so private testnet
+        // chains can activate segwit from genesis; the public testnet activated
+        // it via signalling long ago, but a fresh schedule-override chain can
+        // never reach the 15,000-block confirmation window in a rehearsal.
+        std::unordered_map<Consensus::DeploymentPos, VersionBitsParameters> version_bits_parameters{};
+        std::optional<int> segwit_activation_height{};
     };
 
     /**

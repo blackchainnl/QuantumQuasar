@@ -303,6 +303,12 @@ public:
                                   opts.shadow_gold_rush_blocks.value_or(SHADOW_GOLD_RUSH_BLOCKS));
         }
         consensus.nDemurrageMinActivationHeight = SHADOW_REWARD_END_HEIGHT + 1;
+        if (opts.segwit_activation_height) consensus.SegwitHeight = *opts.segwit_activation_height;
+        for (const auto& [deployment_pos, version_bits_params] : opts.version_bits_parameters) {
+            consensus.vDeployments[deployment_pos].nStartTime = version_bits_params.start_time;
+            consensus.vDeployments[deployment_pos].nTimeout = version_bits_params.timeout;
+            consensus.vDeployments[deployment_pos].min_activation_height = version_bits_params.min_activation_height;
+        }
         consensus.nLastPOWBlock = 0x7fffffff;
         consensus.nStakeTimestampMask = 0xf;
         consensus.nCoinbaseMaturity = 10;

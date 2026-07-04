@@ -45,6 +45,45 @@ void ReadSigNetArgs(const ArgsManager& args, CChainParams::SigNetOptions& option
 }
 
 namespace {
+//! Shared testnet/regtest parsing for -vbparams deployment overrides.
+void ReadVersionBitsArgs(const ArgsManager& args, std::unordered_map<Consensus::DeploymentPos, CChainParams::VersionBitsParameters>& version_bits_parameters)
+{
+    if (!args.IsArgSet("-vbparams")) return;
+
+    for (const std::string& strDeployment : args.GetArgs("-vbparams")) {
+        std::vector<std::string> vDeploymentParams = SplitString(strDeployment, ':');
+        if (vDeploymentParams.size() < 3 || 4 < vDeploymentParams.size()) {
+            throw std::runtime_error("Version bits parameters malformed, expecting deployment:start:end[:min_activation_height]");
+        }
+        CChainParams::VersionBitsParameters vbparams{};
+        if (!ParseInt64(vDeploymentParams[1], &vbparams.start_time)) {
+            throw std::runtime_error(strprintf("Invalid nStartTime (%s)", vDeploymentParams[1]));
+        }
+        if (!ParseInt64(vDeploymentParams[2], &vbparams.timeout)) {
+            throw std::runtime_error(strprintf("Invalid nTimeout (%s)", vDeploymentParams[2]));
+        }
+        if (vDeploymentParams.size() >= 4) {
+            if (!ParseInt32(vDeploymentParams[3], &vbparams.min_activation_height)) {
+                throw std::runtime_error(strprintf("Invalid min_activation_height (%s)", vDeploymentParams[3]));
+            }
+        } else {
+            vbparams.min_activation_height = 0;
+        }
+        bool found = false;
+        for (int j=0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
+            if (vDeploymentParams[0] == VersionBitsDeploymentInfo[j].name) {
+                version_bits_parameters[Consensus::DeploymentPos(j)] = vbparams;
+                found = true;
+                LogPrintf("Setting version bits activation parameters for %s to start=%ld, timeout=%ld, min_activation_height=%d\n", vDeploymentParams[0], vbparams.start_time, vbparams.timeout, vbparams.min_activation_height);
+                break;
+            }
+        }
+        if (!found) {
+            throw std::runtime_error(strprintf("Invalid deployment (%s)", vDeploymentParams[0]));
+        }
+    }
+}
+
 //! Shared testnet/regtest parsing for the Gold Rush shadow schedule heights and
 //! the height-based phase boundary overrides. `shadow_whitelist_height`,
 //! `shadow_gold_rush_start_height` and `shadow_gold_rush_blocks` are stored via
@@ -134,6 +173,24 @@ void ReadTestNetArgs(const ArgsManager& args, CChainParams::TestNetOptions& opti
     if (options.shadow_gold_rush_start_height && *options.shadow_gold_rush_start_height <= options.shadow_whitelist_height.value_or(SHADOW_WHITELIST_HEIGHT)) {
         throw std::runtime_error("-shadowgoldrushstartheight must be greater than -shadowwhitelistheight.");
     }
+    for (const std::string& arg : args.GetArgs("-testactivationheight")) {
+        const auto found{arg.find('@')};
+        if (found == std::string::npos) {
+            throw std::runtime_error(strprintf("Invalid format (%s) for -testactivationheight=name@height.", arg));
+        }
+        const auto value{arg.substr(found + 1)};
+        int32_t height;
+        if (!ParseInt32(value, &height) || height < 0 || height >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Invalid height value (%s) for -testactivationheight=name@height.", arg));
+        }
+        const auto deployment_name{arg.substr(0, found)};
+        if (deployment_name == "segwit") {
+            options.segwit_activation_height = height;
+        } else {
+            throw std::runtime_error(strprintf("Only segwit supports -testactivationheight on testnet, not (%s).", deployment_name));
+        }
+    }
+    ReadVersionBitsArgs(args, options.version_bits_parameters);
 }
 
 void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& options)
@@ -231,40 +288,7 @@ void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& opti
         throw std::runtime_error("-shadowgoldrushstartheight must be greater than -shadowwhitelistheight.");
     }
 
-    if (!args.IsArgSet("-vbparams")) return;
-
-    for (const std::string& strDeployment : args.GetArgs("-vbparams")) {
-        std::vector<std::string> vDeploymentParams = SplitString(strDeployment, ':');
-        if (vDeploymentParams.size() < 3 || 4 < vDeploymentParams.size()) {
-            throw std::runtime_error("Version bits parameters malformed, expecting deployment:start:end[:min_activation_height]");
-        }
-        CChainParams::VersionBitsParameters vbparams{};
-        if (!ParseInt64(vDeploymentParams[1], &vbparams.start_time)) {
-            throw std::runtime_error(strprintf("Invalid nStartTime (%s)", vDeploymentParams[1]));
-        }
-        if (!ParseInt64(vDeploymentParams[2], &vbparams.timeout)) {
-            throw std::runtime_error(strprintf("Invalid nTimeout (%s)", vDeploymentParams[2]));
-        }
-        if (vDeploymentParams.size() >= 4) {
-            if (!ParseInt32(vDeploymentParams[3], &vbparams.min_activation_height)) {
-                throw std::runtime_error(strprintf("Invalid min_activation_height (%s)", vDeploymentParams[3]));
-            }
-        } else {
-            vbparams.min_activation_height = 0;
-        }
-        bool found = false;
-        for (int j=0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
-            if (vDeploymentParams[0] == VersionBitsDeploymentInfo[j].name) {
-                options.version_bits_parameters[Consensus::DeploymentPos(j)] = vbparams;
-                found = true;
-                LogPrintf("Setting version bits activation parameters for %s to start=%ld, timeout=%ld, min_activation_height=%d\n", vDeploymentParams[0], vbparams.start_time, vbparams.timeout, vbparams.min_activation_height);
-                break;
-            }
-        }
-        if (!found) {
-            throw std::runtime_error(strprintf("Invalid deployment (%s)", vDeploymentParams[0]));
-        }
-    }
+    ReadVersionBitsArgs(args, options.version_bits_parameters);
 }
 
 static std::unique_ptr<const CChainParams> globalChainParams;
