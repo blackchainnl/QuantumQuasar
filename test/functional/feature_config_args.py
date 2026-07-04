@@ -607,6 +607,37 @@ class ConfArgsTest(BitcoinTestFramework):
         assert not self._migration_marker(fresh_default_datadir).exists()
         assert not self._migration_backup_root(fresh_default_datadir).exists()
 
+        self.log.info("Test .blackmore import when the GUI already created an empty .blackcoin datadir")
+        # The Qt data-directory chooser (Intro) creates the destination datadir
+        # before first-run migration runs, so importing a Blackmore datadir must
+        # succeed even though the destination directory already exists empty.
+        empty_env, empty_default_datadir = util.get_temp_default_datadir(Path(self.options.tmpdir, "legacy_migration_empty_dest_home"))
+        empty_blackmore_datadir = self._legacy_datadir_for_env(empty_env)
+        # A minimal Blackmore datadir: wallet.dat and config only, no blocks.
+        empty_blackmore_datadir.mkdir(parents=True)
+        util.write_config(empty_blackmore_datadir / "blackmore.conf", n=0, chain=self.chain, disable_autoconnect=self.disable_autoconnect)
+        (empty_blackmore_datadir / "wallet.dat").write_text("empty-dest blackmore wallet\n", encoding="utf8")
+        empty_default_datadir.mkdir(parents=True)  # simulate the GUI Intro pre-creating the datadir
+        self._run_default_datadir_node_once(node, empty_env, empty_default_datadir)
+        assert_equal((empty_default_datadir / "wallet.dat").read_text(encoding="utf8"), "empty-dest blackmore wallet\n")
+        assert (empty_default_datadir / "blackcoin.conf").exists()
+        assert self._migration_marker(empty_default_datadir).exists()
+        self._assert_backup_wallet(empty_default_datadir, "blackmore", "empty-dest blackmore wallet\n")
+
+        self.log.info("Test .blackmore import when the pre-existing .blackcoin datadir holds only a stale lock file")
+        lock_env, lock_default_datadir = util.get_temp_default_datadir(Path(self.options.tmpdir, "legacy_migration_lock_dest_home"))
+        lock_blackmore_datadir = self._legacy_datadir_for_env(lock_env)
+        lock_blackmore_datadir.mkdir(parents=True)
+        util.write_config(lock_blackmore_datadir / "blackmore.conf", n=0, chain=self.chain, disable_autoconnect=self.disable_autoconnect)
+        (lock_blackmore_datadir / "wallet.dat").write_text("lock-dest blackmore wallet\n", encoding="utf8")
+        lock_default_datadir.mkdir(parents=True)
+        (lock_default_datadir / ".lock").write_text("", encoding="utf8")  # a crashed prior run leaves this behind
+        self._run_default_datadir_node_once(node, lock_env, lock_default_datadir)
+        assert_equal((lock_default_datadir / "wallet.dat").read_text(encoding="utf8"), "lock-dest blackmore wallet\n")
+        assert self._migration_marker(lock_default_datadir).exists()
+        # The non-wallet contents were preserved in a backup rather than deleted.
+        assert self._backup_dirs(lock_default_datadir, "preexisting-blackcoin")
+
         self.log.info("Test existing migration marker makes startup a no-op")
         marked_env, marked_default_datadir = util.get_temp_default_datadir(Path(self.options.tmpdir, "legacy_migration_marked_home"))
         marked_blackmore_datadir = self._legacy_datadir_for_env(marked_env)

@@ -560,6 +560,52 @@ bool MoveActiveDestinationAside(const fs::path& destination, const fs::path& mov
     }
 }
 
+//! Clear a pre-existing destination directory that holds no wallet/chain
+//! payload so a staged import can be promoted into its place. The GUI's
+//! data-directory chooser (Intro) creates the Blackcoin datadir before the
+//! first-run migration runs, so on a fresh install importing a Blackmore
+//! datadir the destination already exists as an empty directory. A truly
+//! empty directory is removed; a directory that only holds non-wallet cruft
+//! (e.g. a stray settings.json or lock file) is moved aside into the backup
+//! area so nothing is ever destroyed. Refuses to touch a directory that has
+//! real data payload.
+bool ClearNonPayloadDestination(const fs::path& destination)
+{
+    if (!PathExistsNoThrow(destination)) return true;
+    if (HasDataPayload(destination, BITCOIN_CONF_FILENAME)) {
+        LogPrintf("Warning: refusing to clear Blackcoin datadir %s during migration because it contains wallet or chain data\n",
+                  fs::quoted(fs::PathToString(destination)));
+        return false;
+    }
+
+    std::error_code ec;
+    if (fs::is_directory(destination, ec) && !ec && fs::is_empty(destination, ec) && !ec) {
+        fs::remove(destination, ec);
+        if (!ec) {
+            DirectoryCommit(destination.parent_path());
+            LogPrintf("Blackcoin: removed pre-existing empty Blackcoin datadir %s before importing legacy data\n",
+                      fs::quoted(fs::PathToString(destination)));
+            return true;
+        }
+    }
+
+    const fs::path moved = UniqueBackupPath(destination, "preexisting-blackcoin");
+    try {
+        fs::create_directories(moved.parent_path());
+        fs::rename(destination, moved);
+        DirectoryCommit(destination.parent_path());
+        DirectoryCommit(moved.parent_path());
+        LogPrintf("Blackcoin: moved pre-existing non-wallet Blackcoin datadir %s aside to %s before importing legacy data\n",
+                  fs::quoted(fs::PathToString(destination)),
+                  fs::quoted(fs::PathToString(moved)));
+        return true;
+    } catch (const std::exception& e) {
+        LogPrintf("Warning: failed to move pre-existing Blackcoin datadir %s aside: %s\n",
+                  fs::quoted(fs::PathToString(destination)), e.what());
+        return false;
+    }
+}
+
 bool WriteMigrationDoneMarker(const fs::path& destination, const std::string& status)
 {
     try {
@@ -794,6 +840,16 @@ std::optional<std::string> MaybeMigrateLegacyDataDir(ArgsManager& args, const co
                 return "failed to move the active .blackcoin datadir aside before selected .blackmore import";
             }
             moved_active_path = moved_path;
+        } else if (PathExistsNoThrow(base_path)) {
+            // No populated .blackcoin datadir, but the destination directory
+            // already exists — typically an empty datadir the GUI created
+            // before this migration ran. Move it out of the way (preserving
+            // any contents in the backup area) so the import can be promoted.
+            if (!ClearNonPayloadDestination(base_path)) {
+                std::error_code ec;
+                fs::remove_all(staged_import_path, ec);
+                return "failed to clear the pre-existing empty .blackcoin datadir before importing";
+            }
         }
 
         try {
