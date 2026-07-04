@@ -136,8 +136,20 @@ class GoldRushHeightScheduleMultiNodeTest(BitcoinTestFramework):
 
     def _sync_started(self):
         nodes = [self.nodes[i] for i in self.started]
-        if len(nodes) > 1:
-            self.sync_all(nodes)
+        if len(nodes) <= 1:
+            return
+        self.sync_blocks(nodes)
+        # Transaction relay is driven by Poisson-scheduled timers on the node
+        # clock; with frozen mocktime the announcement never fires. Keep
+        # nudging mocktime forward while waiting for the mempools to agree.
+        pools = []
+        for _ in range(240):
+            pools = [set(n.getrawmempool()) for n in nodes]
+            if all(p == pools[0] for p in pools):
+                return
+            self._bump_mocktime(16)
+            time.sleep(0.25)
+        raise AssertionError(f"mempool sync timed out under mocktime: {pools}")
 
     def _assert_network_agrees(self):
         tips = {self.nodes[i].getbestblockhash() for i in self.started}
