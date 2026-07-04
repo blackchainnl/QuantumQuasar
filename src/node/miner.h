@@ -51,6 +51,9 @@ static const bool DEFAULT_STAKE = true;
 static const bool DEFAULT_STAKE_CACHE = false;
 //! -staketimio default, proof-of-stake timeout in ms
 static const unsigned int DEFAULT_STAKETIMIO = 500;
+//! -solostaking default: stake on an isolated testnet/regtest chain without
+//! peers or a public-chain sync-progress estimate (test schedule branch)
+static const bool DEFAULT_SOLO_STAKING = false;
 
 struct CBlockTemplate
 {

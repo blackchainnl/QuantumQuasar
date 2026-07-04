@@ -96,6 +96,7 @@ void WalletInit::AddWalletOptions(ArgsManager& argsman) const
     argsman.AddArg("-autostartstaking=<true/false>", "Automatically start wallet staking when a wallet is loaded (default: 1)", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
     argsman.AddArg("-stakecache=<true/false>", strprintf("Enables or disables the staking cache; significantly improves staking performance, but can use a lot of memory (default: %u)", node::DEFAULT_STAKE_CACHE), ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
     argsman.AddArg("-staketimio=<n>", strprintf("Proof of stake timeout. (default: %u)", node::DEFAULT_STAKETIMIO), ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
+    argsman.AddArg("-solostaking=<true/false>", strprintf("Stake on an isolated private chain without peers or a public-chain sync estimate (testnet/regtest only on this branch) (default: %u)", node::DEFAULT_SOLO_STAKING), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::WALLET);
     argsman.AddArg("-powmining=<true/false>", "Auto-start the built-in (in-process) Gold Rush Proof-of-Work miner at startup. Requires an unlocked wallet with private keys (default: false)", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
     argsman.AddArg("-powminingthreads=<n>", "Worker threads (CPU cores) for the built-in Gold Rush PoW miner (default: 1)", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
     argsman.AddArg("-powminingcpu=<n>", "Per-core CPU utilization target (1-100) for the built-in Gold Rush PoW miner (default: 1)", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);

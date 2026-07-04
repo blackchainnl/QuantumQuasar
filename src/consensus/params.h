@@ -136,6 +136,12 @@ struct Params {
     int64_t nProtocolV4Time;
     int64_t nGoldRushEndTime;
     int64_t nQuantumMigrationDeadlineTime;
+    /** Optional height-based phase boundaries (testnet/regtest schedule overrides only;
+     *  0 = disabled, phase boundaries stay time-based). When set, the block AT the
+     *  boundary height is the last block of its phase, matching the inclusive
+     *  SHADOW_REWARD_END_HEIGHT reward-window semantics. Mainnet never sets these. */
+    int nGoldRushEndHeight{0};
+    int nQuantumMigrationEndHeight{0};
     uint32_t nQuantumSighashChainId{0};
     int nStakeTierActivationHeight{std::numeric_limits<int>::max()};
     int nStakeRewardSplitActivationHeight{std::numeric_limits<int>::max()};
@@ -148,13 +154,30 @@ struct Params {
     bool IsProtocolV3(int64_t nTime) const { return nTime > nProtocolV3Time && nTime != 1444028400; }
     bool IsProtocolV3_1(int64_t nTime) const { return nTime > nProtocolV3_1Time && nTime != 1713938400; }
     bool IsProtocolV4(int64_t nTime) const { return nTime > nProtocolV4Time; }
-    bool IsQuantumFinalLockout(int64_t nTime) const { return IsProtocolV4(nTime) && nQuantumMigrationDeadlineTime != 0 && nTime > nQuantumMigrationDeadlineTime; }
-    bool IsGoldRushEpoch(int64_t nTime) const { return IsProtocolV4(nTime) && !IsQuantumFinalLockout(nTime) && (nGoldRushEndTime == 0 || nTime <= nGoldRushEndTime); }
-    bool IsQuantumMigrationWindow(int64_t nTime) const { return IsProtocolV4(nTime) && !IsGoldRushEpoch(nTime) && !IsQuantumFinalLockout(nTime) && nGoldRushEndTime != 0 && nTime > nGoldRushEndTime && (nQuantumMigrationDeadlineTime == 0 || nTime <= nQuantumMigrationDeadlineTime); }
-    bool IsQuantumSpendEnforcementActive(int64_t nTime) const { return IsQuantumMigrationWindow(nTime) || IsQuantumFinalLockout(nTime); }
-    bool IsQuantumStakeRulesActive(int64_t nTime) const { return IsQuantumSpendEnforcementActive(nTime); }
-    bool IsNewNetworkStakeOnly(int64_t nTime) const { return IsQuantumFinalLockout(nTime); }
-    bool IsBaseNetworkStakeCompatible(int64_t nTime) const { return !IsNewNetworkStakeOnly(nTime); }
+    /** Phase boundary primitives. nTime is the median-time-past context the caller already
+     *  uses for phase decisions; nHeight is the height of the block being evaluated (for
+     *  next-block/mempool contexts: tip height + 1; for tip-status contexts: tip height).
+     *  When a height override is set (testnet/regtest schedule branch) the height is
+     *  authoritative and the paired time is ignored for that boundary. */
+    bool IsGoldRushEndScheduled() const { return nGoldRushEndHeight > 0 || nGoldRushEndTime != 0; }
+    bool IsMigrationEndScheduled() const { return nQuantumMigrationEndHeight > 0 || nQuantumMigrationDeadlineTime != 0; }
+    bool GoldRushEndPassed(int64_t nTime, int nHeight) const
+    {
+        if (nGoldRushEndHeight > 0) return nHeight > nGoldRushEndHeight;
+        return nGoldRushEndTime != 0 && nTime > nGoldRushEndTime;
+    }
+    bool MigrationDeadlinePassed(int64_t nTime, int nHeight) const
+    {
+        if (nQuantumMigrationEndHeight > 0) return nHeight > nQuantumMigrationEndHeight;
+        return nQuantumMigrationDeadlineTime != 0 && nTime > nQuantumMigrationDeadlineTime;
+    }
+    bool IsQuantumFinalLockout(int64_t nTime, int nHeight) const { return IsProtocolV4(nTime) && IsMigrationEndScheduled() && MigrationDeadlinePassed(nTime, nHeight); }
+    bool IsGoldRushEpoch(int64_t nTime, int nHeight) const { return IsProtocolV4(nTime) && !IsQuantumFinalLockout(nTime, nHeight) && !GoldRushEndPassed(nTime, nHeight); }
+    bool IsQuantumMigrationWindow(int64_t nTime, int nHeight) const { return IsProtocolV4(nTime) && !IsGoldRushEpoch(nTime, nHeight) && !IsQuantumFinalLockout(nTime, nHeight) && IsGoldRushEndScheduled() && GoldRushEndPassed(nTime, nHeight) && !MigrationDeadlinePassed(nTime, nHeight); }
+    bool IsQuantumSpendEnforcementActive(int64_t nTime, int nHeight) const { return IsQuantumMigrationWindow(nTime, nHeight) || IsQuantumFinalLockout(nTime, nHeight); }
+    bool IsQuantumStakeRulesActive(int64_t nTime, int nHeight) const { return IsQuantumSpendEnforcementActive(nTime, nHeight); }
+    bool IsNewNetworkStakeOnly(int64_t nTime, int nHeight) const { return IsQuantumFinalLockout(nTime, nHeight); }
+    bool IsBaseNetworkStakeCompatible(int64_t nTime, int nHeight) const { return !IsNewNetworkStakeOnly(nTime, nHeight); }
     bool IsStakeTiersActive(int nHeight) const { return nHeight >= nStakeTierActivationHeight; }
     bool IsStakeRewardSplitActive(int nHeight) const { return nHeight >= nStakeRewardSplitActivationHeight; }
     int EffectiveDemurrageActivationHeight() const { return std::max(nDemurrageActivationHeight, nDemurrageMinActivationHeight); }
@@ -165,15 +188,15 @@ struct Params {
     int DemurrageAutoAttestBlocks() const { return 3 * DemurrageBlocksPerMonth(); }
     bool IsDemurrageActive(int nHeight, int64_t nParentMedianTimePast) const
     {
-        return nQuantumMigrationDeadlineTime != 0 &&
-               nParentMedianTimePast > nQuantumMigrationDeadlineTime &&
+        return IsMigrationEndScheduled() &&
+               MigrationDeadlinePassed(nParentMedianTimePast, nHeight) &&
                nHeight >= EffectiveDemurrageActivationHeight();
     }
-    QuantumQuasarPhase GetQuantumQuasarPhase(int64_t nTime) const
+    QuantumQuasarPhase GetQuantumQuasarPhase(int64_t nTime, int nHeight) const
     {
         if (!IsProtocolV4(nTime)) return QuantumQuasarPhase::LEGACY;
-        if (IsGoldRushEpoch(nTime)) return QuantumQuasarPhase::GOLD_RUSH;
-        if (IsQuantumMigrationWindow(nTime)) return QuantumQuasarPhase::MIGRATION;
+        if (IsGoldRushEpoch(nTime, nHeight)) return QuantumQuasarPhase::GOLD_RUSH;
+        if (IsQuantumMigrationWindow(nTime, nHeight)) return QuantumQuasarPhase::MIGRATION;
         return QuantumQuasarPhase::FINAL_LOCKOUT;
     }
     int nLastPOWBlock;

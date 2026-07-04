@@ -2732,7 +2732,7 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
                 verify_flags |= SCRIPT_VERIFY_ISCOINSTAKE;
                 verify_flags |= SCRIPT_VERIFY_STRICTENC;
             }
-            if (consensus.IsNewNetworkStakeOnly(tip_mtp)) {
+            if (consensus.IsNewNetworkStakeOnly(tip_mtp, tip->nHeight + 1)) {
                 active_sighash = (active_sighash == SIGHASH_DEFAULT ? SIGHASH_ALL : active_sighash) | SIGHASH_FORKID;
                 verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
             }
@@ -2749,7 +2749,7 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
             if (consensus.IsStakeTiersActive(tip->nHeight + 1)) {
                 verify_flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
             }
-            if (consensus.IsQuantumFinalLockout(tip_mtp)) {
+            if (consensus.IsQuantumFinalLockout(tip_mtp, tip->nHeight + 1)) {
                 verify_flags |= SCRIPT_VERIFY_LEGACY_ECDSA_LOCKOUT;
             }
         }
@@ -2799,12 +2799,12 @@ unsigned int CWallet::GetActiveScriptVerifyFlags() const
                 flags |= SCRIPT_VERIFY_ISCOINSTAKE;
                 flags |= SCRIPT_VERIFY_STRICTENC;
             }
-            if (consensus.IsNewNetworkStakeOnly(tip_mtp)) {
+            if (consensus.IsNewNetworkStakeOnly(tip_mtp, tip->nHeight + 1)) {
                 flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
             }
             quantum_spend_active = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
             eutxo_spend_active = quantum_spend_active;
-            final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp);
+            final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp, tip->nHeight + 1);
             if (consensus.IsStakeTiersActive(tip->nHeight + 1)) {
                 flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
             }
@@ -2848,13 +2848,13 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
                 psbt_verify_flags |= SCRIPT_VERIFY_ISCOINSTAKE;
                 psbt_verify_flags |= SCRIPT_VERIFY_STRICTENC;
             }
-            if (consensus.IsNewNetworkStakeOnly(tip_mtp)) {
+            if (consensus.IsNewNetworkStakeOnly(tip_mtp, tip->nHeight + 1)) {
                 active_sighash = (active_sighash == SIGHASH_DEFAULT ? SIGHASH_ALL : active_sighash) | SIGHASH_FORKID;
                 psbt_verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
             }
             quantum_spend_active = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
             eutxo_spend_active = quantum_spend_active;
-            final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp);
+            final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp, tip->nHeight + 1);
             if (consensus.IsStakeTiersActive(tip->nHeight + 1)) {
                 psbt_verify_flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
             }

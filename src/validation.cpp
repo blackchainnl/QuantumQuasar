@@ -3002,7 +3002,7 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const Ch
         flags |= SCRIPT_VERIFY_STRICTENC;
     }
 
-    if (consensusparams.IsNewNetworkStakeOnly(v4_mtp)) {
+    if (consensusparams.IsNewNetworkStakeOnly(v4_mtp, block_index.nHeight)) {
         flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
     }
 
@@ -3021,7 +3021,7 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const Ch
         flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
     }
 
-    if (consensusparams.IsQuantumFinalLockout(v4_mtp)) {
+    if (consensusparams.IsQuantumFinalLockout(v4_mtp, block_index.nHeight)) {
         flags |= SCRIPT_VERIFY_LEGACY_ECDSA_LOCKOUT;
     }
 
@@ -3039,7 +3039,7 @@ static unsigned int ApplyNextBlockV4ScriptFlags(unsigned int flags, const CBlock
         flags &= ~SCRIPT_VERIFY_ISCOINSTAKE;
         flags &= ~SCRIPT_VERIFY_V4_LARGE_SCRIPT_ELEMENT;
     }
-    if (consensusparams.IsNewNetworkStakeOnly(next_block_mtp)) {
+    if (consensusparams.IsNewNetworkStakeOnly(next_block_mtp, next_height)) {
         flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
     } else {
         flags &= ~SCRIPT_ENABLE_SIGHASH_FORKID;
@@ -3064,7 +3064,7 @@ static unsigned int ApplyNextBlockV4ScriptFlags(unsigned int flags, const CBlock
     } else {
         flags &= ~SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
     }
-    if (consensusparams.IsQuantumFinalLockout(next_block_mtp)) {
+    if (consensusparams.IsQuantumFinalLockout(next_block_mtp, next_height)) {
         flags |= SCRIPT_VERIFY_LEGACY_ECDSA_LOCKOUT;
     } else {
         flags &= ~SCRIPT_VERIFY_LEGACY_ECDSA_LOCKOUT;

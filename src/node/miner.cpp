@@ -255,7 +255,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
         const int64_t transition_mtp = pindexPrev->GetMedianTimePast();
         const bool notice_window = nHeight >= SHADOW_REWARD_START_HEIGHT &&
                                    chainparams.GetConsensus().IsProtocolV4(transition_mtp) &&
-                                   !chainparams.GetConsensus().IsQuantumFinalLockout(transition_mtp);
+                                   !chainparams.GetConsensus().IsQuantumFinalLockout(transition_mtp, nHeight);
         if (notice_window) {
             coinbaseTx.vout.push_back(CTxOut(0, BuildQuantumQuasarBlockNoticeScript()));
         }
@@ -808,7 +808,7 @@ void PoSMiner(CWallet *pwallet)
     {
         LOCK2(pwallet->cs_wallet, cs_main);
         CBlockIndex* tip = pwallet->chain().getTip();
-        const bool final_quantum_lockout = tip && Params().GetConsensus().IsQuantumFinalLockout(tip->GetMedianTimePast());
+        const bool final_quantum_lockout = tip && Params().GetConsensus().IsQuantumFinalLockout(tip->GetMedianTimePast(), tip->nHeight + 1);
         if (!final_quantum_lockout) {
             const std::string label = "Staking Legacy Address";
             pwallet->ForEachAddrBookEntry([&](const CTxDestination& _dest, const std::string& _label, bool _is_change, const std::optional<wallet::AddressPurpose>& _purpose) {
@@ -843,8 +843,13 @@ void PoSMiner(CWallet *pwallet)
             }
 
             // Busy-wait for the network to come online so we don't waste time mining
-            // on an obsolete chain. In regtest mode we expect to fly solo.
-            if (!Params().MineBlocksOnDemand()) {
+            // on an obsolete chain. In regtest mode we expect to fly solo, and the
+            // test schedule branch allows isolated testnets to opt in with
+            // -solostaking (the public-chain transaction statistics used for the
+            // sync estimate are meaningless on a private schedule-override chain).
+            const bool solo_staking = Params().MineBlocksOnDemand() ||
+                (Params().IsTestChain() && gArgs.GetBoolArg("-solostaking", node::DEFAULT_SOLO_STAKING));
+            if (!solo_staking) {
                 while (pwallet->chain().getNodeCount(ConnectionDirection::Both) == 0 || pwallet->chain().isInitialBlockDownload()) {
                     pwallet->m_last_coin_stake_search_interval = 0;
                     if (!SleepStaker(pwallet, 10000))
@@ -852,7 +857,7 @@ void PoSMiner(CWallet *pwallet)
                 }
             }
 
-            while (GuessVerificationProgress(Params().TxData(), pwallet->chain().getTip()) < 0.996) {
+            while (!solo_staking && GuessVerificationProgress(Params().TxData(), pwallet->chain().getTip()) < 0.996) {
                 pwallet->m_last_coin_stake_search_interval = 0;
                 pwallet->WalletLogPrintf("Staker thread sleeps while sync at %f\n", GuessVerificationProgress(Params().TxData(), pwallet->chain().getTip()));
                 if (!SleepStaker(pwallet, 10000))

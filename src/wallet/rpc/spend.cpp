@@ -1897,12 +1897,16 @@ RPCHelpMan migratetoquantum()
 
         const Consensus::Params& consensus = Params().GetConsensus();
         int64_t mtp = 0;
-        if (const CBlockIndex* tip = pwallet->chain().chainman().ActiveChain().Tip()) mtp = tip->GetMedianTimePast();
-        if (consensus.IsQuantumFinalLockout(mtp)) {
+        int next_height = 0;
+        if (const CBlockIndex* tip = pwallet->chain().chainman().ActiveChain().Tip()) {
+            mtp = tip->GetMedianTimePast();
+            next_height = tip->nHeight + 1;
+        }
+        if (consensus.IsQuantumFinalLockout(mtp, next_height)) {
             throw JSONRPCError(RPC_WALLET_ERROR,
                 "The migration deadline has passed; legacy coins are no longer spendable and cannot be migrated.");
         }
-        const std::string phase = QQPhaseName(consensus.GetQuantumQuasarPhase(mtp));
+        const std::string phase = QQPhaseName(consensus.GetQuantumQuasarPhase(mtp, next_height));
 
         CTxDestination dest;
         bool newly_generated = false;
@@ -2059,13 +2063,13 @@ RPCHelpMan migrategoldrushrewards()
             mtp = tip->GetMedianTimePast();
             next_height = tip->nHeight + 1;
         }
-        const bool goldrush_move_active = !consensus.IsQuantumFinalLockout(mtp) &&
+        const bool goldrush_move_active = !consensus.IsQuantumFinalLockout(mtp, next_height) &&
             IsQuantumWitnessSpendActive(consensus, mtp, next_height);
         if (!goldrush_move_active) {
             throw JSONRPCError(RPC_WALLET_ERROR,
                 "Gold Rush reward migration is only allowed once quantum reward spends are active and before the final quantum lockout deadline.");
         }
-        const std::string phase = QQPhaseName(consensus.GetQuantumQuasarPhase(mtp));
+        const std::string phase = QQPhaseName(consensus.GetQuantumQuasarPhase(mtp, next_height));
 
         CTxDestination dest;
         bool newly_generated = false;
@@ -3693,8 +3697,8 @@ RPCHelpMan getmigrationstatus()
             next_height = tip->nHeight + 1;
         }
 
-        const bool scheduled = c.nQuantumMigrationDeadlineTime != 0;
-        const bool passed = c.IsQuantumFinalLockout(mtp);
+        const bool scheduled = c.IsMigrationEndScheduled();
+        const bool passed = c.IsQuantumFinalLockout(mtp, next_height);
         const int64_t secs = (scheduled && c.nQuantumMigrationDeadlineTime > mtp)
                                  ? (c.nQuantumMigrationDeadlineTime - mtp) : 0;
         const bool quantum_active = IsQuantumWitnessSpendActive(c, mtp, next_height);
@@ -3732,7 +3736,7 @@ RPCHelpMan getmigrationstatus()
 
         const int64_t spacing = std::max<int64_t>(1, c.nTargetSpacing);
         UniValue r(UniValue::VOBJ);
-        r.pushKV("phase", QQPhaseName(c.GetQuantumQuasarPhase(mtp)));
+        r.pushKV("phase", QQPhaseName(c.GetQuantumQuasarPhase(mtp, next_height)));
         r.pushKV("mediantime", mtp);
         r.pushKV("deadline_mtp", c.nQuantumMigrationDeadlineTime);
         r.pushKV("deadline_scheduled", scheduled);

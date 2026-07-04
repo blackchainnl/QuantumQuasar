@@ -938,12 +938,12 @@ static RPCHelpMan getblocktemplate()
     }
     UniValue quantumquasar(UniValue::VOBJ);
     const bool quantum_spend_active = IsQuantumWitnessSpendActive(consensusParams, template_mtp, template_height);
-    const bool new_network_stake_only = consensusParams.IsNewNetworkStakeOnly(template_mtp);
-    const bool base_network_stake_compatible = consensusParams.IsBaseNetworkStakeCompatible(template_mtp);
+    const bool new_network_stake_only = consensusParams.IsNewNetworkStakeOnly(template_mtp, template_height);
+    const bool base_network_stake_compatible = consensusParams.IsBaseNetworkStakeCompatible(template_mtp, template_height);
     const bool shadow_merge_mining_active = IsShadowGoldRushRewardActive(consensusParams, template_mtp, template_height);
-    const bool final_lockout_active = consensusParams.IsQuantumFinalLockout(template_mtp);
+    const bool final_lockout_active = consensusParams.IsQuantumFinalLockout(template_mtp, template_height);
     const bool shadow_reward_height_active = IsShadowGoldRushRewardHeight(template_height);
-    quantumquasar.pushKV("phase", gbt_blackcoin_phase_name(consensusParams.GetQuantumQuasarPhase(template_mtp)));
+    quantumquasar.pushKV("phase", gbt_blackcoin_phase_name(consensusParams.GetQuantumQuasarPhase(template_mtp, template_height)));
     quantumquasar.pushKV("v4_activation_time", consensusParams.nProtocolV4Time);
     quantumquasar.pushKV("gold_rush_end_time", consensusParams.nGoldRushEndTime);
     quantumquasar.pushKV("quantum_migration_deadline_time", consensusParams.nQuantumMigrationDeadlineTime);

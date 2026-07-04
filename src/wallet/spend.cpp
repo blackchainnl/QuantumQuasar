@@ -1171,7 +1171,7 @@ static util::Result<CreatedTransactionResult> CreateTransactionInternal(
     CAmount recipients_sum = 0;
     bool final_quantum_lockout = false;
     if (const CBlockIndex* tip = wallet.chain().getTip()) {
-        final_quantum_lockout = Params().GetConsensus().IsQuantumFinalLockout(tip->GetMedianTimePast());
+        final_quantum_lockout = Params().GetConsensus().IsQuantumFinalLockout(tip->GetMedianTimePast(), tip->nHeight + 1);
     }
 
     const OutputType change_type = wallet.TransactionChangeType(coin_control.m_change_type ? *coin_control.m_change_type : wallet.m_default_change_type, vecSend);

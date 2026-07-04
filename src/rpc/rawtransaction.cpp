@@ -1301,7 +1301,7 @@ static RPCHelpMan signrawtransactionwithkey()
 
     UniValue result(UniValue::VOBJ);
     UniValue sighash{request.params[3]};
-    const bool use_forkid_default{WITH_LOCK(::cs_main, return chainman.ActiveChain().Tip() && chainman.GetConsensus().IsNewNetworkStakeOnly(chainman.ActiveChain().Tip()->GetMedianTimePast());)};
+    const bool use_forkid_default{WITH_LOCK(::cs_main, return chainman.ActiveChain().Tip() && chainman.GetConsensus().IsNewNetworkStakeOnly(chainman.ActiveChain().Tip()->GetMedianTimePast(), chainman.ActiveChain().Tip()->nHeight + 1);)};
     if (sighash.isNull() && use_forkid_default) {
         sighash = UniValue{UniValue::VSTR, "ALL|FORKID"};
     }
@@ -1435,7 +1435,7 @@ static RPCHelpMan signrawtransactionwithquantumkey()
             v4_active = consensus.IsProtocolV4(tip_mtp);
             quantum_spend_active = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
             eutxo_spend_active = quantum_spend_active;
-            final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp);
+            final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp, tip->nHeight + 1);
             stake_tiers_active = consensus.IsStakeTiersActive(tip->nHeight + 1);
         }
     }
@@ -2817,7 +2817,7 @@ RPCHelpMan descriptorprocesspsbt()
     const NodeContext& node = EnsureAnyNodeContext(request.context);
     ChainstateManager& chainman = EnsureChainman(node);
     UniValue sighash{request.params[2]};
-    const bool use_forkid_default{WITH_LOCK(::cs_main, return chainman.ActiveChain().Tip() && chainman.GetConsensus().IsNewNetworkStakeOnly(chainman.ActiveChain().Tip()->GetMedianTimePast());)};
+    const bool use_forkid_default{WITH_LOCK(::cs_main, return chainman.ActiveChain().Tip() && chainman.GetConsensus().IsNewNetworkStakeOnly(chainman.ActiveChain().Tip()->GetMedianTimePast(), chainman.ActiveChain().Tip()->nHeight + 1);)};
     if (sighash.isNull() && use_forkid_default) {
         sighash = UniValue{UniValue::VSTR, "ALL|FORKID"};
     }
@@ -2928,8 +2928,8 @@ static RPCHelpMan verifyeutxospend()
             const auto& consensus = chainman.GetConsensus();
             v4_active = consensus.IsProtocolV4(tip_mtp);
             enforced = IsQuantumWitnessSpendActive(consensus, tip_mtp, tip->nHeight + 1);
-            final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp);
-            new_network_stake_only = consensus.IsNewNetworkStakeOnly(tip_mtp);
+            final_lockout_active = consensus.IsQuantumFinalLockout(tip_mtp, tip->nHeight + 1);
+            new_network_stake_only = consensus.IsNewNetworkStakeOnly(tip_mtp, tip->nHeight + 1);
             stake_tiers_active = consensus.IsStakeTiersActive(tip->nHeight + 1);
         }
     }

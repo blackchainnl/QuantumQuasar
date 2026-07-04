@@ -323,7 +323,7 @@ bool CheckProofOfStake(CBlockIndex* pindexPrev, const CTransaction& tx, unsigned
     const bool quantum_stake_rules_active = IsQuantumWitnessSpendActive(consensus, stake_mtp, stake_height);
     std::vector<unsigned char> quantum_block_pubkey;
     const bool quantum_block_signature = tx.vout.size() >= 2 && ExtractQuantumBlockSigningPubKey(tx.vout[1].scriptPubKey, quantum_block_pubkey);
-    if (consensus.IsNewNetworkStakeOnly(stake_mtp) && !quantum_stake) {
+    if (consensus.IsNewNetworkStakeOnly(stake_mtp, stake_height) && !quantum_stake) {
         return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "legacy-stake-disabled", strprintf("CheckProofOfStake() : Legacy stake prevout is disabled after the Quantum Quasar migration deadline on coinstake %s", tx.GetHash().ToString()));
     }
     if (quantum_block_signature) {
@@ -342,7 +342,7 @@ bool CheckProofOfStake(CBlockIndex* pindexPrev, const CTransaction& tx, unsigned
         script_verify_flags |= SCRIPT_VERIFY_ISCOINSTAKE;
         script_verify_flags |= SCRIPT_VERIFY_STRICTENC;
     }
-    if (consensus.IsNewNetworkStakeOnly(stake_mtp)) {
+    if (consensus.IsNewNetworkStakeOnly(stake_mtp, stake_height)) {
         script_verify_flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
     }
     if (IsQuantumWitnessSpendActive(consensus, stake_mtp, stake_height)) {
@@ -358,7 +358,7 @@ bool CheckProofOfStake(CBlockIndex* pindexPrev, const CTransaction& tx, unsigned
     if (consensus.IsStakeTiersActive(stake_height)) {
         script_verify_flags |= SCRIPT_VERIFY_QUANTUM_STAKE_TIERS;
     }
-    if (consensus.IsQuantumFinalLockout(stake_mtp)) {
+    if (consensus.IsQuantumFinalLockout(stake_mtp, stake_height)) {
         script_verify_flags |= SCRIPT_VERIFY_LEGACY_ECDSA_LOCKOUT;
     }
 

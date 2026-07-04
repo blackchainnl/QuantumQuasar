@@ -62,6 +62,40 @@ class GoldRushScheduleControlsTest(BitcoinTestFramework):
         assert mainnet_result.returncode != 0
         assert "only supported on testnet/regtest" in (mainnet_result.stdout + mainnet_result.stderr)
 
+        self.log.info("Rejecting -shadowgoldrushendheight combined with -shadowgoldrushblocks")
+        node.assert_start_raises_init_error(
+            extra_args=[
+                "-shadowwhitelistheight=100",
+                "-shadowgoldrushstartheight=110",
+                "-shadowgoldrushblocks=10",
+                "-shadowgoldrushendheight=119",
+            ],
+            expected_msg="-shadowgoldrushendheight cannot be combined with -shadowgoldrushblocks",
+            match=ErrorMatch.PARTIAL_REGEX,
+        )
+
+        self.log.info("Rejecting a migration end height at or below the Gold Rush end height")
+        node.assert_start_raises_init_error(
+            extra_args=[
+                "-qqgoldrushendheight=200",
+                "-qqmigrationendheight=200",
+            ],
+            expected_msg="-qqmigrationendheight must be greater than -qqgoldrushendheight",
+            match=ErrorMatch.PARTIAL_REGEX,
+        )
+
+        self.log.info("Rejecting a Gold Rush phase end height below the reward window end")
+        node.assert_start_raises_init_error(
+            extra_args=[
+                "-shadowwhitelistheight=100",
+                "-shadowgoldrushstartheight=110",
+                "-shadowgoldrushendheight=119",
+                "-qqgoldrushendheight=115",
+            ],
+            expected_msg="must not be below the shadow reward end height",
+            match=ErrorMatch.PARTIAL_REGEX,
+        )
+
         self.log.info("Starting testnet with an explicit whitelist/start/end schedule")
         self.start_node(0, [
             "-shadowwhitelistheight=100",
@@ -74,6 +108,25 @@ class GoldRushScheduleControlsTest(BitcoinTestFramework):
         assert_equal(info["shadow_reward_end_height"], 119)
         assert_equal(info["shadow_reward_next_height"], 1)
         assert_equal(info["shadow_reward_height_active"], False)
+        assert_equal(info["gold_rush_end_height"], 0)
+        assert_equal(info["quantum_migration_end_height"], 0)
+        self.stop_node(0)
+
+        self.log.info("Starting testnet with the height-based phase boundaries")
+        self.start_node(0, [
+            "-shadowwhitelistheight=100",
+            "-shadowgoldrushstartheight=110",
+            "-shadowgoldrushendheight=119",
+            "-qqgoldrushendheight=119",
+            "-qqmigrationendheight=219",
+        ])
+
+        info = node.getquantumquasarinfo()
+        assert_equal(info["shadow_reward_start_height"], 110)
+        assert_equal(info["shadow_reward_end_height"], 119)
+        assert_equal(info["gold_rush_end_height"], 119)
+        assert_equal(info["quantum_migration_end_height"], 219)
+        assert_equal(info["phase"], "gold_rush")
 
 
 if __name__ == "__main__":

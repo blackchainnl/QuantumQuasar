@@ -61,22 +61,22 @@ BOOST_AUTO_TEST_CASE(phase_schedule_boundaries)
     consensus.nGoldRushEndTime = consensus.nProtocolV4Time + Consensus::QUANTUM_QUASAR_GOLD_RUSH_SECONDS;
     consensus.nQuantumMigrationDeadlineTime = consensus.nGoldRushEndTime + Consensus::QUANTUM_QUASAR_MIGRATION_SECONDS;
 
-    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nProtocolV4Time) == Consensus::QuantumQuasarPhase::LEGACY);
-    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nProtocolV4Time + 1) == Consensus::QuantumQuasarPhase::GOLD_RUSH);
-    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nGoldRushEndTime) == Consensus::QuantumQuasarPhase::GOLD_RUSH);
-    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nGoldRushEndTime + 1) == Consensus::QuantumQuasarPhase::MIGRATION);
-    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nQuantumMigrationDeadlineTime) == Consensus::QuantumQuasarPhase::MIGRATION);
-    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nQuantumMigrationDeadlineTime + 1) == Consensus::QuantumQuasarPhase::FINAL_LOCKOUT);
-    BOOST_CHECK(consensus.IsBaseNetworkStakeCompatible(consensus.nProtocolV4Time));
-    BOOST_CHECK(consensus.IsBaseNetworkStakeCompatible(consensus.nProtocolV4Time + 1));
-    BOOST_CHECK(consensus.IsBaseNetworkStakeCompatible(consensus.nGoldRushEndTime));
-    BOOST_CHECK(consensus.IsBaseNetworkStakeCompatible(consensus.nGoldRushEndTime + 1));
-    BOOST_CHECK(!consensus.IsNewNetworkStakeOnly(consensus.nGoldRushEndTime));
-    BOOST_CHECK(!consensus.IsNewNetworkStakeOnly(consensus.nGoldRushEndTime + 1));
-    BOOST_CHECK(consensus.IsNewNetworkStakeOnly(consensus.nQuantumMigrationDeadlineTime + 1));
-    BOOST_CHECK(!consensus.IsQuantumSpendEnforcementActive(consensus.nGoldRushEndTime));
-    BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nGoldRushEndTime + 1));
-    BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nQuantumMigrationDeadlineTime + 1));
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nProtocolV4Time, 0) == Consensus::QuantumQuasarPhase::LEGACY);
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nProtocolV4Time + 1, 0) == Consensus::QuantumQuasarPhase::GOLD_RUSH);
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nGoldRushEndTime, 0) == Consensus::QuantumQuasarPhase::GOLD_RUSH);
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nGoldRushEndTime + 1, 0) == Consensus::QuantumQuasarPhase::MIGRATION);
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nQuantumMigrationDeadlineTime, 0) == Consensus::QuantumQuasarPhase::MIGRATION);
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nQuantumMigrationDeadlineTime + 1, 0) == Consensus::QuantumQuasarPhase::FINAL_LOCKOUT);
+    BOOST_CHECK(consensus.IsBaseNetworkStakeCompatible(consensus.nProtocolV4Time, 0));
+    BOOST_CHECK(consensus.IsBaseNetworkStakeCompatible(consensus.nProtocolV4Time + 1, 0));
+    BOOST_CHECK(consensus.IsBaseNetworkStakeCompatible(consensus.nGoldRushEndTime, 0));
+    BOOST_CHECK(consensus.IsBaseNetworkStakeCompatible(consensus.nGoldRushEndTime + 1, 0));
+    BOOST_CHECK(!consensus.IsNewNetworkStakeOnly(consensus.nGoldRushEndTime, 0));
+    BOOST_CHECK(!consensus.IsNewNetworkStakeOnly(consensus.nGoldRushEndTime + 1, 0));
+    BOOST_CHECK(consensus.IsNewNetworkStakeOnly(consensus.nQuantumMigrationDeadlineTime + 1, 0));
+    BOOST_CHECK(!consensus.IsQuantumSpendEnforcementActive(consensus.nGoldRushEndTime, 0));
+    BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nGoldRushEndTime + 1, 0));
+    BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nQuantumMigrationDeadlineTime + 1, 0));
     BOOST_CHECK(IsShadowGoldRushRewardActive(consensus, consensus.nProtocolV4Time - 1, SHADOW_REWARD_START_HEIGHT));
     BOOST_CHECK(IsShadowGoldRushRewardActive(consensus, consensus.nGoldRushEndTime + 1, SHADOW_REWARD_END_HEIGHT));
     BOOST_CHECK(!IsShadowGoldRushRewardActive(consensus, consensus.nQuantumMigrationDeadlineTime + 1, SHADOW_REWARD_START_HEIGHT));
@@ -84,30 +84,79 @@ BOOST_AUTO_TEST_CASE(phase_schedule_boundaries)
     BOOST_CHECK(IsQuantumWitnessSpendActive(consensus, consensus.nGoldRushEndTime + 1, SHADOW_REWARD_END_HEIGHT + 1));
 
     consensus.nQuantumMigrationDeadlineTime = 0;
-    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nGoldRushEndTime + 1) == Consensus::QuantumQuasarPhase::MIGRATION);
-    BOOST_CHECK(!consensus.IsNewNetworkStakeOnly(consensus.nGoldRushEndTime + 1));
-    BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nGoldRushEndTime + 1));
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nGoldRushEndTime + 1, 0) == Consensus::QuantumQuasarPhase::MIGRATION);
+    BOOST_CHECK(!consensus.IsNewNetworkStakeOnly(consensus.nGoldRushEndTime + 1, 0));
+    BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nGoldRushEndTime + 1, 0));
 
     consensus.nGoldRushEndTime = 0;
-    BOOST_CHECK(consensus.IsBaseNetworkStakeCompatible(consensus.nProtocolV4Time + 1));
-    BOOST_CHECK(!consensus.IsNewNetworkStakeOnly(consensus.nProtocolV4Time + 1));
-    BOOST_CHECK(!consensus.IsQuantumMigrationWindow(consensus.nProtocolV4Time + 1));
-    BOOST_CHECK(!consensus.IsQuantumFinalLockout(consensus.nProtocolV4Time + 1));
+    BOOST_CHECK(consensus.IsBaseNetworkStakeCompatible(consensus.nProtocolV4Time + 1, 0));
+    BOOST_CHECK(!consensus.IsNewNetworkStakeOnly(consensus.nProtocolV4Time + 1, 0));
+    BOOST_CHECK(!consensus.IsQuantumMigrationWindow(consensus.nProtocolV4Time + 1, 0));
+    BOOST_CHECK(!consensus.IsQuantumFinalLockout(consensus.nProtocolV4Time + 1, 0));
 
     consensus.nQuantumMigrationDeadlineTime = consensus.nProtocolV4Time + 10;
-    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nProtocolV4Time + 1) == Consensus::QuantumQuasarPhase::GOLD_RUSH);
-    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nProtocolV4Time + 11) == Consensus::QuantumQuasarPhase::FINAL_LOCKOUT);
-    BOOST_CHECK(!consensus.IsBaseNetworkStakeCompatible(consensus.nProtocolV4Time + 11));
-    BOOST_CHECK(consensus.IsNewNetworkStakeOnly(consensus.nProtocolV4Time + 11));
-    BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nProtocolV4Time + 11));
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nProtocolV4Time + 1, 0) == Consensus::QuantumQuasarPhase::GOLD_RUSH);
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nProtocolV4Time + 11, 0) == Consensus::QuantumQuasarPhase::FINAL_LOCKOUT);
+    BOOST_CHECK(!consensus.IsBaseNetworkStakeCompatible(consensus.nProtocolV4Time + 11, 0));
+    BOOST_CHECK(consensus.IsNewNetworkStakeOnly(consensus.nProtocolV4Time + 11, 0));
+    BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nProtocolV4Time + 11, 0));
 
     consensus.nGoldRushEndTime = consensus.nProtocolV4Time + 100;
     consensus.nQuantumMigrationDeadlineTime = consensus.nProtocolV4Time + 50;
-    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nProtocolV4Time + 51) == Consensus::QuantumQuasarPhase::FINAL_LOCKOUT);
-    BOOST_CHECK(!consensus.IsGoldRushEpoch(consensus.nProtocolV4Time + 51));
-    BOOST_CHECK(!consensus.IsBaseNetworkStakeCompatible(consensus.nProtocolV4Time + 51));
-    BOOST_CHECK(consensus.IsNewNetworkStakeOnly(consensus.nProtocolV4Time + 51));
-    BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nProtocolV4Time + 51));
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nProtocolV4Time + 51, 0) == Consensus::QuantumQuasarPhase::FINAL_LOCKOUT);
+    BOOST_CHECK(!consensus.IsGoldRushEpoch(consensus.nProtocolV4Time + 51, 0));
+    BOOST_CHECK(!consensus.IsBaseNetworkStakeCompatible(consensus.nProtocolV4Time + 51, 0));
+    BOOST_CHECK(consensus.IsNewNetworkStakeOnly(consensus.nProtocolV4Time + 51, 0));
+    BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(consensus.nProtocolV4Time + 51, 0));
+}
+
+BOOST_AUTO_TEST_CASE(phase_schedule_height_overrides)
+{
+    Consensus::Params consensus;
+    consensus.nProtocolV4Time = 1000;
+    consensus.nGoldRushEndTime = 2000;
+    consensus.nQuantumMigrationDeadlineTime = 3000;
+    consensus.nGoldRushEndHeight = 100;
+    consensus.nQuantumMigrationEndHeight = 200;
+
+    const int64_t t = consensus.nProtocolV4Time + 1; // V4 active; boundary times irrelevant below
+
+    // Heights are authoritative when set: time says MIGRATION/FINAL, height says GOLD_RUSH.
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nQuantumMigrationDeadlineTime + 1, 100) == Consensus::QuantumQuasarPhase::GOLD_RUSH);
+    // The block AT the boundary height is the last block of its phase (inclusive).
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(t, 100) == Consensus::QuantumQuasarPhase::GOLD_RUSH);
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(t, 101) == Consensus::QuantumQuasarPhase::MIGRATION);
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(t, 200) == Consensus::QuantumQuasarPhase::MIGRATION);
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(t, 201) == Consensus::QuantumQuasarPhase::FINAL_LOCKOUT);
+    BOOST_CHECK(consensus.IsGoldRushEpoch(t, 100));
+    BOOST_CHECK(!consensus.IsGoldRushEpoch(t, 101));
+    BOOST_CHECK(consensus.IsQuantumMigrationWindow(t, 101));
+    BOOST_CHECK(consensus.IsQuantumSpendEnforcementActive(t, 101));
+    BOOST_CHECK(!consensus.IsQuantumFinalLockout(t, 200));
+    BOOST_CHECK(consensus.IsQuantumFinalLockout(t, 201));
+    BOOST_CHECK(consensus.IsNewNetworkStakeOnly(t, 201));
+    BOOST_CHECK(!consensus.IsBaseNetworkStakeCompatible(t, 201));
+    // Pre-V4 time still reports LEGACY regardless of heights.
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(consensus.nProtocolV4Time, 500) == Consensus::QuantumQuasarPhase::LEGACY);
+
+    // Height-only migration end: gold rush end by height, final lockout by height, no times set.
+    consensus.nGoldRushEndTime = 0;
+    consensus.nQuantumMigrationDeadlineTime = 0;
+    BOOST_CHECK(consensus.IsMigrationEndScheduled());
+    BOOST_CHECK(consensus.IsGoldRushEndScheduled());
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(t, 150) == Consensus::QuantumQuasarPhase::MIGRATION);
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(t, 201) == Consensus::QuantumQuasarPhase::FINAL_LOCKOUT);
+    // Demurrage honors the height boundary through IsDemurrageActive.
+    consensus.nDemurrageActivationHeight = 0;
+    consensus.nDemurrageMinActivationHeight = 0;
+    BOOST_CHECK(!consensus.IsDemurrageActive(200, t));
+    BOOST_CHECK(consensus.IsDemurrageActive(201, t));
+
+    // Gold rush end height set without a migration end: migration window is open-ended.
+    consensus.nQuantumMigrationEndHeight = 0;
+    BOOST_CHECK(!consensus.IsMigrationEndScheduled());
+    BOOST_CHECK(consensus.GetQuantumQuasarPhase(t, 5000) == Consensus::QuantumQuasarPhase::MIGRATION);
+    BOOST_CHECK(!consensus.IsQuantumFinalLockout(t, 5000));
 }
 
 BOOST_AUTO_TEST_CASE(quantum_migration_witness_v16_address_roundtrip)

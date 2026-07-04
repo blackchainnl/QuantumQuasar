@@ -247,7 +247,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
         tx.vin[0].prevout.n = 0;
         tx.vout.resize(1);
         tx.vout[0].nValue = BLOCKSUBSIDY;
-        const int64_t max_block_sigops_cost = Params().GetConsensus().IsQuantumSpendEnforcementActive(m_node.chainman->ActiveChain().Tip()->GetMedianTimePast()) ? V4_MAX_BLOCK_SIGOPS_COST : MAX_BLOCK_SIGOPS_COST;
+        const int64_t max_block_sigops_cost = Params().GetConsensus().IsQuantumSpendEnforcementActive(m_node.chainman->ActiveChain().Tip()->GetMedianTimePast(), m_node.chainman->ActiveChain().Tip()->nHeight + 1) ? V4_MAX_BLOCK_SIGOPS_COST : MAX_BLOCK_SIGOPS_COST;
         const unsigned int tx_count_exceeding_sigops = static_cast<unsigned int>(max_block_sigops_cost / 80 + 1);
         const CAmount sigops_test_fee = 10'000;
         for (unsigned int i = 0; i < tx_count_exceeding_sigops; ++i) {

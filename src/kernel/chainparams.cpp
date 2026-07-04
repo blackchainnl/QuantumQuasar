@@ -291,6 +291,17 @@ public:
         if (opts.quantum_v4_time) consensus.nProtocolV4Time = *opts.quantum_v4_time;
         if (opts.quantum_gold_rush_end_time) consensus.nGoldRushEndTime = *opts.quantum_gold_rush_end_time;
         if (opts.quantum_migration_deadline_time) consensus.nQuantumMigrationDeadlineTime = *opts.quantum_migration_deadline_time;
+        if (opts.quantum_gold_rush_end_height) consensus.nGoldRushEndHeight = *opts.quantum_gold_rush_end_height;
+        if (opts.quantum_migration_end_height) consensus.nQuantumMigrationEndHeight = *opts.quantum_migration_end_height;
+        // Apply the shadow schedule override before deriving schedule-dependent
+        // heights below, so an overridden testnet run keeps the demurrage window
+        // reachable instead of inheriting the mainnet-scale reward end height.
+        if (opts.shadow_whitelist_height || opts.shadow_gold_rush_start_height || opts.shadow_gold_rush_blocks) {
+            const int whitelist_height = opts.shadow_whitelist_height.value_or(SHADOW_WHITELIST_HEIGHT);
+            SetShadowTestSchedule(whitelist_height,
+                                  opts.shadow_gold_rush_start_height.value_or(whitelist_height + 1),
+                                  opts.shadow_gold_rush_blocks.value_or(SHADOW_GOLD_RUSH_BLOCKS));
+        }
         consensus.nDemurrageMinActivationHeight = SHADOW_REWARD_END_HEIGHT + 1;
         consensus.nLastPOWBlock = 0x7fffffff;
         consensus.nStakeTimestampMask = 0xf;
@@ -332,7 +343,10 @@ public:
         vFixedSeeds = std::vector<uint8_t>(std::begin(chainparams_seed_test), std::end(chainparams_seed_test));
 
         fDefaultConsistencyChecks = false;
-        m_is_mockable_chain = false;
+        // Test schedule branch: testnet is mockable so isolated height-scheduled
+        // lifecycle runs can drive PoS kernels deterministically (setmocktime is
+        // still operator-only RPC and has no effect on peers).
+        m_is_mockable_chain = true;
 
         checkpointData = {
             {
@@ -582,6 +596,8 @@ public:
         if (opts.quantum_v4_time) consensus.nProtocolV4Time = *opts.quantum_v4_time;
         if (opts.quantum_gold_rush_end_time) consensus.nGoldRushEndTime = *opts.quantum_gold_rush_end_time;
         if (opts.quantum_migration_deadline_time) consensus.nQuantumMigrationDeadlineTime = *opts.quantum_migration_deadline_time;
+        if (opts.quantum_gold_rush_end_height) consensus.nGoldRushEndHeight = *opts.quantum_gold_rush_end_height;
+        if (opts.quantum_migration_end_height) consensus.nQuantumMigrationEndHeight = *opts.quantum_migration_end_height;
         if (opts.quantum_stake_tiers_activation_height) consensus.nStakeTierActivationHeight = *opts.quantum_stake_tiers_activation_height;
         if (opts.quantum_stake_reward_split_activation_height) consensus.nStakeRewardSplitActivationHeight = *opts.quantum_stake_reward_split_activation_height;
         if (opts.quantum_demurrage_activation_height) consensus.nDemurrageActivationHeight = *opts.quantum_demurrage_activation_height;

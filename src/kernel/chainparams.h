@@ -147,6 +147,16 @@ public:
         std::optional<int64_t> quantum_v4_time{};
         std::optional<int64_t> quantum_gold_rush_end_time{};
         std::optional<int64_t> quantum_migration_deadline_time{};
+        // Height-based phase boundaries; when set they are authoritative over the
+        // paired boundary times (test schedule branch only).
+        std::optional<int> quantum_gold_rush_end_height{};
+        std::optional<int> quantum_migration_end_height{};
+        // Shadow Gold Rush reward schedule (mirrors RegTestOptions) so testnet
+        // chainparams-derived values (e.g. the demurrage minimum activation
+        // height) follow the overridden schedule instead of mainnet heights.
+        std::optional<int> shadow_whitelist_height{};
+        std::optional<int> shadow_gold_rush_start_height{};
+        std::optional<int> shadow_gold_rush_blocks{};
     };
 
     /**
@@ -171,6 +181,8 @@ public:
         std::optional<int64_t> quantum_v4_time{};
         std::optional<int64_t> quantum_gold_rush_end_time{};
         std::optional<int64_t> quantum_migration_deadline_time{};
+        std::optional<int> quantum_gold_rush_end_height{};
+        std::optional<int> quantum_migration_end_height{};
         std::optional<int> quantum_stake_tiers_activation_height{};
         std::optional<int> quantum_stake_reward_split_activation_height{};
         std::optional<int> quantum_demurrage_activation_height{};

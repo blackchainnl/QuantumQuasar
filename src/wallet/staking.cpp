@@ -1629,8 +1629,8 @@ bool CreateCoinStake(CWallet& wallet, unsigned int nBits, int64_t nSearchInterva
     const int stake_height = pindexPrev->nHeight + 1;
     const Consensus::Params& consensus = Params().GetConsensus();
     const bool quantum_stake_rules_active = IsQuantumWitnessSpendActive(consensus, stake_mtp, stake_height);
-    const bool new_network_stake_only = consensus.IsNewNetworkStakeOnly(stake_mtp);
-    const bool final_quantum_lockout = consensus.IsQuantumFinalLockout(stake_mtp);
+    const bool new_network_stake_only = consensus.IsNewNetworkStakeOnly(stake_mtp, stake_height);
+    const bool final_quantum_lockout = consensus.IsQuantumFinalLockout(stake_mtp, stake_height);
     const bool stake_reward_split_active = consensus.IsStakeRewardSplitActive(stake_height);
 
     // Select coins with suitable depth

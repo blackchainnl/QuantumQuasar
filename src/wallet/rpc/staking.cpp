@@ -2455,7 +2455,7 @@ static RPCHelpMan getdemurragewalletinfo()
     obj.pushKV("demurrage_effective_activation_height", consensus.EffectiveDemurrageActivationHeight());
     obj.pushKV("quantum_migration_deadline_time", consensus.nQuantumMigrationDeadlineTime);
     obj.pushKV("demurrage_height_guard_satisfied", evaluation_height >= consensus.EffectiveDemurrageActivationHeight());
-    obj.pushKV("demurrage_post_migration_guard_satisfied", consensus.nQuantumMigrationDeadlineTime != 0 && evaluation_time > consensus.nQuantumMigrationDeadlineTime);
+    obj.pushKV("demurrage_post_migration_guard_satisfied", consensus.IsMigrationEndScheduled() && consensus.MigrationDeadlinePassed(evaluation_time, evaluation_height));
     obj.pushKV("wallet_staking_enabled", wallet_staking_enabled);
     obj.pushKV("quantum_outputs", static_cast<int>(quantum_outputs.size()));
     obj.pushKV("decaying_outputs", decaying_count);

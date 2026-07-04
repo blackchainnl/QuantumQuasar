@@ -1076,7 +1076,7 @@ static RPCHelpMan getcirculatingsupply()
     ret.pushKV("demurrage_effective_activation_height", consensus.EffectiveDemurrageActivationHeight());
     ret.pushKV("quantum_migration_deadline_time", consensus.nQuantumMigrationDeadlineTime);
     ret.pushKV("demurrage_height_guard_satisfied", tip->nHeight >= consensus.EffectiveDemurrageActivationHeight());
-    ret.pushKV("demurrage_post_migration_guard_satisfied", consensus.nQuantumMigrationDeadlineTime != 0 && tip_mtp > consensus.nQuantumMigrationDeadlineTime);
+    ret.pushKV("demurrage_post_migration_guard_satisfied", consensus.IsMigrationEndScheduled() && consensus.MigrationDeadlinePassed(tip_mtp, tip->nHeight));
     ret.pushKV("nominal_amount", ValueFromAmount(nominal));
     ret.pushKV("circulating_amount", ValueFromAmount(circulating));
     ret.pushKV("decayed_amount", ValueFromAmount(nominal - circulating));
@@ -1365,13 +1365,13 @@ static UniValue QuantumQuasarStatus(const CBlockIndex& tip, const ChainstateMana
 {
     const Consensus::Params& consensus = chainman.GetConsensus();
     const int64_t mtp = tip.GetMedianTimePast();
-    const Consensus::QuantumQuasarPhase phase = consensus.GetQuantumQuasarPhase(mtp);
     const int next_height = tip.nHeight + 1;
+    const Consensus::QuantumQuasarPhase phase = consensus.GetQuantumQuasarPhase(mtp, next_height);
     const bool quantum_spend_active = IsQuantumWitnessSpendActive(consensus, mtp, next_height);
-    const bool new_network_stake_only = consensus.IsNewNetworkStakeOnly(mtp);
-    const bool base_network_stake_compatible = consensus.IsBaseNetworkStakeCompatible(mtp);
+    const bool new_network_stake_only = consensus.IsNewNetworkStakeOnly(mtp, next_height);
+    const bool base_network_stake_compatible = consensus.IsBaseNetworkStakeCompatible(mtp, next_height);
     const bool shadow_merge_mining_active = IsShadowGoldRushRewardActive(consensus, mtp, next_height);
-    const bool final_lockout_active = consensus.IsQuantumFinalLockout(mtp);
+    const bool final_lockout_active = consensus.IsQuantumFinalLockout(mtp, next_height);
     const bool shadow_reward_height_active = IsShadowGoldRushRewardHeight(next_height);
 
     UniValue obj(UniValue::VOBJ);
@@ -1380,6 +1380,8 @@ static UniValue QuantumQuasarStatus(const CBlockIndex& tip, const ChainstateMana
     obj.pushKV("v4_activation_time", consensus.nProtocolV4Time);
     obj.pushKV("gold_rush_end_time", consensus.nGoldRushEndTime);
     obj.pushKV("quantum_migration_deadline_time", consensus.nQuantumMigrationDeadlineTime);
+    obj.pushKV("gold_rush_end_height", consensus.nGoldRushEndHeight);
+    obj.pushKV("quantum_migration_end_height", consensus.nQuantumMigrationEndHeight);
     obj.pushKV("seconds_until_v4", SecondsUntilAfterBoundary(mtp, consensus.nProtocolV4Time));
     obj.pushKV("seconds_until_gold_rush_end", SecondsUntil(mtp, consensus.nGoldRushEndTime));
     obj.pushKV("seconds_until_quantum_migration_deadline", SecondsUntil(mtp, consensus.nQuantumMigrationDeadlineTime));
@@ -1391,7 +1393,7 @@ static UniValue QuantumQuasarStatus(const CBlockIndex& tip, const ChainstateMana
     obj.pushKV("shadow_reward_end_height", SHADOW_REWARD_END_HEIGHT);
     obj.pushKV("new_network_stake_only", new_network_stake_only);
     obj.pushKV("replay_protection_active", new_network_stake_only);
-    obj.pushKV("legacy_address_lockout_scheduled", consensus.nQuantumMigrationDeadlineTime != 0);
+    obj.pushKV("legacy_address_lockout_scheduled", consensus.IsMigrationEndScheduled());
     obj.pushKV("quantum_address_required_by_schedule", final_lockout_active);
     obj.pushKV("legacy_addresses_accepted", !final_lockout_active);
     obj.pushKV("quantum_address_required", final_lockout_active);
@@ -1422,6 +1424,8 @@ static const std::vector<RPCResult> RPCHelpForQuantumQuasar{
     {RPCResult::Type::NUM_TIME, "v4_activation_time", "first V4 hard-fork activation boundary"},
     {RPCResult::Type::NUM_TIME, "gold_rush_end_time", "end of the Gold Rush phase"},
     {RPCResult::Type::NUM_TIME, "quantum_migration_deadline_time", "planned final post-quantum migration deadline"},
+    {RPCResult::Type::NUM, "gold_rush_end_height", "height-based Gold Rush end boundary override, or 0 when the boundary is time-based"},
+    {RPCResult::Type::NUM, "quantum_migration_end_height", "height-based migration end boundary override, or 0 when the boundary is time-based"},
     {RPCResult::Type::NUM, "seconds_until_v4", "seconds until V4 rules become active, or 0 if reached"},
     {RPCResult::Type::NUM, "seconds_until_gold_rush_end", "seconds until Gold Rush end, or 0 if reached"},
     {RPCResult::Type::NUM, "seconds_until_quantum_migration_deadline", "seconds until final migration deadline, or 0 if reached"},

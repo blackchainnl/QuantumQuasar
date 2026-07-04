@@ -44,6 +44,75 @@ void ReadSigNetArgs(const ArgsManager& args, CChainParams::SigNetOptions& option
     }
 }
 
+namespace {
+//! Shared testnet/regtest parsing for the Gold Rush shadow schedule heights and
+//! the height-based phase boundary overrides. `shadow_whitelist_height`,
+//! `shadow_gold_rush_start_height` and `shadow_gold_rush_blocks` are stored via
+//! the supplied optionals so both TestNetOptions and RegTestOptions reuse it.
+void ReadShadowScheduleArgs(const ArgsManager& args,
+                            std::optional<int>& shadow_whitelist_height,
+                            std::optional<int>& shadow_gold_rush_start_height,
+                            std::optional<int>& shadow_gold_rush_blocks,
+                            std::optional<int>& quantum_gold_rush_end_height,
+                            std::optional<int>& quantum_migration_end_height,
+                            int default_shadow_start_height)
+{
+    if (args.IsArgSet("-shadowwhitelistheight")) {
+        const int64_t height = args.GetIntArg("-shadowwhitelistheight", 0);
+        if (height < 0 || height >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Invalid height value (%d) for -shadowwhitelistheight.", height));
+        }
+        shadow_whitelist_height = static_cast<int>(height);
+    }
+    if (args.IsArgSet("-shadowgoldrushstartheight")) {
+        const int64_t height = args.GetIntArg("-shadowgoldrushstartheight", 0);
+        if (height < 0 || height >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Invalid height value (%d) for -shadowgoldrushstartheight.", height));
+        }
+        shadow_gold_rush_start_height = static_cast<int>(height);
+    }
+    if (args.IsArgSet("-shadowgoldrushblocks")) {
+        const int64_t blocks = args.GetIntArg("-shadowgoldrushblocks", 0);
+        if (blocks <= 0 || blocks >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Invalid block count value (%d) for -shadowgoldrushblocks.", blocks));
+        }
+        shadow_gold_rush_blocks = static_cast<int>(blocks);
+    }
+    if (args.IsArgSet("-shadowgoldrushendheight")) {
+        if (shadow_gold_rush_blocks) {
+            throw std::runtime_error("-shadowgoldrushendheight cannot be combined with -shadowgoldrushblocks.");
+        }
+        const int64_t end_height = args.GetIntArg("-shadowgoldrushendheight", 0);
+        const int64_t start_height = shadow_gold_rush_start_height
+            ? *shadow_gold_rush_start_height
+            : (shadow_whitelist_height ? *shadow_whitelist_height + 1 : default_shadow_start_height);
+        if (end_height < start_height || end_height >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Invalid height value (%d) for -shadowgoldrushendheight; must be >= the Gold Rush start height (%d).", end_height, start_height));
+        }
+        shadow_gold_rush_blocks = static_cast<int>(end_height - start_height + 1);
+        if (!shadow_gold_rush_start_height) shadow_gold_rush_start_height = static_cast<int>(start_height);
+    }
+    if (args.IsArgSet("-qqgoldrushendheight")) {
+        const int64_t height = args.GetIntArg("-qqgoldrushendheight", 0);
+        if (height <= 0 || height >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Invalid height value (%d) for -qqgoldrushendheight.", height));
+        }
+        quantum_gold_rush_end_height = static_cast<int>(height);
+    }
+    if (args.IsArgSet("-qqmigrationendheight")) {
+        const int64_t height = args.GetIntArg("-qqmigrationendheight", 0);
+        if (height <= 0 || height >= std::numeric_limits<int>::max()) {
+            throw std::runtime_error(strprintf("Invalid height value (%d) for -qqmigrationendheight.", height));
+        }
+        quantum_migration_end_height = static_cast<int>(height);
+    }
+    if (quantum_gold_rush_end_height && quantum_migration_end_height &&
+        *quantum_migration_end_height <= *quantum_gold_rush_end_height) {
+        throw std::runtime_error("-qqmigrationendheight must be greater than -qqgoldrushendheight.");
+    }
+}
+} // namespace
+
 void ReadTestNetArgs(const ArgsManager& args, CChainParams::TestNetOptions& options)
 {
     if (args.IsArgSet("-qqv4time")) {
@@ -54,6 +123,16 @@ void ReadTestNetArgs(const ArgsManager& args, CChainParams::TestNetOptions& opti
     }
     if (args.IsArgSet("-qqmigrationdeadlinetime")) {
         options.quantum_migration_deadline_time = args.GetIntArg("-qqmigrationdeadlinetime", 0);
+    }
+    ReadShadowScheduleArgs(args,
+                           options.shadow_whitelist_height,
+                           options.shadow_gold_rush_start_height,
+                           options.shadow_gold_rush_blocks,
+                           options.quantum_gold_rush_end_height,
+                           options.quantum_migration_end_height,
+                           SHADOW_REWARD_START_HEIGHT);
+    if (options.shadow_gold_rush_start_height && *options.shadow_gold_rush_start_height <= options.shadow_whitelist_height.value_or(SHADOW_WHITELIST_HEIGHT)) {
+        throw std::runtime_error("-shadowgoldrushstartheight must be greater than -shadowwhitelistheight.");
     }
 }
 
@@ -141,27 +220,13 @@ void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& opti
         }
         options.quantum_demurrage_blocks_per_month = static_cast<int>(blocks);
     }
-    if (args.IsArgSet("-shadowwhitelistheight")) {
-        const int64_t height = args.GetIntArg("-shadowwhitelistheight", 0);
-        if (height < 0 || height >= std::numeric_limits<int>::max()) {
-            throw std::runtime_error(strprintf("Invalid height value (%d) for -shadowwhitelistheight.", height));
-        }
-        options.shadow_whitelist_height = static_cast<int>(height);
-    }
-    if (args.IsArgSet("-shadowgoldrushstartheight")) {
-        const int64_t height = args.GetIntArg("-shadowgoldrushstartheight", 0);
-        if (height < 0 || height >= std::numeric_limits<int>::max()) {
-            throw std::runtime_error(strprintf("Invalid height value (%d) for -shadowgoldrushstartheight.", height));
-        }
-        options.shadow_gold_rush_start_height = static_cast<int>(height);
-    }
-    if (args.IsArgSet("-shadowgoldrushblocks")) {
-        const int64_t blocks = args.GetIntArg("-shadowgoldrushblocks", 0);
-        if (blocks <= 0 || blocks >= std::numeric_limits<int>::max()) {
-            throw std::runtime_error(strprintf("Invalid block count value (%d) for -shadowgoldrushblocks.", blocks));
-        }
-        options.shadow_gold_rush_blocks = static_cast<int>(blocks);
-    }
+    ReadShadowScheduleArgs(args,
+                           options.shadow_whitelist_height,
+                           options.shadow_gold_rush_start_height,
+                           options.shadow_gold_rush_blocks,
+                           options.quantum_gold_rush_end_height,
+                           options.quantum_migration_end_height,
+                           options.shadow_whitelist_height.value_or(SHADOW_WHITELIST_HEIGHT) + 1);
     if (options.shadow_gold_rush_start_height && *options.shadow_gold_rush_start_height <= options.shadow_whitelist_height.value_or(SHADOW_WHITELIST_HEIGHT)) {
         throw std::runtime_error("-shadowgoldrushstartheight must be greater than -shadowwhitelistheight.");
     }

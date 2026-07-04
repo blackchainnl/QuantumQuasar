@@ -35,12 +35,12 @@ bool IsShadowGoldRushRewardHeight(int nHeight)
 bool IsShadowGoldRushRewardActive(const Consensus::Params& consensus, int64_t nMedianTimePast, int nHeight)
 {
     if (!IsShadowGoldRushRewardHeight(nHeight)) return false;
-    return !consensus.IsQuantumFinalLockout(nMedianTimePast);
+    return !consensus.IsQuantumFinalLockout(nMedianTimePast, nHeight);
 }
 
 bool IsQuantumWitnessSpendActive(const Consensus::Params& consensus, int64_t nMedianTimePast, int nSpendHeight)
 {
     if (nSpendHeight <= SHADOW_REWARD_END_HEIGHT) return false;
-    if (consensus.IsQuantumSpendEnforcementActive(nMedianTimePast)) return true;
+    if (consensus.IsQuantumSpendEnforcementActive(nMedianTimePast, nSpendHeight)) return true;
     return false;
 }

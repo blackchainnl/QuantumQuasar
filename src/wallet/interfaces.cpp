@@ -1298,7 +1298,7 @@ WalletDemurrageInfo GetWalletDemurrageInfo(CWallet& wallet)
     info.demurrage_effective_activation_height = consensus.EffectiveDemurrageActivationHeight();
     info.demurrage_height_guard_satisfied = info.evaluation_height >= consensus.EffectiveDemurrageActivationHeight();
     info.demurrage_post_migration_guard_satisfied =
-        consensus.nQuantumMigrationDeadlineTime != 0 && info.evaluation_time > consensus.nQuantumMigrationDeadlineTime;
+        consensus.IsMigrationEndScheduled() && consensus.MigrationDeadlinePassed(info.evaluation_time, info.evaluation_height);
     info.wallet_staking_enabled = wallet.m_enabled_staking.load();
 
     CoinsResult available = AvailableCoinsListUnspent(wallet);
@@ -1411,15 +1411,15 @@ util::Result<WalletQuantumActionTx> CreateQuantumMigrationSweep(
         const int64_t mtp = tip ? tip->GetMedianTimePast() : 0;
         const int next_height = tip ? tip->nHeight + 1 : 0;
         if (goldrush_rewards_only) {
-            const bool can_move_reward_outputs = consensus.IsQuantumMigrationWindow(mtp) ||
-                (allow_goldrush_epoch && !consensus.IsQuantumFinalLockout(mtp) &&
+            const bool can_move_reward_outputs = consensus.IsQuantumMigrationWindow(mtp, next_height) ||
+                (allow_goldrush_epoch && !consensus.IsQuantumFinalLockout(mtp, next_height) &&
                  IsQuantumWitnessSpendActive(consensus, mtp, next_height));
             if (!can_move_reward_outputs) {
                 return util::Error{allow_goldrush_epoch
                     ? _("Gold Rush reward migration is only allowed once quantum reward spends are active and before the final quantum lockout deadline.")
                     : _("Gold Rush reward migration is only allowed during the migration window and before the final quantum lockout deadline.")};
             }
-        } else if (consensus.IsQuantumFinalLockout(mtp)) {
+        } else if (consensus.IsQuantumFinalLockout(mtp, next_height)) {
                 return util::Error{_("The migration deadline has passed; legacy coins are no longer spendable and cannot be migrated.")};
         }
 
@@ -2494,13 +2494,13 @@ public:
         const CBlockIndex* tip = chainman.ActiveChain().Tip();
         const int64_t mtp = tip ? tip->GetMedianTimePast() : 0;
         const int next_height = tip ? tip->nHeight + 1 : 0;
-        const bool scheduled = consensus.nQuantumMigrationDeadlineTime != 0;
-        const bool passed = consensus.IsQuantumFinalLockout(mtp);
+        const bool scheduled = consensus.IsMigrationEndScheduled();
+        const bool passed = consensus.IsQuantumFinalLockout(mtp, next_height);
         const int64_t secs = (scheduled && consensus.nQuantumMigrationDeadlineTime > mtp)
                                  ? consensus.nQuantumMigrationDeadlineTime - mtp : 0;
         const bool quantum_active = IsQuantumWitnessSpendActive(consensus, mtp, next_height);
 
-        status.phase = QuantumQuasarPhaseName(consensus.GetQuantumQuasarPhase(mtp));
+        status.phase = QuantumQuasarPhaseName(consensus.GetQuantumQuasarPhase(mtp, next_height));
         status.median_time = mtp;
         status.deadline_mtp = consensus.nQuantumMigrationDeadlineTime;
         status.deadline_scheduled = scheduled;

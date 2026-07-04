@@ -902,44 +902,38 @@ bool AppInitParameterInteraction(const ArgsManager& args)
     // with altered Gold Rush heights.
     const bool has_shadow_schedule_override = args.IsArgSet("-shadowwhitelistheight") ||
                                               args.IsArgSet("-shadowgoldrushstartheight") ||
-                                              args.IsArgSet("-shadowgoldrushblocks");
+                                              args.IsArgSet("-shadowgoldrushblocks") ||
+                                              args.IsArgSet("-shadowgoldrushendheight");
     if (has_shadow_schedule_override) {
         if (chain != ChainType::TESTNET && chain != ChainType::REGTEST) {
-            return InitError(_("-shadowwhitelistheight, -shadowgoldrushstartheight, and -shadowgoldrushblocks are only supported on testnet/regtest in the test schedule branch."));
+            return InitError(_("-shadowwhitelistheight, -shadowgoldrushstartheight, -shadowgoldrushblocks, and -shadowgoldrushendheight are only supported on testnet/regtest in the test schedule branch."));
         }
 
-        const int64_t wl = args.GetIntArg("-shadowwhitelistheight", SHADOW_WHITELIST_HEIGHT);
-        const int64_t start = args.GetIntArg("-shadowgoldrushstartheight", chain == ChainType::REGTEST ? wl + 1 : SHADOW_REWARD_START_HEIGHT);
-        const int64_t blocks = args.GetIntArg("-shadowgoldrushblocks", SHADOW_GOLD_RUSH_BLOCKS);
-
-        if (wl < 0 || wl >= std::numeric_limits<int>::max()) {
-            return InitError(strprintf(_("Invalid height value (%d) for -shadowwhitelistheight."), wl));
-        }
-        if (start < 0 || start >= std::numeric_limits<int>::max()) {
-            return InitError(strprintf(_("Invalid height value (%d) for -shadowgoldrushstartheight."), start));
-        }
-        if (start <= wl) {
-            return InitError(_("-shadowgoldrushstartheight must be greater than -shadowwhitelistheight."));
-        }
-        if (blocks <= 0 || blocks >= std::numeric_limits<int>::max() || start + blocks - 1 >= std::numeric_limits<int>::max()) {
-            return InitError(strprintf(_("Invalid block count value (%d) for -shadowgoldrushblocks."), blocks));
-        }
-
-        SetShadowTestSchedule(static_cast<int>(wl), static_cast<int>(start), static_cast<int>(blocks));
+        // The schedule itself is parsed, validated, and applied by chainparams
+        // construction (ReadTestNetArgs/ReadRegTestArgs -> SetShadowTestSchedule)
+        // before this point; log the effective window for operators.
         LogPrintf("Quantum Quasar: %s shadow schedule overridden: whitelist=%d reward=[%d,%d]\n",
                   ChainTypeToString(chain), SHADOW_WHITELIST_HEIGHT, SHADOW_REWARD_START_HEIGHT, SHADOW_REWARD_END_HEIGHT);
     }
 
+    if (args.IsArgSet("-solostaking") && chain != ChainType::TESTNET && chain != ChainType::REGTEST) {
+        return InitError(_("-solostaking is only supported on testnet/regtest in the test schedule branch."));
+    }
+
     const bool has_quantum_phase_override = args.IsArgSet("-qqv4time") ||
                                             args.IsArgSet("-qqgoldrushendtime") ||
-                                            args.IsArgSet("-qqmigrationdeadlinetime");
+                                            args.IsArgSet("-qqmigrationdeadlinetime") ||
+                                            args.IsArgSet("-qqgoldrushendheight") ||
+                                            args.IsArgSet("-qqmigrationendheight");
     if (has_quantum_phase_override) {
         if (chain != ChainType::TESTNET && chain != ChainType::REGTEST) {
-            return InitError(_("-qqv4time, -qqgoldrushendtime, and -qqmigrationdeadlinetime are only supported on testnet/regtest in the test schedule branch."));
+            return InitError(_("-qqv4time, -qqgoldrushendtime, -qqmigrationdeadlinetime, -qqgoldrushendheight, and -qqmigrationendheight are only supported on testnet/regtest in the test schedule branch."));
         }
         const int64_t v4_time = Params().GetConsensus().nProtocolV4Time;
         const int64_t goldrush_end = Params().GetConsensus().nGoldRushEndTime;
         const int64_t migration_deadline = Params().GetConsensus().nQuantumMigrationDeadlineTime;
+        const int goldrush_end_height = Params().GetConsensus().nGoldRushEndHeight;
+        const int migration_end_height = Params().GetConsensus().nQuantumMigrationEndHeight;
         if (v4_time < 0 || goldrush_end < 0 || migration_deadline < 0) {
             return InitError(_("-qqv4time, -qqgoldrushendtime, and -qqmigrationdeadlinetime must be non-negative."));
         }
@@ -949,8 +943,14 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         if (migration_deadline != 0 && goldrush_end != 0 && migration_deadline <= goldrush_end) {
             return InitError(_("-qqmigrationdeadlinetime must be greater than -qqgoldrushendtime."));
         }
-        LogPrintf("Quantum Quasar: %s phase times overridden: v4=%d goldrush_end=%d migration_deadline=%d\n",
-                  ChainTypeToString(chain), v4_time, goldrush_end, migration_deadline);
+        if (migration_end_height != 0 && goldrush_end_height != 0 && migration_end_height <= goldrush_end_height) {
+            return InitError(_("-qqmigrationendheight must be greater than -qqgoldrushendheight."));
+        }
+        if (goldrush_end_height != 0 && goldrush_end_height < SHADOW_REWARD_END_HEIGHT) {
+            return InitError(strprintf(_("-qqgoldrushendheight (%d) must not be below the shadow reward end height (%d); the Gold Rush reward window would outlive the Gold Rush phase."), goldrush_end_height, SHADOW_REWARD_END_HEIGHT));
+        }
+        LogPrintf("Quantum Quasar: %s phase boundaries overridden: v4=%d goldrush_end=%d migration_deadline=%d goldrush_end_height=%d migration_end_height=%d\n",
+                  ChainTypeToString(chain), v4_time, goldrush_end, migration_deadline, goldrush_end_height, migration_end_height);
     }
     bilingual_str errors;
     for (const auto& arg : args.GetUnsuitableSectionOnlyArgs()) {

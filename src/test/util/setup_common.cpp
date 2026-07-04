@@ -381,7 +381,7 @@ CMutableTransaction TestChain100Setup::CreateValidMempoolTransaction(CTransactio
     {
         LOCK(cs_main);
         const CBlockIndex* tip{Assert(m_node.chainman)->ActiveChain().Tip()};
-        if (tip && Params().GetConsensus().IsNewNetworkStakeOnly(tip->GetMedianTimePast())) {
+        if (tip && Params().GetConsensus().IsNewNetworkStakeOnly(tip->GetMedianTimePast(), tip->nHeight + 1)) {
             nHashType |= SIGHASH_FORKID;
         }
     }
