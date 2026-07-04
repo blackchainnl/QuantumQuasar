@@ -5860,6 +5860,22 @@ static std::optional<CAmount> GetCurrentShadowObligation(const CCoinsViewCache& 
     return *total;
 }
 
+static uint64_t PurgeShadowMarkers(CCoinsViewCache& view)
+{
+    uint64_t removed{0};
+    std::unique_ptr<CCoinsViewCursor> cursor(view.Cursor());
+    while (cursor->Valid()) {
+        COutPoint outpoint;
+        Coin coin;
+        if (cursor->GetKey(outpoint) && cursor->GetValue(coin) && !coin.IsSpent() && IsShadowMarkerScript(coin.out.scriptPubKey)) {
+            view.SpendCoin(outpoint);
+            ++removed;
+        }
+        cursor->Next();
+    }
+    return removed;
+}
+
 bool Chainstate::ReplayShadowBlocks()
 {
     LOCK(cs_main);
@@ -5884,6 +5900,19 @@ bool Chainstate::ReplayShadowBlocks()
     const auto current = GetCurrentShadowObligation(cache, pindexTip);
     if (!current) return error("ReplayShadowBlocks(): failed to read current Quantum Quasar shadow obligation");
     if (!whitelist_missing && *current == *expected) return true;
+    if (pindexTip->nHeight < SHADOW_REWARD_START_HEIGHT && *expected == 0 && *current != 0) {
+        const uint64_t removed = PurgeShadowMarkers(cache);
+        const auto repaired = GetCurrentShadowObligation(cache, pindexTip);
+        if (!repaired || *repaired != 0) {
+            return error("ReplayShadowBlocks(): failed to clear stale pre-Gold-Rush shadow obligation");
+        }
+        LogPrintf("Quantum Quasar: removed %u stale pre-Gold-Rush shadow markers at height %d\n", removed, pindexTip->nHeight);
+        if (!whitelist_missing) {
+            cache.SetBestBlock(pindexTip->GetBlockHash());
+            if (!cache.Flush()) return error("ReplayShadowBlocks(): failed to flush stale pre-Gold-Rush shadow marker cleanup");
+            return true;
+        }
+    }
 
     const int fork_height = std::max(0, SHADOW_WHITELIST_HEIGHT - 1);
     const CBlockIndex* pindexFork = pindexTip->GetAncestor(fork_height);

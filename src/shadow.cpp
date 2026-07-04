@@ -1418,6 +1418,7 @@ void MarkGoldRushDirectPayoutOutputs(CCoinsViewCache& view, const CTransaction& 
 void UndoGoldRushDirectPayoutOutputMarkers(CCoinsViewCache& view, const CBlockIndex* pindex)
 {
     if (!pindex) return;
+    if (pindex->nHeight < SHADOW_REWARD_START_HEIGHT || pindex->nHeight > SHADOW_REWARD_END_HEIGHT) return;
     for (const COutPoint& outpoint : FindMarkerCoins(view, MARKER_GOLD_RUSH_PAYOUT, pindex)) {
         view.SpendCoin(outpoint);
     }
